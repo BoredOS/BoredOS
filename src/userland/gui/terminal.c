@@ -974,6 +974,7 @@ static bool command_starts_with(const char *prefix) {
 
 static void update_input_color(TerminalSession *s) {
     if (!s->colors_enabled) {
+        s->input_color = s->fg_color;
         return;
     }
     
