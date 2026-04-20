@@ -8,6 +8,7 @@
 #include "lapic.h"
 #include "smp.h"
 #include <stdbool.h>
+#include "input/keymap.h"
 
 extern void serial_print(const char *s);
 extern void serial_print_hex(uint64_t n);
@@ -59,22 +60,6 @@ static void ps2_update_leds(void) {
     outb(0x60, led_status);
 }
 
-static char scancode_map[128] = {
-    0,  27, '1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '-', '=', '\b',
-    '\t', 'q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p', '[', ']', '\n',
-    21, 'a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l', ';', '\'', '`', 0,
-    '\\', 'z', 'x', 'c', 'v', 'b', 'n', 'm', ',', '.', '/', 0, '*', 
-    22, ' ', 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-};
-
-static char scancode_map_shift[128] = {
-    0,  27, '!', '@', '#', '$', '%', '^', '&', '*', '(', ')', '_', '+', '\b',
-    '\t', 'Q', 'W', 'E', 'R', 'T', 'Y', 'U', 'I', 'O', 'P', '{', '}', '\n',
-    21, 'A', 'S', 'D', 'F', 'G', 'H', 'J', 'K', 'L', ':', '"', '~', 0,
-    '|', 'Z', 'X', 'C', 'V', 'B', 'N', 'M', '<', '>', '?', 0, '*', 
-    22, ' ', 23, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 
-};
-
 uint64_t keyboard_handler(registers_t *regs) {
     uint8_t scancode = inb(0x60);
 
@@ -111,7 +96,7 @@ uint64_t keyboard_handler(registers_t *regs) {
                 case 0x4D: wm_handle_key(20, true); break; // Right arrow
             }
         } else {
-            char c = shift_pressed ? scancode_map_shift[scancode] : scancode_map[scancode];
+            char c = keymap_translate(scancode, shift_pressed, caps_lock_on);
             if (c) {
                 if (caps_lock_on) {
                     if (c >= 'a' && c <= 'z') c -= 32;
@@ -131,7 +116,7 @@ uint64_t keyboard_handler(registers_t *regs) {
             }
         } else {
             uint8_t base_scancode = scancode & 0x7F;
-            char c = shift_pressed ? scancode_map_shift[base_scancode] : scancode_map[base_scancode];
+            char c = keymap_translate(base_scancode, shift_pressed, caps_lock_on);
             if (c) {
                 if (caps_lock_on) {
                     if (c >= 'a' && c <= 'z') c -= 32;

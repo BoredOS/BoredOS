@@ -32,6 +32,7 @@
 #include "sys/kernel_subsystem.h"
 #include "sys/module_manager.h"
 #include "sys/bootfs_state.h"
+#include "input/keymap.h"
 
 extern void sysfs_init_subsystems(void);
 
@@ -277,6 +278,7 @@ void kmain(void) {
     fat32_mkdir("/Library/images/gif");
     fat32_mkdir("/Library/Fonts");
     fat32_mkdir("/Library/DOOM");
+    fat32_mkdir("/Library/conf");
     fat32_mkdir("/Library/bsh");
     fat32_mkdir("/docs");
     fat32_mkdir("/root");
@@ -392,6 +394,9 @@ void kmain(void) {
     asm("cli");
     ps2_init();
     asm("sti");
+
+    keymap_init();
+    serial_write("[INIT] Keymap initialized");
 
     lapic_init();
 

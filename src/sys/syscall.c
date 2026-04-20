@@ -22,12 +22,16 @@
 #include "tty.h"
 #include "font_manager.h"
 #include "graphics.h"
+#include "input/keymap.h"
 
 extern bool ps2_ctrl_pressed;
 
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
 #define SPAWN_FLAG_TTY_ID 0x4
+
+#define SYSTEM_CMD_SET_KEYBOARD_LAYOUT 49
+#define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 50
 
 // Read MSR
 static inline uint64_t rdmsr(uint32_t msr) {
@@ -2087,6 +2091,15 @@ static uint64_t sys_cmd_tty_destroy(const syscall_args_t *args) {
     return tty_destroy(tty_id);
 }
 
+static uint64_t sys_cmd_set_keyboard_layout(const syscall_args_t *args) {
+    keymap_set_current((keymap_id_t)args->arg2);
+    return 0;
+}
+
+static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
+    return (uint64_t)keymap_get_current();
+}
+
 #define SYS_CMD_TABLE_SIZE 76
 static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SET_BG_COLOR]        = sys_cmd_set_bg_color,
@@ -2150,6 +2163,8 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SIGACTION]           = sys_cmd_sigaction,
     [SYSTEM_CMD_SIGPROCMASK]         = sys_cmd_sigprocmask,
     [SYSTEM_CMD_SIGPENDING]          = sys_cmd_sigpending,
+    [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
+    [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
 };
 
 static uint64_t handle_sys_write(const syscall_args_t *args) {
