@@ -53,6 +53,7 @@ static widget_checkbox_t chk_snap;
 static widget_checkbox_t chk_align;
 static widget_dropdown_t drop_res;
 static widget_dropdown_t drop_color;
+static widget_dropdown_t drop_keyboard;
 static widget_textbox_t tb_r, tb_g, tb_b;
 static widget_textbox_t tb_ip, tb_dns;
 static widget_button_t btn_apply, btn_back;
@@ -60,7 +61,7 @@ static widget_button_t btn_apply, btn_back;
 #define MAX_WALLPAPERS 10
 #define MAX_FONTS 16
 
-static widget_button_t btn_main_wallpaper, btn_main_network, btn_main_desktop, btn_main_mouse, btn_main_fonts, btn_main_display;
+static widget_button_t btn_main_wallpaper, btn_main_network, btn_main_desktop, btn_main_mouse, btn_main_fonts, btn_main_display, btn_main_keyboard;
 static widget_button_t btn_wp_colors[6];
 static widget_button_t btn_wp_patterns[2];
 static widget_button_t btn_wp_apply;
@@ -93,6 +94,7 @@ static widget_textbox_t tb_custom_w, tb_custom_h;
 #define VIEW_MOUSE 4
 #define VIEW_FONTS 5
 #define VIEW_DISPLAY 6
+#define VIEW_KEYBOARD 7
 
 static int disp_sel_res = 2;
 static int disp_sel_color = 0;
@@ -107,6 +109,7 @@ static char net_ip[16] = "";
 static char net_dns[16] = "";
 static int focused_field = -1;
 static int input_cursor = 0;
+static int keyboard_layout = 0;
 
 static int dyn_res_w[3];
 static int dyn_res_h[3];
@@ -381,6 +384,13 @@ static void control_panel_paint_main(ui_window_t win) {
     ui_draw_rect(win, offset_x + 22, offset_y + item_y + 38, 16, 2, 0xFFB0B0B0);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Display", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Screen resolution & color", COLOR_DKGRAY);
+
+    item_y += item_h + item_spacing;
+    widget_button_draw(&settings_ctx, &btn_main_keyboard);
+
+    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 20, 40, 20, 0xFF888888);
+    ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Keyboard", COLOR_DARK_TEXT);
+    ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Keyboard layout", COLOR_DKGRAY);
 }
 
 static void control_panel_paint_wallpaper(ui_window_t win) {
@@ -745,6 +755,19 @@ static void control_panel_paint_display(ui_window_t win) {
     widget_dropdown_draw(&settings_ctx, &drop_color);
 }
 
+static void control_panel_paint_keyboard(ui_window_t win) {
+    int offset_x = 8;
+    int offset_y = 6;
+
+    widget_button_draw(&settings_ctx, &btn_back);
+
+    ui_draw_string(win, offset_x, offset_y + 40, "Keyboard Layout:", COLOR_DARK_TEXT);
+
+    widget_dropdown_draw(&settings_ctx, &drop_keyboard);
+
+    widget_button_draw(&settings_ctx, &btn_apply);
+}
+
 static void control_panel_paint(ui_window_t win) {
     // Fill background
     ui_draw_rect(win, 0, 0, 350, 500, COLOR_DARK_BG);
@@ -765,6 +788,8 @@ static void control_panel_paint(ui_window_t win) {
         control_panel_paint_fonts(win);
     } else if (current_view == VIEW_DISPLAY) {
         control_panel_paint_display(win);
+    } else if (current_view == VIEW_KEYBOARD) {
+        control_panel_paint_keyboard(win);
     }
 }
 
@@ -1026,6 +1051,14 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
             if (is_click) { current_view = VIEW_DISPLAY; focused_field = -1; btn_main_display.pressed = false; }
             return;
         }
+        if (widget_button_handle_mouse(&btn_main_keyboard, x, y, is_down, is_click, NULL)) {
+            if (is_click) {
+                current_view = VIEW_KEYBOARD;
+                focused_field = -1;
+                btn_main_keyboard.pressed = false;
+            }
+            return;
+        }
     }
 
     if (current_view == VIEW_MOUSE) {
@@ -1050,6 +1083,22 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
         }
         if (widget_textbox_handle_mouse(&tb_custom_h, x, y, is_click, NULL)) {
             focused_field = 4; disp_sel_res = 5; input_cursor = tb_custom_h.cursor_pos; return;
+        }
+    }
+
+    if (current_view == VIEW_KEYBOARD) {
+
+        if (widget_dropdown_handle_mouse(&drop_keyboard, x, y, is_click, NULL)) {
+            keyboard_layout = drop_keyboard.selected_idx;
+            return;
+        }
+
+        if (widget_button_handle_mouse(&btn_apply, x, y, is_down, is_click, NULL)) {
+            if (is_click) {
+                sys_system(SYSTEM_CMD_SET_KEYBOARD_LAYOUT, keyboard_layout, 0,0,0);
+                btn_apply.pressed = false;
+            }
+            return;
         }
     }
 }
@@ -1094,6 +1143,9 @@ static void init_settings_widgets(void) {
     static const char *color_opts[] = {"32-bit", "16-bit", "256 Colors", "Grayscale", "Monochrome"};
     widget_dropdown_init(&drop_color, 168, 66, 140, 30, color_opts, 5);
 
+    static const char *keyboard_opts[] = {"QWERTY", "AZERTY"};
+    widget_dropdown_init(&drop_keyboard, 8, 80, 200, 30, keyboard_opts, 2);
+
     widget_textbox_init(&tb_r, 33, 226, 50, 18, rgb_r, 4);
     widget_textbox_init(&tb_g, 123, 226, 50, 18, rgb_g, 4);
     widget_textbox_init(&tb_b, 213, 226, 50, 18, rgb_b, 4);
@@ -1111,7 +1163,8 @@ static void init_settings_widgets(void) {
     widget_button_init(&btn_main_desktop, 8, 6 + item_y, 334, 60, ""); item_y += 70;
     widget_button_init(&btn_main_mouse, 8, 6 + item_y, 334, 60, ""); item_y += 70;
     widget_button_init(&btn_main_fonts, 8, 6 + item_y, 334, 60, ""); item_y += 70;
-    widget_button_init(&btn_main_display, 8, 6 + item_y, 334, 60, "");
+    widget_button_init(&btn_main_display, 8, 6 + item_y, 334, 60, ""); item_y += 70;
+    widget_button_init(&btn_main_keyboard, 8, 6 + item_y, 334, 60, "");
     
     // Wallpaper View Buttons
     widget_button_init(&btn_wp_colors[0], 8, 71, 91, 25, "");
@@ -1157,6 +1210,9 @@ int main(int argc, char **argv) {
     chk_align.checked = desktop_auto_align;
     drop_res.selected_idx = disp_sel_res;
     drop_color.selected_idx = disp_sel_color;
+
+    keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0,0,0,0);
+    drop_keyboard.selected_idx = keyboard_layout;
     
     gui_event_t ev;
     while (1) {
