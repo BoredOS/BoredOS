@@ -385,10 +385,28 @@ static void control_panel_paint_main(ui_window_t win) {
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Display", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Screen resolution & color", COLOR_DKGRAY);
 
+    // Keyboard
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_keyboard);
-
-    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 20, 40, 20, 0xFF888888);
+    // Keyboard icon
+    int kx = offset_x + 12;
+    int ky = offset_y + item_y + 16;
+    ui_draw_rect(win, kx, ky, 40, 24, 0xFF555555);
+    ui_draw_rect(win, kx, ky, 40, 2, 0xFF777777);
+    ui_draw_rect(win, kx, ky + 22, 40, 2, 0xFF333333);
+    for (int row = 0; row < 3; row++) { // keys
+        for (int col = 0; col < 8; col++) {
+            ui_draw_rect(
+                win,
+                kx + 3 + col * 4,
+                ky + 4 + row * 6,
+                3,
+                3,
+                0xFFBBBBBB
+            );
+        }
+    }
+    ui_draw_rect(win, kx + 10, ky + 18, 20, 3, 0xFFAAAAAA); // spacebar
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Keyboard", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Keyboard layout", COLOR_DKGRAY);
 }
@@ -1196,16 +1214,20 @@ static void init_settings_widgets(void) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+
     ui_window_t win = ui_window_create("Settings", 200, 150, 350, 500);
     if (!win) return 1;
 
     generate_lumberjack_pattern();
-    
-    fetch_kernel_state();
-    
+    init_dynamic_resolutions();
+
     init_settings_widgets();
-    
-    // Set initial toggle states
+
+    desktop_snap_to_grid = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 1, 0, 0, 0);
+    desktop_auto_align   = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 2, 0, 0, 0);
+    desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
+    desktop_max_cols = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
+    mouse_speed = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
     chk_snap.checked = desktop_snap_to_grid;
     chk_align.checked = desktop_auto_align;
     drop_res.selected_idx = disp_sel_res;
@@ -1213,30 +1235,46 @@ int main(int argc, char **argv) {
 
     keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0,0,0,0);
     drop_keyboard.selected_idx = keyboard_layout;
-    
+
+    control_panel_paint(win);
+    ui_mark_dirty(win, 0, 0, 350, 500);
+
+    load_wallpapers(); // loading wallpapers after painting to avoid delays on initial load
+
     gui_event_t ev;
     while (1) {
         if (ui_get_event(win, &ev)) {
+
             if (ev.type == GUI_EVENT_PAINT) {
                 control_panel_paint(win);
                 ui_mark_dirty(win, 0, 0, 350, 500);
+
             } else if (ev.type == GUI_EVENT_CLICK || ev.type == GUI_EVENT_MOUSE_DOWN) {
-                control_panel_handle_mouse(ev.arg1, ev.arg2, ev.type == GUI_EVENT_MOUSE_DOWN, ev.type == GUI_EVENT_CLICK);
+                control_panel_handle_mouse(
+                    ev.arg1, ev.arg2,
+                    ev.type == GUI_EVENT_MOUSE_DOWN,
+                    ev.type == GUI_EVENT_CLICK
+                );
                 control_panel_paint(win);
                 ui_mark_dirty(win, 0, 0, 350, 500);
+
             } else if (ev.type == GUI_EVENT_KEY) {
                 control_panel_handle_key((char)ev.arg1, true);
                 control_panel_paint(win);
                 ui_mark_dirty(win, 0, 0, 350, 500);
+
             } else if (ev.type == GUI_EVENT_KEYUP) {
                 control_panel_handle_key((char)ev.arg1, false);
+
             } else if (ev.type == GUI_EVENT_CLOSE) {
                 sys_exit(0);
             }
+
         } else {
             sleep(10);
         }
     }
+
     return 0;
 }
 
