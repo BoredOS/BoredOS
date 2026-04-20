@@ -173,6 +173,39 @@ void log_fail(const char *msg) {
     serial_write("\n");
 }
 
+static void print_verbose_boot_banner(void) {
+    kconsole_set_color(0xFFB589D6);
+    serial_write("==================== ");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("__    ____  ____ \n");
+
+    kconsole_set_color(0xFFB589D6);
+    serial_write("=================== ");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("/ /_  / __ \\/ ___\\\n");
+
+    kconsole_set_color(0xFF569CD6);
+    serial_write("================== ");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("/ __ \\/ / / /\\___ \\\n");
+
+    kconsole_set_color(0xFF569CD6);
+    serial_write("================= ");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("/ /_/ / /_/ /____/ /\n");
+
+    kconsole_set_color(0xFF4EC9B0);
+    serial_write("================ ");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("/_.___/\\____//_____/ \n");
+
+    kconsole_set_color(0xFF4EC9B0);
+    serial_write("===============                       \n");
+
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("\n");
+}
+
 
 // Kernel Entry Point
 
@@ -265,6 +298,10 @@ void kmain(void) {
     idt_register_interrupts();
     idt_load();
     log_ok("IDT ready");
+    print_verbose_boot_banner();
+    kconsole_set_color(0xFFFFFF55);
+    serial_write("Welcome to BoredOS!\n");
+    kconsole_set_color(0xFFFFFFFF);
 
     process_init();
 
