@@ -1,3 +1,5 @@
+// BOREDOS_APP_DESC: 2048 number puzzle game.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/applications-games.png
 #include "libc/syscall.h"
 #include "libc/libui.h"
 #include "libc/stdlib.h"

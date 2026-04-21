@@ -335,3 +335,14 @@ void sys_parallel_run(void (*fn)(void*), void **args, int count) {
     syscall5(SYS_SYSTEM, SYSTEM_CMD_PARALLEL_RUN, (uint64_t)fn, (uint64_t)args, (uint64_t)count, 0);
 }
 
+// ELF metadata API
+int sys_get_elf_metadata(const char *path, boredos_app_metadata_t *out_metadata) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_GET_ELF_METADATA,
+                         (uint64_t)path, (uint64_t)out_metadata, 0);
+}
+
+int sys_get_elf_primary_image(const char *path, char *out_path, size_t out_path_size) {
+    return (int)syscall5(SYS_SYSTEM, SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE,
+                         (uint64_t)path, (uint64_t)out_path, (uint64_t)out_path_size, 0);
+}
+

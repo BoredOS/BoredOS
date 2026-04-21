@@ -7,14 +7,14 @@
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
   ![Platform: x86_64](https://img.shields.io/badge/Platform-x86_64-lightgrey)
   ![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen)
-  [![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-FFDD00?logo=buymeacoffee&logoColor=000000)](https://buymeacoffee.com/boreddevhq)
+  ![GitHub all releases](https://img.shields.io/github/downloads/boreddevnl/BoredOS/total?color=brightgreen)
 </div>
 
 ---
 
 BoredOS is a x86_64 operating system featuring a custom Desktop Environment (DE), a dedicated Window Manager (BoredWM), and a FAT32 filesystem. It balances low-level kernel exploration with a surprisingly capable userspace.
 
-![Screenshot](screenshot.png)
+![Screenshot](screenshot.jpg)
 > [!NOTE]
 > *The screenshot above may represent a previous build and is subject to change as the UI evolves.*
 

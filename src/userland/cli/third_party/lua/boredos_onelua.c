@@ -3,6 +3,7 @@
 ** Based on the official onelua.c, adapted for BoredOS freestanding environment.
 */
 
+// BOREDOS_APP_DESC: Lua REPL and scripting runtime.
 #include <stdint.h>
 #include <stddef.h>
 #include <stdarg.h>

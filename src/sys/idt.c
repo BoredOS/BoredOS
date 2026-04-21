@@ -79,6 +79,14 @@ uint64_t exception_handler_c(registers_t *regs) {
 
     // Kernel mode exception
     const char *name = (vector < 32) ? exception_messages[vector] : "Unknown Kernel Exception";
+    serial_write("\nRIP: 0x"); k_itoa_hex(regs->rip, buf); serial_write(buf);
+    serial_write("\nErr: 0x"); k_itoa_hex(regs->err_code, buf); serial_write(buf);
+    if (vector == 14) { 
+        uint64_t cr2;
+        asm volatile("mov %%cr2, %0" : "=r"(cr2));
+        serial_write("\nCR2: 0x"); k_itoa_hex(cr2, buf); serial_write(buf);
+    }
+    serial_write("\n");
     kernel_panic(regs, name);
     
     return (uint64_t)regs; // Unreachable

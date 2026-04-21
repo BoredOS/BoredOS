@@ -7,17 +7,19 @@
 
 This example demonstrates how to create an empty window that stays active on the screen until the user explicitly closes it by clicking the 'X' button.
 
-## 📝 Concepts Introduced
+## Concepts Introduced
 * Including `libui.h` and the event structure.
 * Creating a `ui_window_t` handle.
 * Creating an infinite event loop using `ui_get_event()`.
 * Yielding CPU time to the kernel via `sys_yield()`.
+* Declaring app metadata via source annotations.
 
 ---
 
-## 💻 The Code (`src/userland/gui/basic_window.c`)
+## The Code (`src/userland/gui/basic_window.c`)
 
 ```c
+// BOREDOS_APP_DESC: Basic Window — a minimal graphical window demo.
 #include <stdlib.h>
 #include <libui.h>
 #include <syscall.h>
@@ -65,7 +67,8 @@ int main(void) {
 2.  **The Event Loop**: Graphical programs run forever until closed. The `while (1)` loop serves this purpose.
 3.  **Polling**: `ui_get_event` asks the kernel, "Hey, did the user click my window or press a key since the last time I asked?". It is non-blocking, so it immediately returns `false` if nothing happened.
 4.  **CPU Yielding**: Since we are constantly polling in a tight loop, we call `sys_yield()` at the end of the loop frame. This politely tells the OS scheduler, "I'm done checking for events, go ahead and let another program run for a bit."
+5.  **`BOREDOS_APP_DESC` / `BOREDOS_APP_ICONS`**: Embedded into the `.elf` by the build system as a BoredOS NOTE section. The Window Manager reads this at runtime to render the app's icon on the Desktop and in the File Explorer. See [`elf_metadata.md`](../elf_metadata.md) for full details.
 
-## 🚀 Running It
+## Running It
 
 Launch the Terminal and type `basic_window`. You'll see an empty window appear that you can move around the screen!

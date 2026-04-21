@@ -2,6 +2,8 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 
+// BOREDOS_APP_DESC: 3/2D Graphing and plotting utility.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/se.sjoerd.Graphs.png;/Library/images/icons/colloid/app-icon-preview.png
 #include "syscall.h"
 #include "libui.h"
 #include "../../wm/libwidget.h"

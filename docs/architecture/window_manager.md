@@ -16,7 +16,7 @@ BoredOS features a fully custom, graphical Window Manager built directly into th
 > [!TIP]
 > The performance of the window manager heavily depends on minimizing the "dirty regions" drawn in the compositing loop rather than sweeping the whole screen.
 
-## 🪟 Window System (`wm.c`)
+## Window System (`wm.c`)
 
 The windowing system is built around a linked list of `Window` structures.
 
@@ -34,7 +34,7 @@ The WM acts as the central hub for input routing.
 
 - **Event Polling**: The UI loop inside an app continuously calls `ui_poll_event()` to respond to mouse clicks and window movement dispatched by the kernel WM.
 
-## 🧵 Multi-Core Safety & Performance
+## Multi-Core Safety & Performance
 
 With the introduction of Symmetric Multi-Processing (SMP), the Window Manager (WM) was redesigned to ensure stability and high performance across multiple cores.
 

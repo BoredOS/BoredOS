@@ -1,3 +1,5 @@
+// BOREDOS_APP_DESC: Classic snake arcade game.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/cartridges.png
 #include "libc/syscall.h"
 #include "libc/libui.h"
 #include "libc/stdlib.h"

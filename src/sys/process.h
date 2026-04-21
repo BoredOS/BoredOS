@@ -105,6 +105,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user);
 process_t* process_create_elf(const char* filepath, const char* args_str, bool terminal_proc, int tty_id);
 int process_exec_replace_current(registers_t *regs, const char* filepath, const char* args_str);
 process_t* process_get_current(void);
+uint32_t   process_get_current_pid(void);
 void process_set_current_for_cpu(uint32_t cpu_id, process_t* p);
 process_t* process_get_current_for_cpu(uint32_t cpu_id);
 uint64_t process_schedule(uint64_t current_rsp);

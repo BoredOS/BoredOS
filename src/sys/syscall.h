@@ -117,6 +117,8 @@ typedef struct {
 #define SYSTEM_CMD_SIGACTION 73
 #define SYSTEM_CMD_SIGPROCMASK 74
 #define SYSTEM_CMD_SIGPENDING 75
+#define SYSTEM_CMD_GET_ELF_METADATA 76
+#define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
 
 void syscall_init(void);
 uint64_t syscall_handler_c(registers_t *regs);

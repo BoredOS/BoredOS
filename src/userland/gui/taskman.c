@@ -1,5 +1,7 @@
 // Copyright (c) 2023-2026 Chris (boreddevnl)
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// BOREDOS_APP_DESC: Task and process manager.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/utilities-system-monitor.png
 #include "syscall.h"
 #include "libui.h"
 #include "stdlib.h"

@@ -1,3 +1,5 @@
+// BOREDOS_APP_DESC: Screen capture utility.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/accessories-screenshot.png
 #include <stdint.h>
 #include <stdbool.h>
 #include "stdlib.h"

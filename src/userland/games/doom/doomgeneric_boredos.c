@@ -1,3 +1,5 @@
+// BOREDOS_APP_DESC: DOOM game runtime.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/doom-2016.png;/Library/images/icons/colloid/applications-games.png
 #include "doomgeneric.h"
 #include "doomkeys.h"
 #include <libui.h>

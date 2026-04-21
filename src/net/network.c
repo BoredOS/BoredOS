@@ -24,6 +24,7 @@ static struct pbuf *tcp_recv_queue = NULL;
 static int tcp_connect_done = 0;
 static int tcp_connect_error = 0;
 static int tcp_closed = 0;
+static uint32_t tcp_owner_pid = 0; 
 
 static err_t tcp_recv_callback(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, err_t err) {
     (void)arg; (void)tpcb; (void)err;
@@ -158,6 +159,10 @@ void network_force_unlock(void) {
 }
 
 void network_cleanup(void) {
+    extern uint32_t process_get_current_pid(void);
+    uint32_t my_pid = process_get_current_pid();
+    if (tcp_owner_pid != 0 && tcp_owner_pid != my_pid) return;
+
     asm volatile("cli");
     if (tcp_recv_queue) {
         pbuf_free(tcp_recv_queue);
@@ -167,6 +172,7 @@ void network_cleanup(void) {
         tcp_abort(current_tcp_pcb);
         current_tcp_pcb = NULL;
     }
+    tcp_owner_pid = 0;
     network_processing = 0;
     asm volatile("sti");
 }
@@ -208,6 +214,9 @@ int network_tcp_connect(const ipv4_address_t *ip, uint16_t port) {
     
     current_tcp_pcb = tcp_new();
     if (!current_tcp_pcb) { network_processing = 0; return -1; }
+
+    extern uint32_t process_get_current_pid(void);
+    tcp_owner_pid = process_get_current_pid();
     
     ip4_addr_t dest_addr;
     IP4_ADDR(&dest_addr, ip->bytes[0], ip->bytes[1], ip->bytes[2], ip->bytes[3]);

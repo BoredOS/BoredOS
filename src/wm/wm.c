@@ -18,6 +18,7 @@
 #include "userland/stb_image.h"
 #include "memory_manager.h"
 #include "disk.h"
+#include "app_metadata.h"
 #include "../sys/work_queue.h"
 #include "../sys/smp.h"
 #include "../core/kconsole.h"
@@ -61,7 +62,9 @@ static bool str_eq(const char *s1, const char *s2) {
 static int mx = 400, my = 300; 
 static int prev_mx = 400, prev_my = 300; 
 static bool start_menu_open = false;
-static char *start_menu_pending_app = NULL; 
+static int pending_dock_click_index = -1;
+static int dock_drag_source_index = -1;
+static bool dock_drag_active = false;
 static int pending_desktop_icon_click = -1; 
 
 // Desktop Context Menu
@@ -69,6 +72,12 @@ static bool desktop_menu_visible = false;
 static int desktop_menu_x = 0;
 static int desktop_menu_y = 0;
 static int desktop_menu_target_icon = -1; 
+
+// Dock Context Menu
+static bool dock_menu_visible = false;
+static int dock_menu_x = 0;
+static int dock_menu_y = 0;
+static int dock_menu_target_index = -1;
 
 // Desktop Dialog State
 static int desktop_dialog_state = 0; 
@@ -432,19 +441,6 @@ void wm_refresh_desktop(void) {
     force_redraw = true;
 }
 
-static void create_desktop_shortcut(const char *app_name) {
-    char path[128] = "/root/Desktop/";
-    int p = 14;
-    int n = 0; while(app_name[n]) path[p++] = app_name[n++];
-    const char *ext = ".shortcut";
-    int e = 0; while(ext[e]) path[p++] = ext[e++];
-    path[p] = 0;
-    
-    FAT32_FileHandle *fh = fat32_open(path, "w");
-    if (fh) fat32_close(fh);
-    refresh_desktop_icons();
-}
-
 int wm_get_desktop_icon_count(void) {
     return desktop_icon_count;
 }
@@ -564,27 +560,664 @@ static void draw_dock_clock(int x, int y);
 static void draw_dock_taskman(int x, int y);
 static void draw_dock_word(int x, int y);
 static void draw_dock_browser(int x, int y);
-static void draw_dock_editor(int x, int y);
 static void draw_filled_circle(int cx, int cy, int r, uint32_t color);
+static bool thumb_cache_is_failed(const char *path);
+static uint32_t* thumb_cache_lookup(const char *path);
+static uint32_t* thumb_cache_decode(const char *path);
+
+#define DOCK_ITEM_SIZE 48
+#define DOCK_ITEM_SPACING 10
+#define DOCK_HEIGHT 60
+#define DOCK_VERTICAL_MARGIN 6
+#define DOCK_BG_PADDING 12
+#define DOCK_ICON_COUNT 12
+#define DOCK_ICON_SIZE 48
+#define DOCK_ICON_PIXELS (DOCK_ICON_SIZE * DOCK_ICON_SIZE)
+#define DOCK_ICON_BASE_PATH "/Library/images/icons/colloid/"
+#define MAX_DOCK_ITEMS 32
+#define DOCK_LABEL_MAX 64
+#define DOCK_CONFIG_PATH "/Library/Dock/dock.cfg"
+
+enum {
+    DOCK_SLOT_FILES = 0,
+    DOCK_SLOT_SETTINGS = 1,
+    DOCK_SLOT_NOTEPAD = 2,
+    DOCK_SLOT_CALCULATOR = 3,
+    DOCK_SLOT_GRAPHER = 4,
+    DOCK_SLOT_TERMINAL = 5,
+    DOCK_SLOT_MINESWEEPER = 6,
+    DOCK_SLOT_PAINT = 7,
+    DOCK_SLOT_BROWSER = 8,
+    DOCK_SLOT_TASKMAN = 9,
+    DOCK_SLOT_CLOCK = 10,
+    DOCK_SLOT_WORD = 11,
+};
+
+typedef struct {
+    char label[DOCK_LABEL_MAX];
+    char target[FAT32_MAX_PATH];
+    int icon_slot;
+} dock_item_t;
+
+typedef struct {
+    const char *label;
+    const char *target;
+    int icon_slot;
+} dock_default_item_t;
+
+static dock_item_t dock_items[MAX_DOCK_ITEMS];
+static int dock_item_count = 0;
+
+static const dock_default_item_t dock_default_items[] = {
+    {"Files", "/root", DOCK_SLOT_FILES},
+    {"Browser", "/bin/browser.elf", DOCK_SLOT_BROWSER},
+    {"Settings", "/bin/settings.elf", DOCK_SLOT_SETTINGS},
+    {"Notepad", "/bin/notepad.elf", DOCK_SLOT_NOTEPAD},
+    {"Calculator", "/bin/calculator.elf", DOCK_SLOT_CALCULATOR},
+    {"Grapher", "/bin/grapher.elf", DOCK_SLOT_GRAPHER},
+    {"Terminal", "/bin/terminal.elf", DOCK_SLOT_TERMINAL},
+    {"Minesweeper", "/bin/minesweeper.elf", DOCK_SLOT_MINESWEEPER},
+    {"Paint", "/bin/paint.elf", DOCK_SLOT_PAINT},
+    {"Task Manager", "/bin/taskman.elf", DOCK_SLOT_TASKMAN},
+    {"Clock", "/bin/clock.elf", DOCK_SLOT_CLOCK},
+    {"BoredWord", "/bin/boredword.elf", DOCK_SLOT_WORD},
+};
+
+typedef enum {
+    DOCK_ICON_UNTRIED = 0,
+    DOCK_ICON_LOADING = 1,
+    DOCK_ICON_READY = 2,
+    DOCK_ICON_FAILED = 3,
+} dock_icon_state_t;
+
+typedef struct {
+    const char *filename;
+    volatile int state;
+    uint32_t pixels[DOCK_ICON_PIXELS];
+} dock_icon_entry_t;
+
+static dock_icon_entry_t dock_icons[DOCK_ICON_COUNT] = {
+    {"file-manager.png", DOCK_ICON_UNTRIED, {0}},
+    {"preferences-system.png", DOCK_ICON_UNTRIED, {0}},
+    {"text-editor.png", DOCK_ICON_UNTRIED, {0}},
+    {"calc.png", DOCK_ICON_UNTRIED, {0}},
+    {"se.sjoerd.Graphs.png", DOCK_ICON_UNTRIED, {0}},
+    {"xterm.png", DOCK_ICON_UNTRIED, {0}},
+    {"gnome-mines.png", DOCK_ICON_UNTRIED, {0}},
+    {"gnome-paint.png", DOCK_ICON_UNTRIED, {0}},
+    {"web-browser.png", DOCK_ICON_UNTRIED, {0}},
+    {"utilities-system-monitor.png", DOCK_ICON_UNTRIED, {0}},
+    {"preferences-system-time.png", DOCK_ICON_UNTRIED, {0}},
+    {"libreoffice-writer.png", DOCK_ICON_UNTRIED, {0}},
+};
+
+static uint32_t blend_src_over_dst(uint32_t dst, uint32_t src) {
+    uint32_t sa = (src >> 24) & 0xFF;
+    if (sa == 0) return dst;
+    if (sa == 255) return 0xFF000000 | (src & 0x00FFFFFF);
+
+    uint32_t sr = (src >> 16) & 0xFF;
+    uint32_t sg = (src >> 8) & 0xFF;
+    uint32_t sb = src & 0xFF;
+
+    uint32_t dr = (dst >> 16) & 0xFF;
+    uint32_t dg = (dst >> 8) & 0xFF;
+    uint32_t db = dst & 0xFF;
+
+    uint32_t inv = 255 - sa;
+    uint32_t out_r = (sr * sa + dr * inv) / 255;
+    uint32_t out_g = (sg * sa + dg * inv) / 255;
+    uint32_t out_b = (sb * sa + db * inv) / 255;
+
+    return 0xFF000000 | (out_r << 16) | (out_g << 8) | out_b;
+}
+
+static bool dock_icon_decode_into_entry(dock_icon_entry_t *entry) {
+    if (!entry || !entry->filename) return false;
+
+    char full_path[192];
+    k_strcpy(full_path, DOCK_ICON_BASE_PATH);
+    k_strcpy(full_path + k_strlen(full_path), entry->filename);
+
+    FAT32_FileHandle *fh = fat32_open(full_path, "r");
+    if (!fh) return false;
+
+    uint32_t file_size = fh->size;
+    if (file_size == 0 || file_size > 8 * 1024 * 1024) {
+        fat32_close(fh);
+        return false;
+    }
+
+    unsigned char *encoded = (unsigned char*)kmalloc(file_size);
+    if (!encoded) {
+        fat32_close(fh);
+        return false;
+    }
+
+    int total = 0;
+    while (total < (int)file_size) {
+        int chunk = fat32_read(fh, encoded + total, (int)file_size - total);
+        if (chunk <= 0) break;
+        total += chunk;
+    }
+    fat32_close(fh);
+
+    if (total <= 0) {
+        kfree(encoded);
+        return false;
+    }
+
+    int img_w = 0, img_h = 0, channels = 0;
+    unsigned char *rgba = stbi_load_from_memory(encoded, total, &img_w, &img_h, &channels, 4);
+    kfree(encoded);
+    if (!rgba || img_w <= 0 || img_h <= 0) {
+        if (rgba) stbi_image_free(rgba);
+        return false;
+    }
+
+    int img_max_x = img_w - 1;
+    int img_max_y = img_h - 1;
+
+    k_memset(entry->pixels, 0, sizeof(entry->pixels));
+    for (int ty = 0; ty < DOCK_ICON_SIZE; ty++) {
+        for (int tx = 0; tx < DOCK_ICON_SIZE; tx++) {
+            int sx = (DOCK_ICON_SIZE > 1) ? (tx * img_max_x) / (DOCK_ICON_SIZE - 1) : 0;
+            int sy = (DOCK_ICON_SIZE > 1) ? (ty * img_max_y) / (DOCK_ICON_SIZE - 1) : 0;
+            if (sx < 0) sx = 0;
+            if (sy < 0) sy = 0;
+            if (sx > img_max_x) sx = img_max_x;
+            if (sy > img_max_y) sy = img_max_y;
+
+            int idx = (sy * img_w + sx) * 4;
+            uint32_t r = rgba[idx];
+            uint32_t g = rgba[idx + 1];
+            uint32_t b = rgba[idx + 2];
+            uint32_t a = rgba[idx + 3];
+            entry->pixels[ty * DOCK_ICON_SIZE + tx] = (a << 24) | (r << 16) | (g << 8) | b;
+        }
+    }
+
+    stbi_image_free(rgba);
+    return true;
+}
+
+static dock_icon_entry_t *dock_icon_get_entry(int slot_index) {
+    if (slot_index < 0 || slot_index >= DOCK_ICON_COUNT) return NULL;
+
+    dock_icon_entry_t *entry = &dock_icons[slot_index];
+    int state = __atomic_load_n(&entry->state, __ATOMIC_ACQUIRE);
+    if (state == DOCK_ICON_READY || state == DOCK_ICON_FAILED) return entry;
+
+    if (state == DOCK_ICON_UNTRIED) {
+        int expected = DOCK_ICON_UNTRIED;
+        if (__atomic_compare_exchange_n(&entry->state, &expected, DOCK_ICON_LOADING, false,
+                                        __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            bool ok = dock_icon_decode_into_entry(entry);
+            __atomic_store_n(&entry->state, ok ? DOCK_ICON_READY : DOCK_ICON_FAILED, __ATOMIC_RELEASE);
+            return entry;
+        }
+        state = __atomic_load_n(&entry->state, __ATOMIC_ACQUIRE);
+    }
+
+    if (state == DOCK_ICON_LOADING) return NULL;
+    return entry;
+}
+
+bool wm_draw_dock_icon_scaled(int x, int y, int size, int slot_index) {
+    if (size <= 0) return false;
+
+    dock_icon_entry_t *entry = dock_icon_get_entry(slot_index);
+    if (!entry) return false;
+    if (__atomic_load_n(&entry->state, __ATOMIC_ACQUIRE) != DOCK_ICON_READY) return false;
+
+    int src_max = DOCK_ICON_SIZE - 1;
+
+    for (int ty = 0; ty < size; ty++) {
+        int sy = (size > 1) ? (ty * src_max) / (size - 1) : 0;
+        if (sy < 0) sy = 0;
+        if (sy > src_max) sy = src_max;
+
+        for (int tx = 0; tx < size; tx++) {
+            int sx = (size > 1) ? (tx * src_max) / (size - 1) : 0;
+            if (sx < 0) sx = 0;
+            if (sx > src_max) sx = src_max;
+
+            uint32_t src = entry->pixels[sy * DOCK_ICON_SIZE + sx];
+            uint32_t a = (src >> 24) & 0xFF;
+            if (a == 0) continue;
+
+            if (a == 255) {
+                put_pixel(x + tx, y + ty, 0xFF000000 | (src & 0x00FFFFFF));
+            } else {
+                uint32_t dst = graphics_get_pixel(x + tx, y + ty);
+                put_pixel(x + tx, y + ty, blend_src_over_dst(dst, src));
+            }
+        }
+    }
+
+    return true;
+}
+
+static void draw_dock_icon_slot_png(int x, int y, int slot_index) {
+    (void)wm_draw_dock_icon_scaled(x, y, DOCK_ICON_SIZE, slot_index);
+}
+
+static bool draw_icon_path_scaled(int x, int y, int size, const char *path) {
+    uint32_t *icon = NULL;
+    if (size <= 0 || !path || !path[0]) return false;
+
+    icon = thumb_cache_lookup(path);
+    if (!icon && !thumb_cache_is_failed(path)) {
+        icon = thumb_cache_decode(path);
+    }
+    if (!icon) return false;
+
+    int src_max = 47;
+    for (int ty = 0; ty < size; ty++) {
+        int sy = (size > 1) ? (ty * src_max) / (size - 1) : 0;
+        if (sy < 0) sy = 0;
+        if (sy > src_max) sy = src_max;
+
+        for (int tx = 0; tx < size; tx++) {
+            int sx = (size > 1) ? (tx * src_max) / (size - 1) : 0;
+            if (sx < 0) sx = 0;
+            if (sx > src_max) sx = src_max;
+
+            uint32_t src = icon[sy * 48 + sx];
+            uint32_t a = (src >> 24) & 0xFF;
+            if (a == 0) continue;
+
+            if (a == 255) {
+                put_pixel(x + tx, y + ty, 0xFF000000 | (src & 0x00FFFFFF));
+            } else {
+                uint32_t dst = graphics_get_pixel(x + tx, y + ty);
+                put_pixel(x + tx, y + ty, blend_src_over_dst(dst, src));
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool dock_resolve_shortcut_target(const char *shortcut_path, char *out_target, int out_target_size) {
+    if (!shortcut_path || !out_target || out_target_size <= 1) return false;
+
+    FAT32_FileHandle *fh = fat32_open(shortcut_path, "r");
+    if (!fh) return false;
+
+    int len = fat32_read(fh, out_target, out_target_size - 1);
+    fat32_close(fh);
+    if (len <= 0) return false;
+
+    while (len > 0 && (out_target[len - 1] == '\n' || out_target[len - 1] == '\r')) {
+        len--;
+    }
+    out_target[len] = 0;
+    return len > 0;
+}
+
+static bool dock_draw_metadata_icon(int x, int y, const dock_item_t *item) {
+    if (!item || !item->target[0]) return false;
+
+    char elf_target[FAT32_MAX_PATH];
+    const char *metadata_target = NULL;
+
+    if (str_ends_with(item->target, ".elf")) {
+        metadata_target = item->target;
+    } else if (str_ends_with(item->target, ".shortcut")) {
+        if (dock_resolve_shortcut_target(item->target, elf_target, sizeof(elf_target)) &&
+            str_ends_with(elf_target, ".elf")) {
+            metadata_target = elf_target;
+        }
+    }
+
+    if (!metadata_target) return false;
+
+    char icon_path[BOREDOS_APP_METADATA_MAX_IMAGE_PATH];
+    if (!app_metadata_get_primary_image(metadata_target, icon_path, sizeof(icon_path))) {
+        return false;
+    }
+
+    return draw_icon_path_scaled(x, y, DOCK_ICON_SIZE, icon_path);
+}
+
+static void dock_copy_text(char *dst, int dst_size, const char *src) {
+    if (!dst || dst_size <= 0) return;
+    int i = 0;
+    if (src) {
+        while (src[i] && i < dst_size - 1) {
+            dst[i] = src[i];
+            i++;
+        }
+    }
+    dst[i] = 0;
+}
+
+static int dock_parse_int(const char *s) {
+    if (!s) return 0;
+    int v = 0;
+    while (*s >= '0' && *s <= '9') {
+        v = (v * 10) + (*s - '0');
+        s++;
+    }
+    return v;
+}
+
+static void dock_write_int(FAT32_FileHandle *fh, int v) {
+    char tmp[16];
+    int n = 0;
+    if (v == 0) {
+        tmp[n++] = '0';
+    } else {
+        char rev[16];
+        int r = 0;
+        while (v > 0 && r < 15) {
+            rev[r++] = '0' + (v % 10);
+            v /= 10;
+        }
+        while (r > 0) tmp[n++] = rev[--r];
+    }
+    if (n > 0) fat32_write(fh, tmp, n);
+}
+
+static void dock_label_from_target(const char *target, char *out_label, int out_size) {
+    const char *name = target;
+    if (!target || !target[0]) {
+        dock_copy_text(out_label, out_size, "Item");
+        return;
+    }
+
+    int i = 0;
+    while (target[i]) {
+        if (target[i] == '/') name = &target[i + 1];
+        i++;
+    }
+
+    if (!name || !name[0]) {
+        dock_copy_text(out_label, out_size, "Files");
+        return;
+    }
+
+    dock_copy_text(out_label, out_size, name);
+    int len = (int)k_strlen(out_label);
+    if (len > 4 && str_ends_with(out_label, ".elf")) {
+        out_label[len - 4] = 0;
+    } else if (len > 9 && str_ends_with(out_label, ".shortcut")) {
+        out_label[len - 9] = 0;
+    }
+}
+
+static int dock_icon_slot_for_target(const char *target, const char *label) {
+    (void)label;
+    if (!target || !target[0]) return DOCK_SLOT_FILES;
+
+    if (str_eq(target, "/") != 0 || str_eq(target, "/root") != 0 || fat32_is_directory(target)) {
+        return DOCK_SLOT_FILES;
+    }
+    if (str_ends_with(target, ".elf")) return DOCK_SLOT_TERMINAL;
+    if (str_ends_with(target, ".shortcut")) {
+        char shortcut_target[FAT32_MAX_PATH];
+        if (dock_resolve_shortcut_target(target, shortcut_target, sizeof(shortcut_target)) &&
+            str_ends_with(shortcut_target, ".elf")) {
+            return DOCK_SLOT_TERMINAL;
+        }
+        return DOCK_SLOT_NOTEPAD;
+    }
+
+    return DOCK_SLOT_NOTEPAD;
+}
+
+static bool dock_insert_item(int index, const char *label, const char *target, int icon_slot) {
+    if (dock_item_count >= MAX_DOCK_ITEMS) return false;
+    if (index < 0) index = 0;
+    if (index > dock_item_count) index = dock_item_count;
+    if (icon_slot < 0 || icon_slot >= DOCK_ICON_COUNT) icon_slot = DOCK_SLOT_FILES;
+
+    for (int i = dock_item_count; i > index; i--) dock_items[i] = dock_items[i - 1];
+
+    dock_copy_text(dock_items[index].label, DOCK_LABEL_MAX, label);
+    dock_copy_text(dock_items[index].target, FAT32_MAX_PATH, target);
+    dock_items[index].icon_slot = icon_slot;
+    dock_item_count++;
+    return true;
+}
+
+static void dock_remove_item(int index) {
+    if (index < 0 || index >= dock_item_count) return;
+    for (int i = index; i < dock_item_count - 1; i++) dock_items[i] = dock_items[i + 1];
+    dock_item_count--;
+}
+
+static void dock_move_item(int from_index, int to_index) {
+    if (from_index < 0 || from_index >= dock_item_count) return;
+    if (to_index < 0) to_index = 0;
+    if (to_index > dock_item_count) to_index = dock_item_count;
+    if (to_index > from_index) to_index--;
+    if (to_index == from_index) return;
+
+    dock_item_t temp = dock_items[from_index];
+    if (to_index > from_index) {
+        for (int i = from_index; i < to_index; i++) dock_items[i] = dock_items[i + 1];
+    } else {
+        for (int i = from_index; i > to_index; i--) dock_items[i] = dock_items[i - 1];
+    }
+    dock_items[to_index] = temp;
+}
+
+static int dock_find_item_by_target(const char *target) {
+    if (!target) return -1;
+    for (int i = 0; i < dock_item_count; i++) {
+        if (str_eq(dock_items[i].target, target) != 0) return i;
+    }
+    return -1;
+}
+
+static int dock_total_width(void) {
+    if (dock_item_count <= 0) return 0;
+    return (dock_item_count * DOCK_ITEM_SIZE) + ((dock_item_count - 1) * DOCK_ITEM_SPACING);
+}
+
+static bool dock_rect_contains(int x, int y, int w, int h, int px, int py) {
+    return px >= x && px < x + w && py >= y && py < y + h;
+}
+
+static void dock_get_geometry(int sw, int sh, int *dock_x, int *dock_y, int *dock_bg_x, int *dock_bg_w) {
+    int total_w = dock_total_width();
+    if (dock_x) *dock_x = (sw - total_w) / 2;
+    if (dock_y) *dock_y = sh - DOCK_HEIGHT - DOCK_VERTICAL_MARGIN;
+    if (dock_bg_x) *dock_bg_x = (sw - total_w) / 2 - DOCK_BG_PADDING;
+    if (dock_bg_w) *dock_bg_w = total_w + (DOCK_BG_PADDING * 2);
+}
+
+static bool dock_point_in_bounds(int x, int y, int sw, int sh) {
+    int dock_y, dock_bg_x, dock_bg_w;
+    dock_get_geometry(sw, sh, NULL, &dock_y, &dock_bg_x, &dock_bg_w);
+    return dock_item_count > 0 && dock_rect_contains(dock_bg_x, dock_y, dock_bg_w, DOCK_HEIGHT, x, y);
+}
+
+static int dock_item_index_at_point(int x, int y, int sw, int sh) {
+    if (!dock_point_in_bounds(x, y, sw, sh)) return -1;
+
+    int dock_x;
+    dock_get_geometry(sw, sh, &dock_x, NULL, NULL, NULL);
+    for (int i = 0; i < dock_item_count; i++) {
+        int ix = dock_x + i * (DOCK_ITEM_SIZE + DOCK_ITEM_SPACING);
+        if (dock_rect_contains(ix, sh - DOCK_HEIGHT - DOCK_VERTICAL_MARGIN + 6, DOCK_ITEM_SIZE, DOCK_ITEM_SIZE, x, y)) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static int dock_insertion_index_from_x(int x, int y, int sw, int sh) {
+    if (!dock_point_in_bounds(x, y, sw, sh)) return -1;
+    int dock_x;
+    dock_get_geometry(sw, sh, &dock_x, NULL, NULL, NULL);
+
+    for (int i = 0; i < dock_item_count; i++) {
+        int ix = dock_x + i * (DOCK_ITEM_SIZE + DOCK_ITEM_SPACING);
+        if (x < ix + (DOCK_ITEM_SIZE / 2)) return i;
+    }
+    return dock_item_count;
+}
+
+static void dock_save_config(void) {
+    fat32_mkdir("/root");
+    fat32_mkdir("/Library/Dock/dock.cfg");
+
+    FAT32_FileHandle *fh = fat32_open(DOCK_CONFIG_PATH, "w");
+    if (!fh) return;
+
+    const char *header = "v1\n";
+    fat32_write(fh, header, (int)k_strlen(header));
+
+    for (int i = 0; i < dock_item_count; i++) {
+        dock_write_int(fh, dock_items[i].icon_slot);
+        fat32_write(fh, "|", 1);
+        fat32_write(fh, dock_items[i].label, (int)k_strlen(dock_items[i].label));
+        fat32_write(fh, "|", 1);
+        fat32_write(fh, dock_items[i].target, (int)k_strlen(dock_items[i].target));
+        fat32_write(fh, "\n", 1);
+    }
+
+    fat32_close(fh);
+}
+
+static void dock_seed_defaults(void) {
+    dock_item_count = 0;
+    int default_count = (int)(sizeof(dock_default_items) / sizeof(dock_default_items[0]));
+    for (int i = 0; i < default_count; i++) {
+        dock_insert_item(dock_item_count, dock_default_items[i].label,
+                         dock_default_items[i].target, dock_default_items[i].icon_slot);
+    }
+}
+
+static void dock_load_config(void) {
+    dock_item_count = 0;
+
+    FAT32_FileHandle *fh = fat32_open(DOCK_CONFIG_PATH, "r");
+    if (!fh) {
+        dock_seed_defaults();
+        dock_save_config();
+        return;
+    }
+
+    uint32_t size = fh->size;
+    if (size == 0 || size > 16384) {
+        fat32_close(fh);
+        dock_seed_defaults();
+        dock_save_config();
+        return;
+    }
+
+    char *buffer = (char*)kmalloc(size + 1);
+    if (!buffer) {
+        fat32_close(fh);
+        dock_seed_defaults();
+        return;
+    }
+
+    int total = 0;
+    while (total < (int)size) {
+        int chunk = fat32_read(fh, buffer + total, (int)size - total);
+        if (chunk <= 0) break;
+        total += chunk;
+    }
+    fat32_close(fh);
+    buffer[total] = 0;
+
+    char *cursor = buffer;
+    while (*cursor) {
+        char *line = cursor;
+        while (*cursor && *cursor != '\n' && *cursor != '\r') cursor++;
+        if (*cursor) {
+            *cursor = 0;
+            cursor++;
+            while (*cursor == '\n' || *cursor == '\r') cursor++;
+        }
+
+        if (!line[0] || str_eq(line, "v1") != 0 || line[0] == '#') continue;
+
+        char *sep1 = line;
+        while (*sep1 && *sep1 != '|') sep1++;
+        if (*sep1 != '|') continue;
+        *sep1 = 0;
+
+        char *label = sep1 + 1;
+        char *sep2 = label;
+        while (*sep2 && *sep2 != '|') sep2++;
+        if (*sep2 != '|') continue;
+        *sep2 = 0;
+        char *target = sep2 + 1;
+
+        if (!label[0] || !target[0]) continue;
+
+        int icon_slot = dock_parse_int(line);
+        if (icon_slot < 0 || icon_slot >= DOCK_ICON_COUNT) {
+            icon_slot = dock_icon_slot_for_target(target, label);
+        }
+
+        if (!dock_insert_item(dock_item_count, label, target, icon_slot)) break;
+    }
+
+    kfree(buffer);
+
+    if (dock_item_count == 0) {
+        dock_seed_defaults();
+        dock_save_config();
+    }
+}
+
+static bool dock_can_pin_path(const char *path) {
+    if (!path || !path[0]) return false;
+    if (path[0] != '/') return false;
+    if (fat32_is_directory(path)) return true;
+    if (str_ends_with(path, ".elf")) return true;
+    if (str_ends_with(path, ".shortcut")) return true;
+    return false;
+}
+
+static bool dock_launch_shortcut_path(const char *shortcut_path) {
+    FAT32_FileHandle *fh = fat32_open(shortcut_path, "r");
+    if (!fh) return false;
+    char buf[FAT32_MAX_PATH];
+    int len = fat32_read(fh, buf, FAT32_MAX_PATH - 1);
+    fat32_close(fh);
+    if (len <= 0) return false;
+    while (len > 0 && (buf[len - 1] == '\n' || buf[len - 1] == '\r')) len--;
+    buf[len] = 0;
+    if (!buf[0]) return false;
+    explorer_open_target(buf);
+    return true;
+}
+
+static void dock_launch_item(int index) {
+    if (index < 0 || index >= dock_item_count) return;
+    const char *target = dock_items[index].target;
+    if (!target || !target[0]) return;
+
+    if (str_ends_with(target, ".shortcut")) {
+        if (dock_launch_shortcut_path(target)) return;
+    }
+
+    explorer_open_target(target);
+}
+
+static bool dock_item_is_protected(int index) {
+    if (index < 0 || index >= dock_item_count) return false;
+    const dock_item_t *item = &dock_items[index];
+    return (str_eq(item->label, "Files") != 0) && (str_eq(item->target, "/root") != 0);
+}
 
 static void draw_scaled_icon(int x, int y, void (*draw_fn)(int, int)) {
-    // 48x48 buffer for the dock icon
     uint32_t icon_buf[48 * 48];
-    // Clear to magenta (transparent key color)
     for (int i = 0; i < 48 * 48; i++) icon_buf[i] = 0xFFFF00FF;
     
-    // Redirect graphics to our buffer
     graphics_set_render_target(icon_buf, 48, 48);
-    // Draw at 0,0 in the buffer
     draw_fn(0, 0);
-    // Restore graphics to screen
     graphics_set_render_target(NULL, 0, 0);
-    
-    // Calculate centered x,y in the 80x80 cell
-    // (80-32)/2 = 24.
     int dx = x + 24, dy = y + 12;
     
-    // Blit scaled down (nearest neighbor 48x48 -> 32x32 downsample, ratio = 1.5)
     for (int ty = 0; ty < 32; ty++) {
         for (int tx = 0; tx < 32; tx++) {
             int src_x = tx * 48 / 32;
@@ -715,8 +1348,7 @@ void draw_elf_icon(int x, int y, const char *label) {
     draw_icon_label(x, y, label);
 }
 
-// === Dynamic thumbnail cache for JPG explorer icons ===
-#define THUMB_CACHE_SIZE 8
+#define THUMB_CACHE_SIZE 128
 #define THUMB_PIXELS (48 * 48)
 static struct {
     char path[FAT32_MAX_PATH];
@@ -727,7 +1359,7 @@ static struct {
 static int thumb_cache_next = 0; // Round-robin eviction
 
 // Deferred Thumbnail Request Queue
-#define THUMB_QUEUE_SIZE 16
+#define THUMB_QUEUE_SIZE 128
 static char thumb_request_queue[THUMB_QUEUE_SIZE][FAT32_MAX_PATH];
 static int thumb_queue_head = 0;
 static int thumb_queue_tail = 0;
@@ -771,21 +1403,49 @@ static uint32_t* thumb_cache_lookup(const char *path) {
     return NULL;
 }
 
+static void thumb_cache_mark_failed(const char *path) {
+    if (!path || !path[0]) return;
+
+    int slot = thumb_cache_next;
+    thumb_cache_next = (thumb_cache_next + 1) % THUMB_CACHE_SIZE;
+
+    int p = 0;
+    while (path[p] && p < FAT32_MAX_PATH - 1) {
+        thumb_cache[slot].path[p] = path[p];
+        p++;
+    }
+    thumb_cache[slot].path[p] = 0;
+    thumb_cache[slot].valid = false;
+    thumb_cache[slot].failed = true;
+}
+
 
 
 static uint32_t* thumb_cache_decode(const char *path) {
+    uint32_t *cached = thumb_cache_lookup(path);
+    if (cached) return cached;
+    if (thumb_cache_is_failed(path)) return NULL;
+
     // Open and read the JPG file
     FAT32_FileHandle *fh = fat32_open(path, "r");
-    if (!fh) return NULL;
+    if (!fh) {
+        thumb_cache_mark_failed(path);
+        return NULL;
+    }
     
     uint32_t file_size = fh->size;
     if (file_size == 0 || file_size > 8 * 1024 * 1024) {
         fat32_close(fh);
+        thumb_cache_mark_failed(path);
         return NULL;
     }
     
     unsigned char *buf = (unsigned char*)kmalloc(file_size);
-    if (!buf) { fat32_close(fh); return NULL; }
+    if (!buf) {
+        fat32_close(fh);
+        thumb_cache_mark_failed(path);
+        return NULL;
+    }
     
     int total = 0;
     while (total < (int)file_size) {
@@ -795,19 +1455,21 @@ static uint32_t* thumb_cache_decode(const char *path) {
     }
     fat32_close(fh);
     
-    if (total <= 0) { kfree(buf); return NULL; }
+    if (total <= 0) {
+        kfree(buf);
+        thumb_cache_mark_failed(path);
+        return NULL;
+    }
     
     // Decode image
     int img_w, img_h, channels;
     unsigned char *img = stbi_load_from_memory(buf, total, &img_w, &img_h, &channels, 4);
     if (!img || img_w <= 0 || img_h <= 0) {
-        serial_write("[WM] stbi_load_from_memory failed for deferred thumb\n");
         if (img) stbi_image_free(img);
         kfree(buf);
+        thumb_cache_mark_failed(path);
         return NULL;
     }
-    
-    serial_write("[WM] stbi_load_from_memory OK for deferred thumb\n");
     
     // Store in cache — downscale to 48x48
     int slot = thumb_cache_next;
@@ -889,6 +1551,39 @@ void draw_image_icon(int x, int y, const char *label) {
     }
     
     // Removing the explicit `draw_icon_label` call here to prevent double-text since `wm.c` or Explorer manually draws it as well inside their draw block
+}
+
+bool draw_icon_path(int x, int y, const char *path) {
+    uint32_t *icon = NULL;
+
+    if (!path || !path[0]) return false;
+
+    icon = thumb_cache_lookup(path);
+    if (!icon && !thumb_cache_is_failed(path)) {
+        icon = thumb_cache_decode(path);
+    }
+    if (!icon) return false;
+
+    int dx = x + 24;
+    int dy = y + 12;
+    for (int ty = 0; ty < 32; ty++) {
+        for (int tx = 0; tx < 32; tx++) {
+            int src_x = tx * 48 / 32;
+            int src_y = ty * 48 / 32;
+            uint32_t src = icon[src_y * 48 + src_x];
+            uint32_t a = (src >> 24) & 0xFF;
+            if (a == 0) continue;
+
+            if (a == 255) {
+                put_pixel(dx + tx, dy + ty, 0xFF000000 | (src & 0x00FFFFFF));
+            } else {
+                uint32_t dst = graphics_get_pixel(dx + tx, dy + ty);
+                put_pixel(dx + tx, dy + ty, blend_src_over_dst(dst, src));
+            }
+        }
+    }
+
+    return true;
 }
 
 void draw_notepad_icon(int x, int y, const char *label) {
@@ -1090,7 +1785,7 @@ static long long isqrt(long long n) {
     return x;
 }
 
-static void draw_dock_word(int x, int y) {
+static void __attribute__((unused)) draw_dock_word(int x, int y) {
     // Rich blue document style
     draw_rounded_rect_filled(x, y, 48, 48, 10, 0xFF4A90E2);
     draw_rounded_rect_filled(x + 1, y + 1, 46, 28, 9, 0xFF5D9CE6);
@@ -1247,7 +1942,7 @@ static void draw_dock_paint(int x, int y) {
     draw_rounded_rect_filled(x + 30, y + 22, 3, 7, 1, 0xFF1A1A1A);
 }
 
-static void draw_dock_browser(int x, int y) {
+static void __attribute__((unused)) draw_dock_browser(int x, int y) {
     draw_rounded_rect_filled(x, y, 48, 48, 10, 0xFF0D47A1);
     draw_rounded_rect_filled(x + 1, y + 1, 46, 28, 9, 0xFF1976D2);
     draw_rounded_rect_filled(x + 1, y + 24, 46, 23, 9, 0xFF1565C0);
@@ -1347,7 +2042,6 @@ void draw_window(Window *win) {
     }
 }
 
-// Draw Mouse Cursor (classic outlined arrow)
 void draw_cursor(int x, int y) {
     // '.' transparent, 'w' white outline, 'b' black fill
     static const char cursor_bitmap[CURSOR_H][CURSOR_W + 1] = {
@@ -1627,7 +2321,29 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
                 else if (str_starts_with(icon->name, "Grapher")) draw_grapher_icon(icon->x, icon->y, label);
                 else draw_icon(icon->x, icon->y, label);
             } else {
-                if (str_ends_with(icon->name, ".elf")) draw_elf_icon(icon->x, icon->y, icon->name);
+                if (str_ends_with(icon->name, ".elf")) {
+                    char full_path[128] = "/root/Desktop/";
+                    char icon_path[BOREDOS_APP_METADATA_MAX_IMAGE_PATH];
+                    bool drew_icon = false;
+                    int p = 14;
+                    int n = 0;
+
+                    while (icon->name[n] && p < 127) full_path[p++] = icon->name[n++];
+                    full_path[p] = 0;
+
+                    if (app_metadata_get_primary_image(full_path, icon_path, sizeof(icon_path))) {
+                        drew_icon = draw_icon_path(icon->x, icon->y, icon_path);
+                    }
+                    if (!drew_icon) {
+                        drew_icon = draw_icon_path(icon->x, icon->y, "/Library/images/icons/colloid/xterm.png");
+                    }
+
+                    if (drew_icon) {
+                        draw_icon_label(icon->x, icon->y, icon->name);
+                    } else {
+                        draw_elf_icon(icon->x, icon->y, icon->name);
+                    }
+                }
                 else if (str_ends_with(icon->name, ".pnt")) draw_paint_icon(icon->x, icon->y, icon->name);
                 else if (is_image_file(icon->name)) {
                     char full_path[128] = "/root/Desktop/"; int p=14; int n=0; while(icon->name[n] && p < 127) full_path[p++] = icon->name[n++]; full_path[p]=0;
@@ -1661,24 +2377,26 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
             draw_string(20, 108, "Restart", COLOR_DARK_TEXT);
         }
         
-        int dock_h = 60, dock_y = sh - dock_h - 6;   
-        if (dock_y < cy + ch && dock_y + dock_h > cy) {
-            int d_item_sz = 48, d_space = 10, d_total_w = 12 * (d_item_sz + d_space);
-            int d_bg_x = (sw - d_total_w) / 2 - 12, d_bg_w = d_total_w + 24;
-            draw_rounded_rect_blurred(d_bg_x, dock_y, d_bg_w, dock_h, 18, COLOR_DOCK_BG, 1, 180);
-            int dx = (sw - d_total_w) / 2, dy = dock_y + 6;
-            draw_dock_files(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_settings(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_notepad(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_calculator(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_grapher(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_terminal(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_minesweeper(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_paint(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_browser(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_taskman(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_clock(dx, dy); dx += d_item_sz+d_space;
-            draw_dock_word(dx, dy);
+        int dock_y, dock_x, dock_bg_x, dock_bg_w;
+        dock_get_geometry(sw, sh, &dock_x, &dock_y, &dock_bg_x, &dock_bg_w);
+        if (dock_item_count > 0 && dock_y < cy + ch && dock_y + DOCK_HEIGHT > cy) {
+            draw_rounded_rect_blurred(dock_bg_x, dock_y, dock_bg_w, DOCK_HEIGHT, 18, COLOR_DOCK_BG, 1, 180);
+            int dx = dock_x;
+            int dy = dock_y + 6;
+            for (int i = 0; i < dock_item_count; i++) {
+                if (!dock_draw_metadata_icon(dx, dy, &dock_items[i])) {
+                    draw_dock_icon_slot_png(dx, dy, dock_items[i].icon_slot);
+                }
+                dx += DOCK_ITEM_SIZE + DOCK_ITEM_SPACING;
+            }
+        }
+
+        if (dock_menu_visible) {
+            int d_mw = 140, d_mh = 25;
+            if (dock_menu_y < cy + ch && dock_menu_y + d_mh > cy) {
+                draw_rounded_rect_filled(dock_menu_x, dock_menu_y, d_mw, d_mh, 8, COLOR_DARK_PANEL);
+                draw_string(dock_menu_x + 10, dock_menu_y + 8, "Remove from Dock", COLOR_TRAFFIC_RED);
+            }
         }
         
         if (desktop_menu_visible) {
@@ -1719,11 +2437,19 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
         }
 
         if (msg_box_visible) {
-            int mw = 320, mh = 100, m_x = (sw - mw)/2, m_y = (sh - mh)/2;
+            ttf_font_t *_ttf = graphics_get_current_ttf();
+            int title_w = _ttf ? font_manager_get_string_width(_ttf, msg_box_title) : (int)(k_strlen(msg_box_title) * 8);
+            int text_w  = _ttf ? font_manager_get_string_width(_ttf, msg_box_text)  : (int)(k_strlen(msg_box_text)  * 8);
+            int content_w = (title_w > text_w) ? title_w : text_w;
+            int padding = 30; // horizontal padding on each side
+            int mw = content_w + padding * 2;
+            if (mw < 160) mw = 160; // minimum width
+            int mh = 100;
+            int m_x = (sw - mw)/2, m_y = (sh - mh)/2;
             if (m_y < cy + ch && m_y + mh > cy) {
                 draw_rounded_rect_filled(m_x, m_y, mw, mh, 8, COLOR_DARK_PANEL);
                 draw_string(m_x + 15, m_y + 10, msg_box_title, COLOR_DARK_TEXT);
-                draw_string(m_x + 10, m_y + 40, msg_box_text, COLOR_DARK_TEXT);
+                draw_string(m_x + 15, m_y + 40, msg_box_text, COLOR_DARK_TEXT);
                 draw_rounded_rect_filled(m_x + mw/2 - 30, m_y + 70, 60, 20, 4, COLOR_DARK_BORDER);
                 draw_string(m_x + mw/2 - 10, m_y + 75, "OK", COLOR_WHITE);
             }
@@ -1773,12 +2499,12 @@ void wm_paint(void) {
         dirty = graphics_get_dirty_rect();
         menubar_dirty_pending = false;
     }
-    if (dirty.active) {
-        int d_h = 60, d_y = sh - d_h - 6, d_total_w = 11 * (48 + 10);
-        int d_bg_x = (sw - d_total_w) / 2 - 12, d_bg_w = d_total_w + 24;
+    if (dirty.active && dock_item_count > 0) {
+        int d_x, d_y, d_bg_x, d_bg_w;
+        dock_get_geometry(sw, sh, &d_x, &d_y, &d_bg_x, &d_bg_w);
         if (!(dirty.x >= d_bg_x + d_bg_w || dirty.x + dirty.w <= d_bg_x ||
-              dirty.y >= d_y + d_h || dirty.y + dirty.h <= d_y)) {
-            graphics_mark_dirty(d_bg_x - 10, d_y - 10, d_bg_w + 20, d_h + 20);
+              dirty.y >= d_y + DOCK_HEIGHT || dirty.y + dirty.h <= d_y)) {
+            graphics_mark_dirty(d_bg_x - 10, d_y - 10, d_bg_w + 20, DOCK_HEIGHT + 20);
             dirty = graphics_get_dirty_rect();
         }
     }
@@ -1993,6 +2719,28 @@ void wm_handle_click(int x, int y) {
             msg_box_visible = false;
             force_redraw = true;
         }
+        return;
+    }
+
+    if (dock_menu_visible) {
+        int menu_w = 140;
+        int menu_h = 25;
+        if (rect_contains(dock_menu_x, dock_menu_y, menu_w, menu_h, x, y)) {
+            if (dock_menu_target_index >= 0 && dock_menu_target_index < dock_item_count) {
+                if (dock_item_is_protected(dock_menu_target_index)) {
+                    wm_show_message("Dock", "Unable to remove the Files app from the dock.");
+                } else {
+                    dock_remove_item(dock_menu_target_index);
+                    dock_save_config();
+                }
+            }
+        }
+        dock_menu_visible = false;
+        dock_menu_target_index = -1;
+        pending_dock_click_index = -1;
+        dock_drag_active = false;
+        dock_drag_source_index = -1;
+        force_redraw = true;
         return;
     }
     
@@ -2240,7 +2988,13 @@ void wm_handle_click(int x, int y) {
 
 // Handle right click (context menu or special actions)
 void wm_handle_right_click(int x, int y) {
-    desktop_menu_visible = false; // Close if open
+    desktop_menu_visible = false;
+    dock_menu_visible = false;
+    dock_menu_target_index = -1;
+
+    int sw = get_screen_width();
+    int sh = get_screen_height();
+
     // Find topmost window at click location
     Window *topmost = NULL;
     int topmost_z = -1;
@@ -2265,6 +3019,20 @@ void wm_handle_right_click(int x, int y) {
             }
         }
     } else {
+        int dock_item = dock_item_index_at_point(x, y, sw, sh);
+        if (dock_item != -1) {
+            dock_menu_visible = true;
+            dock_menu_x = x;
+            dock_menu_y = y;
+            dock_menu_target_index = dock_item;
+            force_redraw = true;
+            return;
+        }
+        if (dock_point_in_bounds(x, y, sw, sh)) {
+            force_redraw = true;
+            return;
+        }
+
         // Desktop Right Click
         desktop_menu_visible = true;
         desktop_menu_x = x;
@@ -2338,35 +3106,24 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
     if (left && !prev_left) {
         drag_start_x = mx;
         drag_start_y = my;
-        int dock_h = 60;
-        int dock_y = sh - dock_h - 6;  
-        int dock_item_size = 48;
-        int dock_spacing = 10;
-        int total_dock_width = 12 * (dock_item_size + dock_spacing);
-        int dock_bg_x = (sw - total_dock_width) / 2 - 12;
-        int dock_bg_w = total_dock_width + 24;
-        
-        if (rect_contains(dock_bg_x, dock_y, dock_bg_w, dock_h, mx, my)) {
-            int dock_x = (sw - total_dock_width) / 2;
-            
-            // Check which dock item was clicked
-            int item_x = mx - dock_x;
-            if (item_x >= 0) {
-                int item = item_x / (dock_item_size + dock_spacing);
-                if (item == 0) start_menu_pending_app = "Files";
-                else if (item == 1) start_menu_pending_app = "Settings";
-                else if (item == 2) start_menu_pending_app = "Notepad";
-                else if (item == 3) start_menu_pending_app = "Calculator";
-                else if (item == 4) start_menu_pending_app = "Grapher";
-                else if (item == 5) start_menu_pending_app = "Terminal";
-                else if (item == 6) start_menu_pending_app = "Minesweeper";
-                else if (item == 7) start_menu_pending_app = "Paint";
-                else if (item == 8) start_menu_pending_app = "Browser";
-                else if (item == 9) start_menu_pending_app = "Task Manager";
-                else if (item == 10) start_menu_pending_app = "Clock";
-                else if (item == 11) start_menu_pending_app = "Word Processor";
-            }
-        } else {
+
+        if (dock_menu_visible) {
+            pending_dock_click_index = -1;
+            dock_drag_active = false;
+            dock_drag_source_index = -1;
+            wm_handle_click(mx, my);
+            prev_left = left;
+            prev_right = right;
+            return;
+        }
+
+        int dock_item = dock_item_index_at_point(mx, my, sw, sh);
+        if (dock_item != -1) {
+            pending_dock_click_index = dock_item;
+            dock_drag_active = false;
+            dock_drag_source_index = -1;
+            dock_menu_visible = false;
+        } else if (!dock_point_in_bounds(mx, my, sw, sh)) {
             wm_handle_click(mx, my);
         }
     } else if (right && !prev_right) {
@@ -2411,19 +3168,13 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
         if (dist_y < 0) dist_y = -dist_y;
         
         if (dist_x >= 5 || dist_y >= 5) {
-            // Check for Start Menu Drag
-            if (start_menu_pending_app) {
-                // Start dragging app from start menu
+            if (pending_dock_click_index != -1 && pending_dock_click_index < dock_item_count) {
+                dock_drag_active = true;
+                dock_drag_source_index = pending_dock_click_index;
+                pending_dock_click_index = -1;
                 is_dragging_file = true;
                 drag_icon_type = 2;
-                // Construct special path for app drag
-                char *p = drag_file_path;
-                const char *prefix = "::APP::";
-                while(*prefix) *p++ = *prefix++;
-                char *n = start_menu_pending_app;
-                while(*n) *p++ = *n++;
-                *p = 0;
-                start_menu_pending_app = NULL;
+                drag_file_path[0] = 0;
             }
             
             if (pending_desktop_icon_click != -1) {
@@ -2485,72 +3236,10 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
             force_redraw = true;
         }
         
-        // Handle Dock App Click (Mouse Up without Drag)
-        if (start_menu_pending_app) {
-            // Launch App
-            if (str_starts_with(start_menu_pending_app, "Files")) {
-                explorer_open_directory("/root");
-            } else if (str_starts_with(start_menu_pending_app, "Notepad")) {
-                Window *existing = wm_find_window_by_title_locked("Notepad");
-                if (existing) {
-                    wm_bring_to_front_locked(existing);
-                } else {
-                    process_create_elf("/bin/notepad.elf", NULL, false, -1);
-                }
-            } else if (str_starts_with(start_menu_pending_app, "Editor")) {
-                Window *existing = wm_find_window_by_title_locked("Txtedit");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/txtedit.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Word Processor")) {
-                Window *existing = wm_find_window_by_title_locked("Word Processor");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/boredword.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Terminal")) {
-                process_create_elf("/bin/terminal.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Grapher")) {
-                Window *existing = wm_find_window_by_title_locked("Grapher");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/grapher.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Calculator")) {
-                Window *existing = wm_find_window_by_title_locked("Calculator");
-                if (existing) {
-                    wm_bring_to_front_locked(existing);
-                } else {
-                    process_create_elf("/bin/calculator.elf", NULL, false, -1);
-                }
-            } else if (str_starts_with(start_menu_pending_app, "Minesweeper")) {
-                Window *existing = wm_find_window_by_title_locked("Minesweeper");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/minesweeper.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Settings")) {
-                Window *existing = wm_find_window_by_title_locked("Settings");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/settings.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Paint")) {
-                Window *existing = wm_find_window_by_title_locked("Paint");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/paint.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Clock")) {
-                Window *existing = wm_find_window_by_title_locked("Clock");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/clock.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Browser")) {
-                Window *existing = wm_find_window_by_title_locked("Web Browser");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/browser.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "About")) {
-                process_create_elf("/bin/about.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Task Manager")) {
-                Window *existing = wm_find_window_by_title_locked("Task Manager");
-                if (existing) wm_bring_to_front_locked(existing);
-                else process_create_elf("/bin/taskman.elf", NULL, false, -1);
-            } else if (str_starts_with(start_menu_pending_app, "Shutdown")) {
-                k_shutdown();
-            } else if (str_starts_with(start_menu_pending_app, "Restart")) {
-                k_reboot();
-            }
-            
-            start_menu_pending_app = NULL;
+        // Handle Dock App Click (mouse up without dragging)
+        if (pending_dock_click_index != -1 && !dock_drag_active) {
+            dock_launch_item(pending_dock_click_index);
+            pending_dock_click_index = -1;
             force_redraw = true;
         }
         
@@ -2635,6 +3324,39 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
         
         if (is_dragging_file) {
             // Drop logic
+            bool drop_handled = false;
+
+            if (dock_drag_active && dock_drag_source_index >= 0 && dock_drag_source_index < dock_item_count) {
+                int insert_idx = dock_insertion_index_from_x(mx, my, sw, sh);
+                if (insert_idx != -1) {
+                    dock_move_item(dock_drag_source_index, insert_idx);
+                    dock_save_config();
+                }
+                drop_handled = true;
+            }
+
+            if (!drop_handled && dock_point_in_bounds(mx, my, sw, sh)) {
+                int insert_idx = dock_insertion_index_from_x(mx, my, sw, sh);
+                if (insert_idx == -1) insert_idx = dock_item_count;
+
+                if (dock_can_pin_path(drag_file_path)) {
+                    int existing_idx = dock_find_item_by_target(drag_file_path);
+                    if (existing_idx != -1) {
+                        dock_move_item(existing_idx, insert_idx);
+                    } else if (dock_item_count < MAX_DOCK_ITEMS) {
+                        char label[DOCK_LABEL_MAX];
+                        dock_label_from_target(drag_file_path, label, sizeof(label));
+                        int icon_slot = dock_icon_slot_for_target(drag_file_path, label);
+                        dock_insert_item(insert_idx, label, drag_file_path, icon_slot);
+                    } else {
+                        wm_show_message("Dock", "Dock is full.");
+                    }
+                    dock_save_config();
+                } else {
+                    wm_show_message("Dock", "Only folders, .elf and .shortcut can be pinned.");
+                }
+                drop_handled = true;
+            }
             
             Window *drop_win = NULL;
             int topmost_z = -1;
@@ -2648,7 +3370,7 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
                 }
             }
 
-            if (drop_win) {
+            if (!drop_handled && drop_win) {
                 char target_path[256];
                 bool is_dir;
                 // Check if dropped on a folder inside this explorer
@@ -2662,11 +3384,9 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
                 if (str_starts_with(drag_file_path, "/root/Desktop/")) {
                     refresh_desktop_icons();
                 }
-            } else {
+            } else if (!drop_handled) {
                 // Dropped on Desktop (or elsewhere)
-                if (drag_file_path[0] == ':' && drag_file_path[1] == ':' && drag_file_path[2] == 'A') {
-                    create_desktop_shortcut(drag_file_path + 7); 
-                } else {
+                {
                     bool from_desktop = (drag_file_path[0]=='/' && drag_file_path[1]=='D' && drag_file_path[2]=='e');
                     bool dropped_on_target = false;
                     for (int i = 0; i < desktop_icon_count; i++) {
@@ -2829,6 +3549,8 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
         
         if (is_dragging_file) {
             is_dragging_file = false;
+            dock_drag_active = false;
+            dock_drag_source_index = -1;
             force_redraw = true;
         }
     }
@@ -3112,10 +3834,12 @@ void wm_process_deferred_thumbs(void) {
 
     // Pop from queue
     thumb_queue_head = (thumb_queue_head + 1) % THUMB_QUEUE_SIZE;
+
+    if (thumb_cache_lookup(path) || thumb_cache_is_failed(path)) return;
     
-    // Process (this takes time but it's okay because we are in the main loop with IRQs enabled)
-    thumb_cache_decode(path);
-    force_redraw = true;
+    if (thumb_cache_decode(path)) {
+        force_redraw = true;
+    }
 }
 
 void wm_init(void) {
@@ -3144,6 +3868,9 @@ void wm_init(void) {
     
     refresh_desktop_icons();
     log_ok("Desktop icons refreshed");
+
+    dock_load_config();
+    log_ok("Dock config loaded");
     
     // Initialize z-indices
     win_explorer.z_index = 1;
@@ -3202,9 +3929,26 @@ void wm_timer_tick(void) {
     }
 }
 
+static volatile bool index_rebuild_queued = false;
+
+static void index_rebuild_wrapper(void *arg) {
+    (void)arg;
+    file_index_build();
+    lumos_index_built = file_index_is_valid();
+    index_rebuild_queued = false;
+}
+
 void wm_notify_fs_change(void) {
     periodic_refresh_pending = true;
     
     file_index_invalidate_cache();
-    lumos_index_built = false;  
+    lumos_index_built = false;
+
+    // Kick off a background index rebuild so Lumos reflects changes immediately.
+    // The flag prevents flooding the work queue when many files change at once
+    // (e.g. during a bulk folder move that triggers one notification per file).
+    if (!index_rebuild_queued) {
+        index_rebuild_queued = true;
+        work_queue_submit(index_rebuild_wrapper, NULL);
+    }
 }

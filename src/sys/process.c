@@ -475,6 +475,11 @@ process_t* process_get_current(void) {
     return current_process[cpu];
 }
 
+uint32_t process_get_current_pid(void) {
+    process_t *p = process_get_current();
+    return p ? p->pid : 0;
+}
+
 uint64_t process_schedule(uint64_t current_rsp) {
     uint32_t my_cpu = smp_this_cpu_id();
     uint64_t rflags = spinlock_acquire_irqsave(&runqueue_lock);

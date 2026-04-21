@@ -13,10 +13,10 @@ void get_os_info(os_info_t *info) {
     for (size_t i = 0; i < sizeof(os_info_t); i++) p[i] = 0;
 
     const char *os_name = "BoredOS";
-    const char *os_version = "26.4.2.1";
-    const char *os_codename = "Voyager";
+    const char *os_version = "26.5-dev";
+    const char *os_codename = "Genesis";
     const char *kernel_name = "Boredkernel";
-    const char *kernel_version = "4.1.0-stable";
+    const char *kernel_version = "4.2.0-dev";
     const char *build_date = __DATE__;
     const char *build_time = __TIME__;
     const char *build_arch = "x86_64";

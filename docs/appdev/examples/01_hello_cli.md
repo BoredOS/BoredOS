@@ -7,16 +7,18 @@
 
 This example demonstrates the bare minimum structure of a BoredOS application that outputs text to the standard output (usually the Terminal executing the binary).
 
-## 📝 Concepts Introduced
+## Concepts Introduced
 * Including `stdlib.h` for basic IO.
 * The `main()` entry point.
 * Using `printf()` for formatted output.
+* Declaring app metadata via source annotations.
 
 ---
 
-## 💻 The Code (`src/userland/cli/hello_world.c`)
+## The Code (`src/userland/cli/hello_world.c`)
 
 ```c
+// BOREDOS_APP_DESC: Hello World — a minimal CLI demo.
 #include <stdlib.h>
 
 int main(int argc, char **argv) {
@@ -34,14 +36,15 @@ int main(int argc, char **argv) {
 }
 ```
 
-## 🛠️ How it Works
+## How it Works
 
 1.  **`#include <stdlib.h>`**: We include the SDK's standard library header which gives us access to `printf`.
 2.  **`int main(...)`**: Every process begins execution here (managed transparently by `crt0.asm`).
 3.  **`printf(...)`**: The SDK routes this call internally directly to the `SYS_WRITE` system call, making it available on the terminal.
-4.  **`return 0`**: A successful exit code. 
+4.  **`return 0`**: A successful exit code.
+5.  **`BOREDOS_APP_DESC` / `BOREDOS_APP_ICONS`**: These comment annotations are read by the build system (`gen_userland_note.sh`) and embedded as a `boredos_app_metadata_t` NOTE entry inside the compiled `.elf`. The File Explorer and Desktop use this to display the correct icon. See [`elf_metadata.md`](../elf_metadata.md) for full details.
 
-## 🚀 Running It
+## Running It
 
 If you build the project, you can open the Terminal and type:
 ```sh

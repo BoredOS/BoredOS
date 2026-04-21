@@ -34,7 +34,7 @@ BoredOS uses **Limine** as its primary bootloader.
 5.  **Driver Initialization**: PCI buses are scanned, finding the network card or disk controllers. The filesystem is mounted.
 6.  **Window Manager**: The UI is drawn on top of the Limine-provided framebuffer.
 
-## 🧵 Multi-Core & Scheduling
+## Multi-Core & Scheduling
 
 BoredOS utilizes Symmetric Multi-Processing (SMP) to distribute workloads across all available CPU cores.
 

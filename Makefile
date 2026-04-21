@@ -17,6 +17,16 @@ ISO_DIR = iso_root
 KERNEL_ELF = $(BUILD_DIR)/boredos.elf
 ISO_IMAGE = boredos.iso
 
+DOCK_COLLOID_ICONS = $(shell sed -n 's/^[[:space:]]*{"\([^"]*\.png\)",[[:space:]]*DOCK_ICON_UNTRIED.*/\1/p' $(SRC_DIR)/wm/wm.c)
+USERLAND_COLLOID_ICONS = $(shell { \
+	find $(SRC_DIR)/userland -type f -name '*.c' ! -path '*/third_party/*' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
+	find $(SRC_DIR)/userland -type f -name '*.h' ! -path '*/third_party/*' ! -name 'stb_image.h' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
+} | sed 's/"//g' | sed 's@.*/@@' | sort -u)
+USERLAND_METADATA_ICONS = $(shell { \
+	find $(SRC_DIR)/userland -type f -name '*.c' -exec sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' {} + 2>/dev/null; \
+} | tr ';' '\n' | sed 's@.*/@@' | sed '/^[[:space:]]*$$/d' | sort -u)
+COLLOID_ICONS = $(sort $(DOCK_COLLOID_ICONS) $(USERLAND_COLLOID_ICONS) $(USERLAND_METADATA_ICONS) xterm.png)
+
 C_SOURCES = $(wildcard $(SRC_DIR)/core/*.c) \
             $(wildcard $(SRC_DIR)/sys/*.c) \
             $(wildcard $(SRC_DIR)/mem/*.c) \
@@ -143,6 +153,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/bin
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/Wallpapers
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/gif
+	mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/colloid
 	mkdir -p $(BUILD_DIR)/initrd/Library/Fonts/Emoji
 	mkdir -p $(BUILD_DIR)/initrd/Library/DOOM
 	mkdir -p $(BUILD_DIR)/initrd/Library/bsh
@@ -156,6 +167,10 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	done
 	@for f in $(SRC_DIR)/images/gif/*.gif; do \
 		if [ -f "$$f" ]; then cp "$$f" $(BUILD_DIR)/initrd/Library/images/gif/; fi \
+	done
+	@for f in $(COLLOID_ICONS); do \
+		src="$(SRC_DIR)/images/icons/colloid/$$f"; \
+		if [ -f "$$src" ]; then cp "$$src" $(BUILD_DIR)/initrd/Library/images/icons/colloid/; fi \
 	done
 	@for f in $(SRC_DIR)/fonts/*.ttf; do \
 		if [ -f "$$f" ]; then cp "$$f" $(BUILD_DIR)/initrd/Library/Fonts/; fi \

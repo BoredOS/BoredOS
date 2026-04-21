@@ -44,6 +44,25 @@ typedef struct {
     Elf64_Xword   p_align;            /* Segment alignment */
 } Elf64_Phdr;
 
+typedef struct {
+    Elf64_Word    sh_name;            /* Section name (string tbl index) */
+    Elf64_Word    sh_type;            /* Section type */
+    Elf64_Xword   sh_flags;           /* Section flags */
+    Elf64_Addr    sh_addr;            /* Section virtual addr at execution */
+    Elf64_Off     sh_offset;          /* Section file offset */
+    Elf64_Xword   sh_size;            /* Section size in bytes */
+    Elf64_Word    sh_link;            /* Link to another section */
+    Elf64_Word    sh_info;            /* Additional section information */
+    Elf64_Xword   sh_addralign;       /* Section alignment */
+    Elf64_Xword   sh_entsize;         /* Entry size if section holds table */
+} Elf64_Shdr;
+
+typedef struct {
+    Elf64_Word n_namesz;              /* Name size in bytes */
+    Elf64_Word n_descsz;              /* Descriptor size in bytes */
+    Elf64_Word n_type;                /* Note type */
+} Elf64_Nhdr;
+
 /* e_ident constants */
 #define ELFMAG0 0x7f
 #define ELFMAG1 'E'
@@ -63,10 +82,36 @@ typedef struct {
 /* p_type constants */
 #define PT_LOAD 1
 
+/* sh_type constants */
+#define SHT_NOTE 7
+
 /* p_flags constants */
 #define PF_X 1
 #define PF_W 2
 #define PF_R 4
+
+/* BoredOS app metadata note constants */
+#define BOREDOS_APP_NOTE_OWNER "BOREDOS"
+#define BOREDOS_APP_NOTE_NAME BOREDOS_APP_NOTE_OWNER
+#define BOREDOS_APP_NOTE_SECTION ".note.boredos.app"
+#define BOREDOS_APP_NOTE_TYPE 0x41505031U
+#define BOREDOS_APP_METADATA_MAGIC 0x414d4431U
+#define BOREDOS_APP_METADATA_VERSION 1U
+
+#define BOREDOS_APP_METADATA_MAX_APP_NAME 64
+#define BOREDOS_APP_METADATA_MAX_DESCRIPTION 192
+#define BOREDOS_APP_METADATA_MAX_IMAGES 4
+#define BOREDOS_APP_METADATA_MAX_IMAGE_PATH 160
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t image_count;
+    uint16_t reserved;
+    char app_name[BOREDOS_APP_METADATA_MAX_APP_NAME];
+    char description[BOREDOS_APP_METADATA_MAX_DESCRIPTION];
+    char images[BOREDOS_APP_METADATA_MAX_IMAGES][BOREDOS_APP_METADATA_MAX_IMAGE_PATH];
+} boredos_app_metadata_t;
 
 #include <stdbool.h>
 #include <stddef.h>

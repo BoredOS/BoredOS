@@ -7,17 +7,20 @@
 
 This example builds upon the `02_basic_window` guide. It demonstrates how to constantly update the screen to simulate a bouncing square moving freely inside the window bounds.
 
-## 📝 Concepts Introduced
+## Concepts Introduced
 * Maintaining application state across frames (Velocity/Position).
 * Drawing primitives (`ui_fill_rect`, `ui_draw_string`).
 * The importance of clearing the screen on a new frame.
 * Explicitly forcing standard visual updates via `ui_mark_dirty()`.
+* Declaring app metadata via source annotations.
 
 ---
 
-## 💻 The Code (`src/userland/gui/bounce.c`)
+## The Code (`src/userland/gui/bounce.c`)
 
 ```c
+// BOREDOS_APP_DESC: Bouncing ball animation demo.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/applications-games.png
 #include <stdlib.h>
 #include <libui.h>
 #include <syscall.h>
@@ -81,12 +84,13 @@ int main(void) {
 }
 ```
 
-## 🛠️ How it Works
+## How it Works
 
 1.  **State Management**: We store `pos_x`, `pos_y`, `vel_x`, and `vel_y`. These variables represent the "physics" of our system. Notice that they update *outside* the event-checking logic so that the animation runs even if the user isn't clicking the mouse.
 2.  **Screen Clearing**: We *must* fill the screen with black (`ui_draw_rect(wid, 0, 0, W_WIDTH, W_HEIGHT, ...)`). If we don't clear the screen, the red square will leave a permanent trailing smear everywhere it goes!
-3.  **The Double Buffer**: `ui_draw_rect` and `ui_draw_string` do not immediately appear on your monitor. They just color a hidden buffer within the kernel. 
+3.  **The Double Buffer**: `ui_draw_rect` and `ui_draw_string` do not immediately appear on your monitor. They just color a hidden buffer within the kernel.
 4.  **`ui_mark_dirty`**: This is the crucial command that tells the kernel Window Manager, "I'm done drawing my frame. Can you quickly copy my hidden buffer over to the real screen now?"
+5.  **`BOREDOS_APP_DESC` / `BOREDOS_APP_ICONS`**: Embedded into the compiled `.elf` as a BoredOS NOTE section. The Desktop and File Explorer read this to show the game's icon instead of the generic binary icon. See [`elf_metadata.md`](../elf_metadata.md) for full details.
 
 > [!WARNING]
 > Because `sys_yield()`'s pause duration depends heavily on CPU load and how many other processes are running (or QEMU emulation speed), tying physics/movement strictly to loops can make the game run faster on faster computers. Advanced developers will want to calculate delta time (time elapsed since the last frame) for smooth motion.

@@ -15,7 +15,6 @@
 static spinlock_t ramfs_lock = SPINLOCK_INIT; // Protects the RAM-based filesystem (/)
 
 
-#define MAX_FILES 256
 #define MAX_CLUSTERS 8192
 #define MAX_OPEN_HANDLES 32
 
@@ -23,18 +22,18 @@ static spinlock_t ramfs_lock = SPINLOCK_INIT; // Protects the RAM-based filesyst
 static uint32_t fat_table[MAX_CLUSTERS];
 static uint8_t cluster_data[MAX_CLUSTERS][FAT32_CLUSTER_SIZE];
 
-// File/Directory tracking
-typedef struct {
+typedef struct FileEntry {
     char full_path[FAT32_MAX_PATH];
     char filename[FAT32_MAX_FILENAME];
     uint32_t start_cluster;
     uint32_t size;
     uint32_t attributes;
-    bool used;
+    bool used;            
     char parent_path[FAT32_MAX_PATH];
+    struct FileEntry *next; 
 } FileEntry;
 
-static FileEntry files[MAX_FILES];
+static FileEntry *file_list_head = NULL; 
 static uint32_t next_cluster = 3;  // Start after reserved clusters 0, 1, 2
 static FAT32_FileHandle open_handles[MAX_OPEN_HANDLES];
 static char current_dir[FAT32_MAX_PATH] = "/";
@@ -234,9 +233,9 @@ static FileEntry* ramfs_find_file(const char *path) {
     if (!normalized) return NULL;
     fat32_normalize_path(path, normalized);
     FileEntry *ret = NULL;
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && fs_strcmp(files[i].full_path, normalized) == 0) {
-            ret = &files[i];
+    for (FileEntry *n = file_list_head; n; n = n->next) {
+        if (fs_strcmp(n->full_path, normalized) == 0) {
+            ret = n;
             break;
         }
     }
@@ -244,11 +243,29 @@ static FileEntry* ramfs_find_file(const char *path) {
     return ret;
 }
 
-static FileEntry* ramfs_find_free_entry(void) {
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (!files[i].used) return &files[i];
+static FileEntry* ramfs_alloc_entry(void) {
+    FileEntry *e = (FileEntry*)kmalloc(sizeof(FileEntry));
+    if (!e) return NULL;
+    for (int i = 0; i < (int)sizeof(FileEntry); i++) ((char*)e)[i] = 0;
+    e->used = true;
+    e->next = file_list_head;
+    file_list_head = e;
+    return e;
+}
+
+static void ramfs_free_entry(FileEntry *entry) {
+    if (!entry) return;
+    if (file_list_head == entry) {
+        file_list_head = entry->next;
+    } else {
+        for (FileEntry *n = file_list_head; n && n->next; n = n->next) {
+            if (n->next == entry) {
+                n->next = entry->next;
+                break;
+            }
+        }
     }
-    return NULL;
+    kfree(entry);
 }
 
 static FAT32_FileHandle* ramfs_find_free_handle(void) {
@@ -267,10 +284,8 @@ static uint32_t ramfs_allocate_cluster(void) {
 
 static int ramfs_count_files_in_dir(const char *normalized_path) {
     int count = 0;
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && fs_strcmp(files[i].parent_path, normalized_path) == 0) {
-            count++;
-        }
+    for (FileEntry *n = file_list_head; n; n = n->next) {
+        if (fs_strcmp(n->parent_path, normalized_path) == 0) count++;
     }
     return count;
 }
@@ -306,14 +321,13 @@ static FAT32_FileHandle* ramfs_open(const char *normalized_path, const char *mod
     } else if (mode[0] == 'w' || (mode[0] == 'a')) {
         if (!entry) {
             if (!check_desktop_limit(normalized_path)) return NULL;
-            entry = ramfs_find_free_entry();
+            entry = ramfs_alloc_entry();
             if (!entry) return NULL;
-            entry->used = true;
             fs_strcpy(entry->full_path, normalized_path);
             extract_filename(normalized_path, entry->filename);
             extract_parent_path(normalized_path, entry->parent_path);
             entry->start_cluster = ramfs_allocate_cluster();
-            if (!entry->start_cluster) return NULL;
+            if (!entry->start_cluster) { ramfs_free_entry(entry); return NULL; }
             entry->size = 0;
             entry->attributes = 0;
         }
@@ -411,9 +425,9 @@ static int ramfs_write(FAT32_FileHandle *handle, const void *buffer, int size) {
         }
     }
     
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (files[i].used && files[i].start_cluster == handle->start_cluster) {
-            files[i].size = handle->size;
+    for (FileEntry *n = file_list_head; n; n = n->next) {
+        if (n->start_cluster == handle->start_cluster) {
+            n->size = handle->size;
             break;
         }
     }
@@ -1467,27 +1481,26 @@ static int vfs_ramfs_readdir(void *fs_private, const char *rel_path, vfs_dirent_
     vfs_ramfs_get_abs_path(rel_path, abs);
     
     uint64_t rflags = spinlock_acquire_irqsave(&ramfs_lock);
-    for (int i = 0; i < MAX_FILES && count < max; i++) {
+    for (FileEntry *n = file_list_head; n && count < max; n = n->next) {
         bool match = false;
-        if (files[i].used && files[i].filename[0] != '\0') {
-            if (fs_strcmp(files[i].parent_path, abs) == 0) match = true;
+        if (n->filename[0] != '\0') {
+            if (fs_strcmp(n->parent_path, abs) == 0) match = true;
             
-            // Root unification: Treat "", "/", and "A:/" as root parent
             if (!match && abs[0] == '/' && abs[1] == '\0') {
-                if (files[i].parent_path[0] == '\0' || 
-                    fs_strcmp(files[i].parent_path, "/") == 0 ||
-                    fs_strcmp(files[i].parent_path, "A:/") == 0) {
+                if (n->parent_path[0] == '\0' || 
+                    fs_strcmp(n->parent_path, "/") == 0 ||
+                    fs_strcmp(n->parent_path, "A:/") == 0) {
                     match = true;
                 }
             }
         }
         
         if (match) {
-            fs_strcpy(entries[count].name, files[i].filename);
-            entries[count].size = files[i].size;
-            entries[count].is_directory = (files[i].attributes & ATTR_DIRECTORY) ? 1 : 0;
-            entries[count].start_cluster = files[i].start_cluster;
-            entries[count].write_date = 0; // Not tracked in RAMFS for now
+            fs_strcpy(entries[count].name, n->filename);
+            entries[count].size = n->size;
+            entries[count].is_directory = (n->attributes & ATTR_DIRECTORY) ? 1 : 0;
+            entries[count].start_cluster = n->start_cluster;
+            entries[count].write_date = 0;
             entries[count].write_time = 0;
             count++;
         }
@@ -1840,16 +1853,13 @@ void* fat32_mount_volume(void *disk_ptr) {
 // === Public API (Dispatch) ===
 
 void fat32_init(void) {
-    // Explicitly zero out all structures for RAMFS safety
-    for (int i = 0; i < MAX_FILES; i++) {
-        files[i].used = false;
-        files[i].full_path[0] = 0;
-        files[i].filename[0] = 0;
-        files[i].parent_path[0] = 0;
-        files[i].size = 0;
-        files[i].attributes = 0;
-        files[i].start_cluster = 0;
+    FileEntry *node = file_list_head;
+    while (node) {
+        FileEntry *next = node->next;
+        kfree(node);
+        node = next;
     }
+    file_list_head = NULL;
 
     // Initialize FAT table for RAMFS
     for (int i = 0; i < MAX_CLUSTERS; i++) {
@@ -1917,11 +1927,6 @@ FAT32_FileHandle* fat32_open_nolock(const char *path, const char *mode) {
             }
         }
     } else if (path[0] == '/') {
-        // Absolute VFS path - bypass legacy drive letters
-        // This is safe to call WITHOUT the fat32_lock because vfs_open was called formerly
-        // and it will resolve to one of our mounts which will then acquire the lock.
-        // HOWEVER, if we are already inside a fat32_lock call, we SHOULD NOT call vfs_open.
-        // For now, absolute paths starting with / are handled by VFS entry points.
         vfs_file_t *vf = vfs_open(path, mode);
         if (vf && vf->fs_handle) {
              return (FAT32_FileHandle*)vf->fs_handle;
@@ -2223,7 +2228,7 @@ bool fat32_mkdir(const char *path) {
         return false;
     }
     
-    FileEntry *entry = ramfs_find_free_entry();
+    FileEntry *entry = ramfs_alloc_entry();
     if (!entry) {
         kfree(normalized);
         spinlock_release_irqrestore(&ramfs_lock, rflags);
@@ -2263,7 +2268,7 @@ bool fat32_rmdir(const char *path) {
         return false;
     }
     
-    entry->used = false;
+    ramfs_free_entry(entry);
     kfree(normalized);
     wm_notify_fs_change();
     spinlock_release_irqrestore(&ramfs_lock, rflags);
@@ -2287,7 +2292,7 @@ bool fat32_delete(const char *path) {
             
             FileEntry *entry = ramfs_find_file(normalized);
             if (entry && !(entry->attributes & ATTR_DIRECTORY)) {
-                entry->used = false;
+                ramfs_free_entry(entry);
                 result = true;
             }
             kfree(normalized);
@@ -2426,27 +2431,26 @@ bool fat32_rename(const char *old_path, const char *new_path) {
     char *suffix = (char*)kmalloc(FAT32_MAX_PATH);
     if (!suffix) { spinlock_release_irqrestore(&ramfs_lock, rflags); return false; }
 
-    for (int i = 0; i < MAX_FILES; i++) {
-        if (!files[i].used) continue;
-        if (fs_strcmp(files[i].full_path, old_path) == 0) {
-            fs_strcpy(files[i].full_path, new_path);
-            extract_filename(new_path, files[i].filename);
-            extract_parent_path(new_path, files[i].parent_path);
-        } else if (fs_strlen(files[i].full_path) > old_len && 
-                   fs_starts_with(files[i].full_path, old_path) &&
-                   files[i].full_path[old_len] == '/') {
-            fs_strcpy(suffix, files[i].full_path + old_len);
-            fs_strcpy(files[i].full_path, new_path);
-            fs_strcat(files[i].full_path, suffix);
+    for (FileEntry *n = file_list_head; n; n = n->next) {
+        if (fs_strcmp(n->full_path, old_path) == 0) {
+            fs_strcpy(n->full_path, new_path);
+            extract_filename(new_path, n->filename);
+            extract_parent_path(new_path, n->parent_path);
+        } else if (fs_strlen(n->full_path) > old_len &&
+                   fs_starts_with(n->full_path, old_path) &&
+                   n->full_path[old_len] == '/') {
+            fs_strcpy(suffix, n->full_path + old_len);
+            fs_strcpy(n->full_path, new_path);
+            fs_strcat(n->full_path, suffix);
         }
-        if (fs_strcmp(files[i].parent_path, old_path) == 0) {
-            fs_strcpy(files[i].parent_path, new_path);
-        } else if (fs_strlen(files[i].parent_path) > old_len &&
-                   fs_starts_with(files[i].parent_path, old_path) &&
-                   files[i].parent_path[old_len] == '/') {
-            fs_strcpy(suffix, files[i].parent_path + old_len);
-            fs_strcpy(files[i].parent_path, new_path);
-            fs_strcat(files[i].parent_path, suffix);
+        if (fs_strcmp(n->parent_path, old_path) == 0) {
+            fs_strcpy(n->parent_path, new_path);
+        } else if (fs_strlen(n->parent_path) > old_len &&
+                   fs_starts_with(n->parent_path, old_path) &&
+                   n->parent_path[old_len] == '/') {
+            fs_strcpy(suffix, n->parent_path + old_len);
+            fs_strcpy(n->parent_path, new_path);
+            fs_strcat(n->parent_path, suffix);
         }
     }
     kfree(suffix);
@@ -2524,15 +2528,16 @@ int fat32_list_directory(const char *path, FAT32_FileInfo *entries, int max_entr
         if (!normalized) { spinlock_release_irqrestore(&ramfs_lock, rflags); return 0; }
         fat32_normalize_path(p, normalized);
         
-        for (int i = 0; i < MAX_FILES && count < max_entries; i++) {
-            if (files[i].used && fs_strcmp(files[i].parent_path, normalized) == 0) {
-                fs_strcpy(entries[count].name, files[i].filename);
-                entries[count].size = files[i].size;
-                entries[count].is_directory = (files[i].attributes & ATTR_DIRECTORY) != 0;
-                entries[count].start_cluster = files[i].start_cluster;
+        for (FileEntry *_n = file_list_head; _n && count < max_entries; _n = _n->next) {
+                if (fs_strcmp(_n->parent_path, normalized) != 0) continue;
+                fs_strcpy(entries[count].name, _n->filename);
+                entries[count].size = _n->size;
+                entries[count].is_directory = (_n->attributes & ATTR_DIRECTORY) != 0;
+                entries[count].start_cluster = _n->start_cluster;
+                entries[count].write_date = 0;
+                entries[count].write_time = 0;
                 count++;
             }
-        }
         kfree(normalized);
     }
     

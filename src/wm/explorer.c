@@ -10,6 +10,7 @@
 #include "wm.h"
 #include "memory_manager.h"
 #include "process.h"
+#include "app_metadata.h"
 #define EXPLORER_ITEM_HEIGHT 80
 #define EXPLORER_ITEM_WIDTH 120
 #define EXPLORER_COLS 4
@@ -468,7 +469,7 @@ bool explorer_clipboard_has_content(void) {
 
 static bool explorer_copy_recursive(const char *src_path, const char *dest_path) {
     if (vfs_is_directory(src_path)) {
-        if (!vfs_mkdir(dest_path)) return false;
+        if (!vfs_mkdir(dest_path) && !vfs_is_directory(dest_path)) return false;
         int capacity = 64;
         vfs_dirent_t *files = (vfs_dirent_t*)kmalloc(capacity * sizeof(vfs_dirent_t));
         if (!files) return false;
@@ -881,23 +882,62 @@ static void explorer_open_item(Window *win, int index) {
     explorer_open_target(full_path);
 }
 
-static void explorer_draw_file_icon(int x, int y, bool is_dir, uint32_t color, const char *filename, const char *current_path) {
+enum {
+    EXPLORER_DOCK_SLOT_FILES = 0,
+    EXPLORER_DOCK_SLOT_SETTINGS = 1,
+    EXPLORER_DOCK_SLOT_NOTEPAD = 2,
+    EXPLORER_DOCK_SLOT_CALCULATOR = 3,
+    EXPLORER_DOCK_SLOT_GRAPHER = 4,
+    EXPLORER_DOCK_SLOT_TERMINAL = 5,
+    EXPLORER_DOCK_SLOT_MINESWEEPER = 6,
+    EXPLORER_DOCK_SLOT_PAINT = 7,
+    EXPLORER_DOCK_SLOT_BROWSER = 8,
+    EXPLORER_DOCK_SLOT_TASKMAN = 9,
+    EXPLORER_DOCK_SLOT_CLOCK = 10,
+    EXPLORER_DOCK_SLOT_WORD = 11,
+};
+
+static void explorer_draw_colloid_slot_icon(int x, int y, int slot_index) {
+    (void)wm_draw_dock_icon_scaled(x + 24, y + 12, 32, slot_index);
+}
+
+static void explorer_draw_file_icon(int x, int y, bool is_dir, const char *filename, const char *current_path) {
     if (is_dir) {
-        if (explorer_strcmp(filename, "RecycleBin") == 0) draw_recycle_bin_icon(x + 5, y + 5, "");
-        else draw_folder_icon(x + 5, y + 5, "");
+        explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_FILES);
     } else if (explorer_str_ends_with(filename, ".shortcut")) {
-        if (explorer_strcmp(filename, "Notepad.shortcut") == 0) draw_notepad_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Calculator.shortcut") == 0) draw_calculator_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Terminal.shortcut") == 0) draw_terminal_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Minesweeper.shortcut") == 0) draw_minesweeper_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Control Panel.shortcut") == 0) draw_control_panel_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "About.shortcut") == 0) draw_about_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Explorer.shortcut") == 0) draw_folder_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "Recycle Bin.shortcut") == 0) draw_recycle_bin_icon(x + 5, y + 5, "");
-        else if (explorer_strcmp(filename, "RecycleBin") == 0) draw_recycle_bin_icon(x + 5, y + 5, "");
-        else draw_icon(x + 5, y + 5, "");
+        if (explorer_strcmp(filename, "Notepad.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_NOTEPAD);
+        } else if (explorer_strcmp(filename, "Calculator.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_CALCULATOR);
+        } else if (explorer_strcmp(filename, "Terminal.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_TERMINAL);
+        } else if (explorer_strcmp(filename, "Minesweeper.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_MINESWEEPER);
+        } else if (explorer_strcmp(filename, "Control Panel.shortcut") == 0 || explorer_strcmp(filename, "Settings.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_SETTINGS);
+        } else if (explorer_strcmp(filename, "About.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_SETTINGS);
+        } else if (explorer_strcmp(filename, "Explorer.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_FILES);
+        } else if (explorer_strcmp(filename, "Recycle Bin.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_FILES);
+        } else if (explorer_strcmp(filename, "Paint.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_PAINT);
+        } else if (explorer_strcmp(filename, "Grapher.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_GRAPHER);
+        } else if (explorer_strcmp(filename, "Clock.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_CLOCK);
+        } else if (explorer_strcmp(filename, "Browser.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_BROWSER);
+        } else if (explorer_strcmp(filename, "Task Manager.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_TASKMAN);
+        } else if (explorer_strcmp(filename, "Word Processor.shortcut") == 0) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_WORD);
+        } else {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_NOTEPAD);
+        }
     } else if (explorer_str_ends_with(filename, ".pnt")) {
-        draw_paint_icon(x + 5, y + 5, "");
+        explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_PAINT);
     } else if (explorer_is_image_file(filename)) {
         char full_path[FAT32_MAX_PATH];
         explorer_strcpy(full_path, current_path);
@@ -905,11 +945,21 @@ static void explorer_draw_file_icon(int x, int y, bool is_dir, uint32_t color, c
         explorer_strcat(full_path, filename);
         draw_image_icon(x + 5, y + 5, full_path);
     } else if (explorer_str_ends_with(filename, ".pdf")) {
-        draw_pdf_icon(x + 5, y + 5, "");
+        explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_WORD);
     } else if (explorer_str_ends_with(filename, ".elf")) {
-        draw_elf_icon(x + 5, y + 5, "");
+        char app_path[FAT32_MAX_PATH];
+        char icon_path[BOREDOS_APP_METADATA_MAX_IMAGE_PATH];
+
+        explorer_strcpy(app_path, current_path);
+        if (app_path[explorer_strlen(app_path) - 1] != '/') explorer_strcat(app_path, "/");
+        explorer_strcat(app_path, filename);
+
+        if (!(app_metadata_get_primary_image(app_path, icon_path, sizeof(icon_path)) &&
+              draw_icon_path(x + 5, y + 5, icon_path))) {
+            explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_TERMINAL);
+        }
     } else {
-        draw_document_icon(x + 5, y + 5, "");
+        explorer_draw_colloid_slot_icon(x + 5, y + 5, EXPLORER_DOCK_SLOT_NOTEPAD);
     }
 }
 
@@ -964,7 +1014,7 @@ static void explorer_paint(Window *win) {
         uint32_t text_color = (i == state->selected_item) ? COLOR_WHITE : COLOR_DARK_TEXT;
         draw_rounded_rect_filled(item_x, item_y, EXPLORER_ITEM_WIDTH, EXPLORER_ITEM_HEIGHT, 6, bg_color);
         
-        explorer_draw_file_icon(item_x + 5, item_y + 5, state->items[i].is_directory, state->items[i].color, state->items[i].name, state->current_path);
+        explorer_draw_file_icon(item_x + 5, item_y + 5, state->items[i].is_directory, state->items[i].name, state->current_path);
         
         const char *display_name = state->items[i].name;
         if (explorer_strcmp(state->items[i].name, "RecycleBin") == 0) {
@@ -1711,9 +1761,10 @@ static void explorer_perform_move_internal(Window *win, const char *source_path,
         explorer_strcat(origin_path, ".origin");
         vfs_delete(origin_path);
     }
-
-    if (explorer_copy_recursive(source_path, dest_path)) {
-        explorer_delete_permanently(source_path);
+    if (!vfs_rename(source_path, dest_path)) {
+        if (explorer_copy_recursive(source_path, dest_path)) {
+            explorer_delete_permanently(source_path);
+        }
     }
         
     explorer_refresh_all();

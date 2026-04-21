@@ -23,6 +23,7 @@
 #include "font_manager.h"
 #include "graphics.h"
 #include "input/keymap.h"
+#include "app_metadata.h"
 
 extern bool ps2_ctrl_pressed;
 
@@ -2101,6 +2102,21 @@ static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
 }
 
 #define SYS_CMD_TABLE_SIZE 76
+static uint64_t sys_cmd_get_elf_metadata(const syscall_args_t *args) {
+    const char *path = (const char *)args->arg2;
+    boredos_app_metadata_t *out = (boredos_app_metadata_t *)args->arg3;
+    if (!path || !out) return 0;
+    return app_metadata_read(path, out) ? 1 : 0;
+}
+static uint64_t sys_cmd_get_elf_primary_image(const syscall_args_t *args) {
+    const char *path     = (const char *)args->arg2;
+    char       *out_path = (char *)args->arg3;
+    size_t      out_size = (size_t)args->arg4;
+    if (!path || !out_path || !out_size) return 0;
+    return app_metadata_get_primary_image(path, out_path, out_size) ? 1 : 0;
+}
+
+#define SYS_CMD_TABLE_SIZE 78
 static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SET_BG_COLOR]        = sys_cmd_set_bg_color,
     [SYSTEM_CMD_SET_BG_PATTERN]      = sys_cmd_set_bg_pattern,
@@ -2165,6 +2181,8 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SIGPENDING]          = sys_cmd_sigpending,
     [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
     [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
+    [SYSTEM_CMD_GET_ELF_METADATA]    = sys_cmd_get_elf_metadata,
+    [SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE] = sys_cmd_get_elf_primary_image,
 };
 
 static uint64_t handle_sys_write(const syscall_args_t *args) {

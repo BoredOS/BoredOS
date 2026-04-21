@@ -1,6 +1,8 @@
 // Copyright (c) 2023-2026 Chris (boreddevnl)
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
+// BOREDOS_APP_DESC: System configuration and preferences.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/preferences-system.png;/Library/images/icons/colloid/preferences-system-services.png
 #include "libc/syscall.h"
 #include "libc/libui.h"
 #include "libc/stdlib.h"
@@ -75,6 +77,37 @@ static widget_button_t btn_dt_rows_minus, btn_dt_rows_plus;
 
 static widget_button_t btn_fonts[MAX_FONTS];
 static widget_textbox_t tb_custom_w, tb_custom_h;
+
+#define SETTINGS_ICON_MAIN_SIZE 32
+#define SETTINGS_ICON_LIST_SIZE 18
+
+#define SETTINGS_ICON_UNTRIED 0
+#define SETTINGS_ICON_LOADED  1
+#define SETTINGS_ICON_FAILED  2
+
+enum settings_icon_id {
+    SETTINGS_ICON_WALLPAPER = 0,
+    SETTINGS_ICON_NETWORK,
+    SETTINGS_ICON_DESKTOP,
+    SETTINGS_ICON_MOUSE,
+    SETTINGS_ICON_FONTS,
+    SETTINGS_ICON_DISPLAY,
+    SETTINGS_ICON_COUNT
+};
+
+static const char *settings_icon_names[SETTINGS_ICON_COUNT] = {
+    "preferences-desktop-wallpaper.png",
+    "preferences-system-network-ethernet.png",
+    "desktop.png",
+    "input-mouse.png",
+    "fonts.png",
+    "preferences-desktop-display.png",
+};
+
+static int settings_icon_main_state[SETTINGS_ICON_COUNT];
+static int settings_icon_list_state[SETTINGS_ICON_COUNT];
+static uint32_t settings_icon_main_pixels[SETTINGS_ICON_COUNT][SETTINGS_ICON_MAIN_SIZE * SETTINGS_ICON_MAIN_SIZE];
+static uint32_t settings_icon_list_pixels[SETTINGS_ICON_COUNT][SETTINGS_ICON_LIST_SIZE * SETTINGS_ICON_LIST_SIZE];
 
 #define COLOR_PURPLE    0xFF800080
 #define COLOR_GREY      0xFF454545
@@ -234,9 +267,9 @@ static void k_itoa_hex(uint64_t num, char* str) {
 
 static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h, uint32_t *dst, int dst_w, int dst_h) {
     for (int y = 0; y < dst_h; y++) {
-        int src_y = y * src_h / dst_h;
+        int src_y = (dst_h <= 1 || src_h <= 1) ? 0 : (y * (src_h - 1)) / (dst_h - 1);
         for (int x = 0; x < dst_w; x++) {
-            int src_x = x * src_w / dst_w;
+            int src_x = (dst_w <= 1 || src_w <= 1) ? 0 : (x * (src_w - 1)) / (dst_w - 1);
             int idx = (src_y * src_w + src_x) * 4;
             uint8_t r = rgba[idx];
             uint8_t g = rgba[idx + 1];
@@ -245,6 +278,104 @@ static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h, 
             dst[y * dst_w + x] = ((uint32_t)a << 24) | ((uint32_t)r << 16) | ((uint32_t)g << 8) | b;
         }
     }
+}
+
+static void settings_try_load_icon_variant(int icon_id, int dst_w, int dst_h, uint32_t *dst_pixels, int *state) {
+    if (!state || !dst_pixels || icon_id < 0 || icon_id >= SETTINGS_ICON_COUNT) return;
+    if (*state != SETTINGS_ICON_UNTRIED) return;
+
+    *state = SETTINGS_ICON_FAILED;
+
+    char path[160];
+    strcpy(path, "/Library/images/icons/colloid/");
+    strcat(path, settings_icon_names[icon_id]);
+
+    int fd = sys_open(path, "r");
+    if (fd < 0) return;
+
+    int size = sys_seek(fd, 0, 2);
+    sys_seek(fd, 0, 0);
+    if (size <= 0 || size > 4 * 1024 * 1024) {
+        sys_close(fd);
+        return;
+    }
+
+    unsigned char *buf = (unsigned char *)malloc((size_t)size);
+    if (!buf) {
+        sys_close(fd);
+        return;
+    }
+
+    int bytes_read = sys_read(fd, buf, size);
+    sys_close(fd);
+    if (bytes_read <= 0) {
+        free(buf);
+        return;
+    }
+
+    int img_w, img_h, channels;
+    unsigned char *img = stbi_load_from_memory(buf, bytes_read, &img_w, &img_h, &channels, 4);
+    free(buf);
+    if (!img || img_w <= 0 || img_h <= 0) {
+        if (img) stbi_image_free(img);
+        return;
+    }
+
+    scale_rgba_to_argb(img, img_w, img_h, dst_pixels, dst_w, dst_h);
+    stbi_image_free(img);
+    *state = SETTINGS_ICON_LOADED;
+}
+
+static void settings_draw_icon(ui_window_t win, int icon_id, int x, int y, bool list_variant) {
+    if (icon_id < 0 || icon_id >= SETTINGS_ICON_COUNT) return;
+
+    if (list_variant) {
+        settings_try_load_icon_variant(
+            icon_id,
+            SETTINGS_ICON_LIST_SIZE,
+            SETTINGS_ICON_LIST_SIZE,
+            settings_icon_list_pixels[icon_id],
+            &settings_icon_list_state[icon_id]
+        );
+        if (settings_icon_list_state[icon_id] == SETTINGS_ICON_LOADED) {
+            ui_draw_image(win, x, y, SETTINGS_ICON_LIST_SIZE, SETTINGS_ICON_LIST_SIZE, settings_icon_list_pixels[icon_id]);
+            return;
+        }
+        ui_draw_rounded_rect_filled(win, x, y, SETTINGS_ICON_LIST_SIZE, SETTINGS_ICON_LIST_SIZE, 4, 0xFF3A3A3A);
+        return;
+    }
+
+    settings_try_load_icon_variant(
+        icon_id,
+        SETTINGS_ICON_MAIN_SIZE,
+        SETTINGS_ICON_MAIN_SIZE,
+        settings_icon_main_pixels[icon_id],
+        &settings_icon_main_state[icon_id]
+    );
+    if (settings_icon_main_state[icon_id] == SETTINGS_ICON_LOADED) {
+        ui_draw_image(win, x, y, SETTINGS_ICON_MAIN_SIZE, SETTINGS_ICON_MAIN_SIZE, settings_icon_main_pixels[icon_id]);
+        return;
+    }
+    ui_draw_rounded_rect_filled(win, x, y, SETTINGS_ICON_MAIN_SIZE, SETTINGS_ICON_MAIN_SIZE, 6, 0xFF3A3A3A);
+}
+
+static void load_settings_icons(void) {
+    for (int i = 0; i < SETTINGS_ICON_COUNT; i++) {
+        settings_try_load_icon_variant(
+            i,
+            SETTINGS_ICON_MAIN_SIZE,
+            SETTINGS_ICON_MAIN_SIZE,
+            settings_icon_main_pixels[i],
+            &settings_icon_main_state[i]
+        );
+    }
+    settings_try_load_icon_variant(
+        SETTINGS_ICON_FONTS,
+        SETTINGS_ICON_LIST_SIZE,
+        SETTINGS_ICON_LIST_SIZE,
+        settings_icon_list_pixels[SETTINGS_ICON_FONTS],
+        &settings_icon_list_state[SETTINGS_ICON_FONTS]
+    );
 }
 
 static void load_wallpapers(void) {
@@ -335,53 +466,42 @@ static void control_panel_paint_main(ui_window_t win) {
     
     // Wallpaper
     widget_button_draw(&settings_ctx, &btn_main_wallpaper);
-    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 8, 40, 40, 0xFF87CEEB);
-    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 28, 40, 20, 0xFF90EE90);
-    ui_draw_rect(win, offset_x + 24, offset_y + item_y + 22, 3, 6, 0xFF654321);
-    ui_draw_rect(win, offset_x + 21, offset_y + item_y + 18, 9, 8, 0xFF228B22);
+    settings_draw_icon(win, SETTINGS_ICON_WALLPAPER, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Wallpaper", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Choose wallpaper", COLOR_DKGRAY);
     
     // Network
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_network);
-    ui_draw_rect(win, offset_x + 18, offset_y + item_y + 12, 24, 24, 0xFF4169E1);
-    ui_draw_rect(win, offset_x + 22, offset_y + item_y + 16, 16, 16, 0xFF87CEEB);
+    settings_draw_icon(win, SETTINGS_ICON_NETWORK, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Network", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Internet and connectivity", COLOR_DKGRAY);
     
     // Desktop
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_desktop);
-    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 10, 36, 8, 0xFFE0C060);
-    ui_draw_rect(win, offset_x + 12, offset_y + item_y + 18, 36, 22, 0xFFD4A574);
+    settings_draw_icon(win, SETTINGS_ICON_DESKTOP, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Desktop", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Desktop alignment", COLOR_DKGRAY);
     
     // Mouse
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_mouse);
-    ui_draw_rect(win, offset_x + 18, offset_y + item_y + 8, 20, 28, 0xFFD3D3D3);
-    ui_draw_rect(win, offset_x + 20, offset_y + item_y + 10, 16, 10, 0xFFB0B0B0);
+    settings_draw_icon(win, SETTINGS_ICON_MOUSE, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Mouse", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Pointer settings", COLOR_DKGRAY);
     
     // Fonts
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_fonts);
-    // Font icon: "Aa" stylized
-    ui_draw_string(win, offset_x + 14, offset_y + item_y + 10, "Aa", 0xFF6A9EF5);
+    settings_draw_icon(win, SETTINGS_ICON_FONTS, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Fonts", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Choose system font", COLOR_DKGRAY);
 
     // Display
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_display);
-    // Monitor icon
-    ui_draw_rect(win, offset_x + 14, offset_y + item_y + 12, 32, 22, 0xFF4A90E2);
-    ui_draw_rect(win, offset_x + 16, offset_y + item_y + 14, 28, 18, 0xFF87CEEB);
-    ui_draw_rect(win, offset_x + 26, offset_y + item_y + 34, 8, 4, 0xFFB0B0B0);
-    ui_draw_rect(win, offset_x + 22, offset_y + item_y + 38, 16, 2, 0xFFB0B0B0);
+    settings_draw_icon(win, SETTINGS_ICON_DISPLAY, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Display", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Screen resolution & color", COLOR_DKGRAY);
 
@@ -732,8 +852,7 @@ static void control_panel_paint_fonts(ui_window_t win) {
     int item_y = offset_y + 60;
     for (int i = 0; i < font_count; i++) {
         widget_button_draw(&settings_ctx, &btn_fonts[i]);
-        // Font icon
-        ui_draw_string(win, offset_x + 10, item_y + 9, "Aa", 0xFF6A9EF5);
+        settings_draw_icon(win, SETTINGS_ICON_FONTS, offset_x + 10, item_y + 9, true);
         // Font name
         ui_draw_string(win, offset_x + 40, item_y + 9, fonts[i].name, COLOR_DARK_TEXT);
         if (i == selected_font) {
@@ -1228,6 +1347,9 @@ int main(int argc, char **argv) {
     desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
     desktop_max_cols = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
     mouse_speed = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
+    load_settings_icons();
+    
+    // Set initial toggle states
     chk_snap.checked = desktop_snap_to_grid;
     chk_align.checked = desktop_auto_align;
     drop_res.selected_idx = disp_sel_res;

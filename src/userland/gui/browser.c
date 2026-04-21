@@ -1,5 +1,7 @@
 // Copyright (c) 2023-2026 Chris (boreddevnl)
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// BOREDOS_APP_DESC: Web browser for internet pages.
+// BOREDOS_APP_ICONS: /Library/images/icons/colloid/web-browser.png
 #include "libc/syscall.h"
 #include "libc/libui.h"
 #include "stb_image.h"

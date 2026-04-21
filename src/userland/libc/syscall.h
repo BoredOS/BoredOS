@@ -97,6 +97,8 @@
 #define SYSTEM_CMD_SIGACTION 73
 #define SYSTEM_CMD_SIGPROCMASK 74
 #define SYSTEM_CMD_SIGPENDING 75
+#define SYSTEM_CMD_GET_ELF_METADATA 76
+#define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
 
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
@@ -104,6 +106,22 @@
 #define SPAWN_FLAG_BACKGROUND 0x8
 #define SYSTEM_CMD_SET_KEYBOARD_LAYOUT 49
 #define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 50
+
+// ELF app metadata (mirrors src/sys/elf.h, kept in sync manually)
+#define BOREDOS_APP_METADATA_MAX_APP_NAME   64
+#define BOREDOS_APP_METADATA_MAX_DESCRIPTION 192
+#define BOREDOS_APP_METADATA_MAX_IMAGES     4
+#define BOREDOS_APP_METADATA_MAX_IMAGE_PATH 160
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t image_count;
+    uint16_t reserved;
+    char app_name[BOREDOS_APP_METADATA_MAX_APP_NAME];
+    char description[BOREDOS_APP_METADATA_MAX_DESCRIPTION];
+    char images[BOREDOS_APP_METADATA_MAX_IMAGES][BOREDOS_APP_METADATA_MAX_IMAGE_PATH];
+} boredos_app_metadata_t;
 
 // Internal assembly entry into Ring 0
 extern uint64_t syscall0(uint64_t sys_num);
@@ -219,5 +237,8 @@ int sys_set_dns_server(const net_ipv4_address_t *ip);
 void sys_network_force_unlock(void);
 void sys_yield(void);
 
+// ELF metadata API
+int sys_get_elf_metadata(const char *path, boredos_app_metadata_t *out_metadata);
+int sys_get_elf_primary_image(const char *path, char *out_path, size_t out_path_size);
 
 #endif
