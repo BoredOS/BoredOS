@@ -3,16 +3,40 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "keycodes.h"
+
+// NOTE: If a new keyboard layout is added, there is a lot of changes todo loooool
 
 typedef enum {
     KEYMAP_QWERTY = 0,
     KEYMAP_AZERTY = 1,
 } keymap_id_t;
 
+typedef struct {
+    uint32_t normal;
+    uint32_t shift;
+    uint32_t altgr;
+    uint32_t shift_altgr;
+    uint8_t dead_mask;   // bit0 normal, bit1 shift, bit2 altgr, bit3 shift_altgr
+    bool alpha;
+} keymap_entry_t;
+
+typedef struct {
+    uint32_t codepoint;
+    bool is_text;
+    bool is_dead;
+} keymap_result_t;
+
 void keymap_init(void);
 void keymap_set_current(keymap_id_t id);
 keymap_id_t keymap_get_current(void);
+const char *keymap_get_name(keymap_id_t id);
+int keymap_get_count(void);
 
-char keymap_translate(uint8_t scancode, bool shift, bool caps);
+keymap_result_t keymap_translate_keycode(uint16_t keycode, uint32_t mods);
+uint32_t keymap_compose(uint32_t dead_codepoint, uint32_t base_codepoint);
+
+// compat legacy for exustung apps
+int keymap_legacy_key(uint16_t keycode, uint32_t codepoint);
 
 #endif
