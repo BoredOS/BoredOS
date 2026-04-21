@@ -5,8 +5,6 @@
 #include <stdbool.h>
 #include "keycodes.h"
 
-// NOTE: If a new keyboard layout is added, there is a lot of changes todo loooool
-
 typedef enum {
     KEYMAP_QWERTY = 0,
     KEYMAP_AZERTY = 1,
@@ -36,7 +34,7 @@ int keymap_get_count(void);
 keymap_result_t keymap_translate_keycode(uint16_t keycode, uint32_t mods);
 uint32_t keymap_compose(uint32_t dead_codepoint, uint32_t base_codepoint);
 
-// compat legacy for exustung apps
+// compat legacy for exusting apps
 int keymap_legacy_key(uint16_t keycode, uint32_t codepoint);
 
 #endif
