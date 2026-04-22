@@ -22,7 +22,7 @@ HOW TO ADD A NEW LAYOUT:
 2. Create a new keyboard_layout_t instance in keymap.c, filling the entries array with the appropriate codepoints for each keycode and modifier combination. Use 0 for unused combinations.
 3. Add the new layout to the g_layouts array in keymap.c
 4. (Optional) If your layout has dead keys, add the appropriate entries to the g_compose_table array in keymap.c, defining how dead keys combine with base characters to produce composed characters.
-5. Add the layout to /src/userland/gui/settings.c 
+5. Add the layout to /src/userland/gui/settings.c in init_settings_widgets() in the *keyboard_opts[] array and increment the count in widget_dropdown_init for drop_keyboard.
 */
 
 // QWERTY LAYOUT US (DEFAULT)
@@ -175,9 +175,143 @@ static const keyboard_layout_t layout_azerty = {
     }
 };
 
+static const keyboard_layout_t layout_qwertz = {
+    "QWERTZ (DE)",
+    .entries = {
+        [KEY_1] = { '1', '!', 0, 0, 0, false },
+        [KEY_2] = { '2', '"', 0x00B2, 0, 0, false },        // ²
+        [KEY_3] = { '3', 0x00A7, 0x00B3, 0, 0, false },     // § ³
+        [KEY_4] = { '4', '$', 0, 0, 0, false },
+        [KEY_5] = { '5', '%', 0, 0, 0, false },
+        [KEY_6] = { '6', '&', 0, 0, 0, false },
+        [KEY_7] = { '7', '/', '{', 0, 0, false },
+        [KEY_8] = { '8', '(', '[', 0, 0, false },
+        [KEY_9] = { '9', ')', ']', 0, 0, false },
+        [KEY_0] = { '0', '=', '}', 0, 0, false },
+        [KEY_MINUS] = { 0x00DF, '?', '\\', 0, 0, false },   // ß
+        [KEY_EQUAL] = { 0x00B4, '`', 0, 0, DEAD_NORMAL, false }, // ´ dead
+
+        [KEY_Q] = { 'q', 'Q', '@', 0, 0, true },
+        [KEY_W] = { 'w', 'W', 0, 0, 0, true },
+        [KEY_E] = { 'e', 'E', 0x20AC, 0, 0, true },         // €
+        [KEY_R] = { 'r', 'R', 0, 0, 0, true },
+        [KEY_T] = { 't', 'T', 0, 0, 0, true },
+        [KEY_Y] = { 'z', 'Z', 0, 0, 0, true },
+        [KEY_U] = { 'u', 'U', 0, 0, 0, true },
+        [KEY_I] = { 'i', 'I', 0, 0, 0, true },
+        [KEY_O] = { 'o', 'O', 0, 0, 0, true },
+        [KEY_P] = { 'p', 'P', 0, 0, 0, true },
+        [KEY_LBRACKET] = { 0x00FC, 0x00DC, 0, 0, 0, true }, // ü
+        [KEY_RBRACKET] = { '+', '*', '~', 0, 0, false },
+
+        [KEY_A] = { 'a', 'A', 0, 0, 0, true },
+        [KEY_S] = { 's', 'S', 0, 0, 0, true },
+        [KEY_D] = { 'd', 'D', 0, 0, 0, true },
+        [KEY_F] = { 'f', 'F', 0, 0, 0, true },
+        [KEY_G] = { 'g', 'G', 0, 0, 0, true },
+        [KEY_H] = { 'h', 'H', 0, 0, 0, true },
+        [KEY_J] = { 'j', 'J', 0, 0, 0, true },
+        [KEY_K] = { 'k', 'K', 0, 0, 0, true },
+        [KEY_L] = { 'l', 'L', 0, 0, 0, true },
+        [KEY_SEMICOLON] = { 0x00F6, 0x00D6, 0, 0, 0, true }, // ö
+        [KEY_APOSTROPHE] = { 0x00E4, 0x00C4, 0, 0, 0, true }, // ä
+        [KEY_GRAVE] = { '^', 0x00B0, 0, 0, DEAD_NORMAL, false }, // ^ dead
+
+        [KEY_BACKSLASH] = { '#', '\'', 0, 0, 0, false },
+        [KEY_Z] = { 'y', 'Y', 0, 0, 0, true },
+        [KEY_X] = { 'x', 'X', 0, 0, 0, true },
+        [KEY_C] = { 'c', 'C', 0, 0, 0, true },
+        [KEY_V] = { 'v', 'V', 0, 0, 0, true },
+        [KEY_B] = { 'b', 'B', 0, 0, 0, true },
+        [KEY_N] = { 'n', 'N', 0, 0, 0, true },
+        [KEY_M] = { 'm', 'M', 0, 0, 0, true },
+        [KEY_COMMA] = { ',', ';', 0, 0, 0, false },
+        [KEY_DOT] = { '.', ':', 0, 0, 0, false },
+        [KEY_SLASH] = { '-', '_', 0, 0, 0, false },
+
+        [KEY_SPACE] = { ' ', ' ', 0, 0, 0, false },
+
+        [KEY_KP_SLASH] = {'/', '/', 0, 0, 0, false},
+        [KEY_KP_STAR] = {'*', '*', 0, 0, 0, false},
+        [KEY_KP_MINUS] = {'-', '-', 0, 0, 0, false},
+        [KEY_KP_PLUS] = {'+', '+', 0, 0, 0, false},
+        [KEY_KP_DOT] = {'.', '.', 0, 0, 0, false},
+        [KEY_KP_0] = {'0', '0', 0, 0, 0, false},
+        [KEY_KP_1] = {'1', '1', 0, 0, 0, false},
+        [KEY_KP_2] = {'2', '2', 0, 0, 0, false},
+        [KEY_KP_3] = {'3', '3', 0, 0, 0, false},
+        [KEY_KP_4] = {'4', '4', 0, 0, 0, false},
+        [KEY_KP_5] = {'5', '5', 0, 0, 0, false},
+        [KEY_KP_6] = {'6', '6', 0, 0, 0, false},
+        [KEY_KP_7] = {'7', '7', 0, 0, 0, false},
+        [KEY_KP_8] = {'8', '8', 0, 0, 0, false},
+        [KEY_KP_9] = {'9', '9', 0, 0, 0, false},
+    }
+};
+
+static const keyboard_layout_t layout_dvorak = {
+    "DVORAK",
+    .entries = {
+        [KEY_1] = { '1', '!', 0, 0, 0, false },
+        [KEY_2] = { '2', '@', 0, 0, 0, false },
+        [KEY_3] = { '3', '#', 0, 0, 0, false },
+        [KEY_4] = { '4', '$', 0, 0, 0, false },
+        [KEY_5] = { '5', '%', 0, 0, 0, false },
+        [KEY_6] = { '6', '^', 0, 0, 0, false },
+        [KEY_7] = { '7', '&', 0, 0, 0, false },
+        [KEY_8] = { '8', '*', 0, 0, 0, false },
+        [KEY_9] = { '9', '(', 0, 0, 0, false },
+        [KEY_0] = { '0', ')', 0, 0, 0, false },
+        [KEY_MINUS] = { '[', '{', 0, 0, 0, false },
+        [KEY_EQUAL] = { ']', '}', 0, 0, 0, false },
+
+        [KEY_Q] = { '\'', '"', 0, 0, 0, false },
+        [KEY_W] = { ',', '<', 0, 0, 0, false },
+        [KEY_E] = { '.', '>', 0, 0, 0, false },
+        [KEY_R] = { 'p', 'P', 0, 0, 0, true },
+        [KEY_T] = { 'y', 'Y', 0, 0, 0, true },
+        [KEY_Y] = { 'f', 'F', 0, 0, 0, true },
+        [KEY_U] = { 'g', 'G', 0, 0, 0, true },
+        [KEY_I] = { 'c', 'C', 0, 0, 0, true },
+        [KEY_O] = { 'r', 'R', 0, 0, 0, true },
+        [KEY_P] = { 'l', 'L', 0, 0, 0, true },
+        [KEY_LBRACKET] = { '/', '?', 0, 0, 0, false },
+        [KEY_RBRACKET] = { '=', '+', 0, 0, 0, false },
+
+        [KEY_A] = { 'a', 'A', 0, 0, 0, true },
+        [KEY_S] = { 'o', 'O', 0, 0, 0, true },
+        [KEY_D] = { 'e', 'E', 0, 0, 0, true },
+        [KEY_F] = { 'u', 'U', 0, 0, 0, true },
+        [KEY_G] = { 'i', 'I', 0, 0, 0, true },
+        [KEY_H] = { 'd', 'D', 0, 0, 0, true },
+        [KEY_J] = { 'h', 'H', 0, 0, 0, true },
+        [KEY_K] = { 't', 'T', 0, 0, 0, true },
+        [KEY_L] = { 'n', 'N', 0, 0, 0, true },
+        [KEY_SEMICOLON] = { 's', 'S', 0, 0, 0, true },
+        [KEY_APOSTROPHE] = { '-', '_', 0, 0, 0, false },
+        [KEY_GRAVE] = { '`', '~', 0, 0, 0, false },
+
+        [KEY_BACKSLASH] = { '\\', '|', 0, 0, 0, false },
+        [KEY_Z] = { ';', ':', 0, 0, 0, false },
+        [KEY_X] = { 'q', 'Q', 0, 0, 0, true },
+        [KEY_C] = { 'j', 'J', 0, 0, 0, true },
+        [KEY_V] = { 'k', 'K', 0, 0, 0, true },
+        [KEY_B] = { 'x', 'X', 0, 0, 0, true },
+        [KEY_N] = { 'b', 'B', 0, 0, 0, true },
+        [KEY_M] = { 'm', 'M', 0, 0, 0, true },
+        [KEY_COMMA] = { 'w', 'W', 0, 0, 0, true },
+        [KEY_DOT] = { 'v', 'V', 0, 0, 0, true },
+        [KEY_SLASH] = { 'z', 'Z', 0, 0, 0, true },
+
+        [KEY_SPACE] = { ' ', ' ', 0, 0, 0, false },
+    }
+};
+
 static const keyboard_layout_t *g_layouts[] = {
     &layout_qwerty,
-    &layout_azerty
+    &layout_azerty,
+    &layout_qwertz,
+    &layout_dvorak
 };
 
 static keymap_id_t g_current = KEYMAP_QWERTY;
@@ -190,6 +324,10 @@ static const compose_entry_t g_compose_table[] = {
     { 0x00A8, 'a', 0x00E4 }, { 0x00A8, 'e', 0x00EB }, { 0x00A8, 'i', 0x00EF }, { 0x00A8, 'o', 0x00F6 }, { 0x00A8, 'u', 0x00FC }, { 0x00A8, 'y', 0x00FF },
     { 0x00A8, 'A', 0x00C4 }, { 0x00A8, 'E', 0x00CB }, { 0x00A8, 'I', 0x00CF }, { 0x00A8, 'O', 0x00D6 }, { 0x00A8, 'U', 0x00DC },
 
+    { 0x00B4, 'a', 0x00E1 }, { 0x00B4, 'e', 0x00E9 }, { 0x00B4, 'i', 0x00ED }, { 0x00B4, 'o', 0x00F3 }, { 0x00B4, 'u', 0x00FA },
+    { 0x00B4, 'A', 0x00C1 }, { 0x00B4, 'E', 0x00C9 }, { 0x00B4, 'I', 0x00CD }, { 0x00B4, 'O', 0x00D3 }, { 0x00B4, 'U', 0x00DA },
+
+    { '`', 'a', 0x00E0 }, { '`', 'e', 0x00E8 }, { '`', 'i', 0x00EC }, { '`', 'o', 0x00F2 }, { '`', 'u', 0x00F9 },
     { 0, 0, 0 }
 };
 

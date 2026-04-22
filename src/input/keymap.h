@@ -8,6 +8,8 @@
 typedef enum {
     KEYMAP_QWERTY = 0,
     KEYMAP_AZERTY = 1,
+    KEYMAP_QWERTZ = 2,
+    KEYMAP_DVORAK = 3,
 } keymap_id_t;
 
 typedef struct {

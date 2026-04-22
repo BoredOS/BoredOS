@@ -1304,8 +1304,8 @@ static void init_settings_widgets(void) {
     static const char *color_opts[] = {"32-bit", "16-bit", "256 Colors", "Grayscale", "Monochrome"};
     widget_dropdown_init(&drop_color, 168, 66, 140, 30, color_opts, 5);
 
-    static const char *keyboard_opts[] = {"QWERTY", "AZERTY"};
-    widget_dropdown_init(&drop_keyboard, 8, 80, 200, 30, keyboard_opts, 2);
+    static const char *keyboard_opts[] = {"QWERTY", "AZERTY", "QWERTZ", "DVORAK"}; // add more layouts here 
+    widget_dropdown_init(&drop_keyboard, 8, 80, 200, 30, keyboard_opts, 4); // increment the last number when adding more layouts
 
     widget_textbox_init(&tb_r, 33, 226, 50, 18, rgb_r, 4);
     widget_textbox_init(&tb_g, 123, 226, 50, 18, rgb_g, 4);
