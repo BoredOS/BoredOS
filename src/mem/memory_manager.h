@@ -9,21 +9,22 @@
 #include <stdbool.h>
 #include "limine.h"
 
-// Memory Manager Configuration
-#define DEFAULT_POOL_SIZE (128 * 1024 * 1024)  // 128MB default
-#define MAX_ALLOCATIONS 262144  // Increased for larger pools
-#define MAX_FRAGMENTATION_SLOTS 2048
+// SLAB_CLASSES and SLAB_MAX_SIZE must stay in sync with the slab_sizes[] table in memory_manager.c.
+#define DEFAULT_POOL_SIZE           (128 * 1024 * 1024)
+#define BLOCK_LIST_INITIAL_CAPACITY 64
+#define SLAB_CLASSES  7
+#define SLAB_MAX_SIZE 512
 
-// Allocation block metadata
 typedef struct {
     void *address;
     size_t size;
     bool allocated;
-    uint32_t allocation_id;
-    uint32_t timestamp;
+    uint32_t allocation_id;  // Monotonically increasing; wraps at UINT32_MAX. 0 = unallocated.
+    uint32_t timestamp;      // Value of the internal tick counter at allocation time; 0 = unallocated.
 } MemBlock;
 
-// Memory statistics
+// Snapshot of allocator state returned by memory_get_stats().
+// fragmentation_percent is the proportion of free memory stranded outside the largest free block.
 typedef struct {
     size_t total_memory;
     size_t used_memory;
@@ -34,18 +35,20 @@ typedef struct {
     size_t smallest_free_block;
     size_t fragmentation_percent;
     size_t peak_memory_used;
+    size_t slab_allocs;
+    size_t slab_frees;
 } MemStats;
 
-// Public API
+// Must be called exactly once before any allocation. Idempotent if called again (no-op),
+// but re-initialisation after allocations have been made is not supported.
 void memory_manager_init_from_memmap(struct limine_memmap_response *memmap);
 
-// Allocation/Deallocation
 void* kmalloc(size_t size);
+// alignment must be a power of 2. Requests <= 512 B with alignment <= 8 are served by the slab allocator.
 void* kmalloc_aligned(size_t size, size_t alignment);
 void kfree(void *ptr);
 void* krealloc(void *ptr, size_t new_size);
 
-// Statistics and Information
 MemStats memory_get_stats(void);
 
 void mem_memset(void *dest, int val, size_t len);
