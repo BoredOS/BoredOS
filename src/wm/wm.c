@@ -22,6 +22,8 @@
 #include "../sys/work_queue.h"
 #include "../sys/smp.h"
 #include "../core/kconsole.h"
+#include "../input/keycodes.h"
+#include "../input/keymap.h"
 
 
 // Hello developer,
@@ -30,7 +32,7 @@
 // TRUST ME.
 // If you do decide to hate yourself for some dumb reason,
 // add a few hours to the counter of despair:
-// hours wasted: 57
+// hours wasted: 61
 // send help
 
 #include "../sys/spinlock.h"
@@ -98,7 +100,7 @@ static char notif_text[256] = {0};
 static int notif_timer = 0;
 static int notif_x_offset = 420; // Starts offscreen
 static bool notif_active = false;
-extern bool ps2_ctrl_pressed;
+
 
 static lumos_state_t lumos_state = {0};
 static bool lumos_index_built = false;  
@@ -3649,14 +3651,18 @@ void wm_handle_mouse(int dx, int dy, uint8_t buttons, int dz) {
 // Input Queue
 #define INPUT_QUEUE_SIZE 128
 typedef struct {
-    char c;
+    int legacy;
+    uint16_t keycode;
+    uint32_t codepoint;
+    uint32_t mods;
     bool pressed;
 } key_event_t;
 static key_event_t key_queue[INPUT_QUEUE_SIZE];
 static volatile int key_head = 0;
 static volatile int key_tail = 0;
 
-static void wm_dispatch_key(char c, bool pressed) {
+static void wm_dispatch_key(int legacy, uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed) {
+    char c = (char)legacy;
     if (desktop_dialog_state != 0) {
         int len = 0; while(desktop_dialog_input[len]) len++;
         if (c == '\n') {
@@ -3718,7 +3724,7 @@ static void wm_dispatch_key(char c, bool pressed) {
     
     
     if (target->handle_key) {
-        target->handle_key(target, c, pressed);
+        target->handle_key(target, legacy, keycode, codepoint, mods, pressed);
     }
     
     // Mark window as needing redraw on next timer tick
@@ -3745,18 +3751,20 @@ static void build_file_index_async(void *arg) {
     file_index_build();
 }
 
-void wm_handle_key(char c, bool pressed) {
-    if (pressed && c == 'p' && ps2_ctrl_pressed) {
+// Called by keyboard interrupt handler
+void wm_handle_key_event(uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed) {
+    int legacy = keymap_legacy_key(keycode, codepoint);
+    char c = (char)legacy;
+
+    if (pressed && keycode == KEY_P && (mods & KB_MOD_CTRL)) {
         process_create_elf("/bin/screenshot.elf", NULL, false, -1);
         return;
     }
-    
-    if (pressed && c == ' ' && ps2_ctrl_pressed && ps2_shift_pressed()) {
+
+    if (pressed && keycode == KEY_SPACE && (mods & KB_MOD_CTRL) && (mods & KB_MOD_SHIFT)) {
         lumos_state.visible = !lumos_state.visible;
         if (lumos_state.visible) {
-            // Check current index status - it may still be building in background
             lumos_index_built = file_index_is_valid();
-            // Clear search state when opening
             lumos_state.search_len = 0;
             lumos_state.search_query[0] = 0;
             lumos_state.cursor_pos = 0;
@@ -3769,15 +3777,18 @@ void wm_handle_key(char c, bool pressed) {
         force_redraw = true;
         return;
     }
-    
-    if (lumos_state.visible && pressed) {
+
+    if (lumos_state.visible && pressed && legacy != 0) {
         wm_lumos_handle_key(c);
         return;
     }
-    
+
     int next = (key_head + 1) % INPUT_QUEUE_SIZE;
     if (next != key_tail) {
-        key_queue[key_head].c = c;
+        key_queue[key_head].legacy = legacy;
+        key_queue[key_head].keycode = keycode;
+        key_queue[key_head].codepoint = codepoint;
+        key_queue[key_head].mods = mods;
         key_queue[key_head].pressed = pressed;
         key_head = next;
     }
@@ -3798,7 +3809,7 @@ void wm_process_input(void) {
     while (key_head != key_tail) {
         key_event_t ev = key_queue[key_tail];
         key_tail = (key_tail + 1) % INPUT_QUEUE_SIZE;
-        wm_dispatch_key(ev.c, ev.pressed);
+        wm_dispatch_key(ev.legacy, ev.keycode, ev.codepoint, ev.mods, ev.pressed);
     }
     wm_lock_release(rflags);
 

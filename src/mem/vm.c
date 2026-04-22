@@ -12,6 +12,7 @@
 #include "kutils.h"
 #include "io.h"
 #include "input/keymap.h"
+#include "input/keyboard.h"
 
 // VM State
 static int stack[VM_STACK_SIZE];
@@ -113,15 +114,31 @@ static void vm_syscall(int id) {
             break;
         case VM_SYS_GETCHAR: {
             int c = 0;
-            // Blocking read for a valid key press
+            bool ext = false;
+            // Wait for a key press and return the ASCII code
             while (1) {
-                if ((inb(0x64) & 1)) { // Data available
+                if ((inb(0x64) & 1)) { // Data available in keyboard controller
                     uint8_t sc = inb(0x60);
-                    if (!(sc & 0x80)) { // Key press
-                        if (sc < 128) {
-                            c = keymap_translate(sc, false, false);
-                            if (c) break;
+
+                    if (sc == 0xE0) { // Extended scancode prefix
+                        ext = true;
+                        continue;
+                    }
+
+                    if (!(sc & 0x80)) { // Key press (not release)
+                        uint16_t keycode = keyboard_keycode_from_set1((uint8_t)(sc & 0x7F), ext); // Get keycode and reset
+                        ext = false;
+
+                        if (keycode != KEY_NONE) {
+                            uint32_t mods = keyboard_get_modifiers();
+                            keymap_result_t r = keymap_translate_keycode(keycode, mods);
+                            if (r.is_text && !r.is_dead && r.codepoint > 0 && r.codepoint < 128) {
+                                c = (int)r.codepoint;
+                                break;
+                            }
                         }
+                    } else {
+                        ext = false;
                     }
                 }
             }

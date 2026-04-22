@@ -1414,7 +1414,12 @@ static void explorer_handle_click(Window *win, int x, int y) {
     }
 }
 
-static void explorer_handle_key(Window *win, char c, bool pressed) {
+static void explorer_handle_key(Window *win, int legacy, uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed) {
+    (void)keycode;
+    (void)codepoint;
+    (void)mods;
+    char c = (char)legacy;
+    
     if (!pressed) return;
     ExplorerState *state = (ExplorerState*)win->data;
     

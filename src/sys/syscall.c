@@ -22,17 +22,16 @@
 #include "tty.h"
 #include "font_manager.h"
 #include "graphics.h"
+#include "input/keycodes.h"
 #include "input/keymap.h"
 #include "app_metadata.h"
-
-extern bool ps2_ctrl_pressed;
 
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
 #define SPAWN_FLAG_TTY_ID 0x4
 
 #define SYSTEM_CMD_SET_KEYBOARD_LAYOUT 49
-#define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 50
+#define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 51
 
 // Read MSR
 static inline uint64_t rdmsr(uint32_t msr) {
@@ -162,10 +161,17 @@ void syscall_send_mouse_up_event(Window *win, int x, int y) {
     user_window_mouse_up(win, x, y);
 }
 
-static void user_window_key(Window *win, char c, bool pressed) {
+static void user_window_key(Window *win, int legacy, uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed) {
     process_t *proc = process_get_by_ui_window(win);
     if (!proc) return;
-    gui_event_t ev = { .type = pressed ? GUI_EVENT_KEY : GUI_EVENT_KEYUP, .arg1 = (int)c, .arg3 = (int)ps2_ctrl_pressed };
+
+    gui_event_t ev = {
+        .type = pressed ? GUI_EVENT_KEY : GUI_EVENT_KEYUP,
+        .arg1 = legacy,
+        .arg2 = (int)keycode,
+        .arg3 = (int)mods,
+        .arg4 = (int)codepoint
+    };
     process_push_gui_event(proc, &ev);
 }
 
@@ -2092,16 +2098,6 @@ static uint64_t sys_cmd_tty_destroy(const syscall_args_t *args) {
     return tty_destroy(tty_id);
 }
 
-static uint64_t sys_cmd_set_keyboard_layout(const syscall_args_t *args) {
-    keymap_set_current((keymap_id_t)args->arg2);
-    return 0;
-}
-
-static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
-    return (uint64_t)keymap_get_current();
-}
-
-#define SYS_CMD_TABLE_SIZE 76
 static uint64_t sys_cmd_get_elf_metadata(const syscall_args_t *args) {
     const char *path = (const char *)args->arg2;
     boredos_app_metadata_t *out = (boredos_app_metadata_t *)args->arg3;
@@ -2114,6 +2110,16 @@ static uint64_t sys_cmd_get_elf_primary_image(const syscall_args_t *args) {
     size_t      out_size = (size_t)args->arg4;
     if (!path || !out_path || !out_size) return 0;
     return app_metadata_get_primary_image(path, out_path, out_size) ? 1 : 0;
+}
+
+static uint64_t sys_cmd_set_keyboard_layout(const syscall_args_t *args) {
+    keymap_set_current((keymap_id_t)args->arg2);
+    return 0;
+}
+
+static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
+    (void)args;
+    return (uint64_t)keymap_get_current();
 }
 
 #define SYS_CMD_TABLE_SIZE 78
@@ -2163,6 +2169,8 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SET_RESOLUTION]      = sys_cmd_set_resolution,
     [SYSTEM_CMD_NETWORK_GET_NIC_NAME] = sys_cmd_network_get_nic_name,
     [SYSTEM_CMD_PARALLEL_RUN]        = sys_cmd_parallel_run,
+    [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
+    [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
     [SYSTEM_CMD_TTY_CREATE]          = sys_cmd_tty_create,
     [SYSTEM_CMD_TTY_READ_OUT]        = sys_cmd_tty_read_out,
     [SYSTEM_CMD_TTY_WRITE_IN]        = sys_cmd_tty_write_in,
@@ -2179,8 +2187,6 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SIGACTION]           = sys_cmd_sigaction,
     [SYSTEM_CMD_SIGPROCMASK]         = sys_cmd_sigprocmask,
     [SYSTEM_CMD_SIGPENDING]          = sys_cmd_sigpending,
-    [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
-    [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
     [SYSTEM_CMD_GET_ELF_METADATA]    = sys_cmd_get_elf_metadata,
     [SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE] = sys_cmd_get_elf_primary_image,
 };
