@@ -90,8 +90,22 @@ static void vm_syscall(int id) {
             push(0);
             break;
         case VM_SYS_PRINT_CHAR: {
-            char c = (char)pop();
-            char s[2] = {c, 0};
+            uint32_t cp = (uint32_t)pop();
+            char s[5] = {0};
+
+            if (cp < 0x80) {
+                s[0] = cp;
+            } else if (cp < 0x800) {
+                s[0] = 0xC0 | (cp >> 6);
+                s[1] = 0x80 | (cp & 0x3F);
+            } else if (cp < 0x10000) {
+                s[0] = 0xE0 | (cp >> 12);
+                s[1] = 0x80 | ((cp >> 6) & 0x3F);
+                s[2] = 0x80 | (cp & 0x3F);
+            } else {
+                s[0] = '?';
+            }
+
             cmd_write(s);
             push(0);
             break;
@@ -132,7 +146,8 @@ static void vm_syscall(int id) {
                         if (keycode != KEY_NONE) {
                             uint32_t mods = keyboard_get_modifiers();
                             keymap_result_t r = keymap_translate_keycode(keycode, mods);
-                            if (r.is_text && !r.is_dead && r.codepoint > 0 && r.codepoint < 256) { // 256 bc 128 is max ASCII but we might have some extended chars
+                            // Only return valid text characters, ignore modifiers and dead keys
+                            if (r.is_text && !r.is_dead && r.codepoint >= 32 && r.codepoint != 127) {
                                 c = (int)r.codepoint;
                                 break;
                             }
@@ -554,7 +569,26 @@ int vm_exec(const uint8_t *code, int code_size) {
             case OP_MUL: push(pop() * pop()); break;
             case OP_DIV: { int b=pop(); int a=pop(); push(b==0?0:a/b); } break;
             case OP_PRINT: cmd_write_int(pop()); cmd_write("\n"); break;
-            case OP_PRITC: { char c=(char)pop(); char s[2]={c,0}; cmd_write(s); } break;
+            case OP_PRITC: {
+                uint32_t cp = (uint32_t)pop();
+                char s[5] = {0};
+
+                if (cp < 0x80) {
+                    s[0] = (char)cp;
+                } else if (cp < 0x800) {
+                    s[0] = (char)(0xC0 | (cp >> 6));
+                    s[1] = (char)(0x80 | (cp & 0x3F));
+                } else if (cp < 0x10000) {
+                    s[0] = (char)(0xE0 | (cp >> 12));
+                    s[1] = (char)(0x80 | ((cp >> 6) & 0x3F));
+                    s[2] = (char)(0x80 | (cp & 0x3F));
+                } else {
+                    s[0] = '?';
+                }
+
+                cmd_write(s);
+                break;
+            }
             case OP_JMP: {
                 int addr = 0;
                 addr |= memory[pc++];
