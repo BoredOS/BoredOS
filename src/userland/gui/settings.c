@@ -92,7 +92,8 @@ enum settings_icon_id {
     SETTINGS_ICON_MOUSE,
     SETTINGS_ICON_FONTS,
     SETTINGS_ICON_DISPLAY,
-    SETTINGS_ICON_COUNT
+    SETTINGS_ICON_KEYBOARD,
+    SETTINGS_ICON_COUNT,// must be last
 };
 
 static const char *settings_icon_names[SETTINGS_ICON_COUNT] = {
@@ -102,6 +103,7 @@ static const char *settings_icon_names[SETTINGS_ICON_COUNT] = {
     "input-mouse.png",
     "fonts.png",
     "preferences-desktop-display.png",
+    "input-keyboard.png"
 };
 
 static int settings_icon_main_state[SETTINGS_ICON_COUNT];
@@ -508,25 +510,7 @@ static void control_panel_paint_main(ui_window_t win) {
     // Keyboard
     item_y += item_h + item_spacing;
     widget_button_draw(&settings_ctx, &btn_main_keyboard);
-    // Keyboard icon
-    int kx = offset_x + 12;
-    int ky = offset_y + item_y + 16;
-    ui_draw_rect(win, kx, ky, 40, 24, 0xFF555555);
-    ui_draw_rect(win, kx, ky, 40, 2, 0xFF777777);
-    ui_draw_rect(win, kx, ky + 22, 40, 2, 0xFF333333);
-    for (int row = 0; row < 3; row++) { // keys
-        for (int col = 0; col < 8; col++) {
-            ui_draw_rect(
-                win,
-                kx + 3 + col * 4,
-                ky + 4 + row * 6,
-                3,
-                3,
-                0xFFBBBBBB
-            );
-        }
-    }
-    ui_draw_rect(win, kx + 10, ky + 18, 20, 3, 0xFFAAAAAA); // spacebar
+    settings_draw_icon(win, SETTINGS_ICON_KEYBOARD, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Keyboard", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Keyboard layout", COLOR_DKGRAY);
 }
