@@ -106,8 +106,6 @@
 #define SPAWN_FLAG_INHERIT_TTY 0x2
 #define SPAWN_FLAG_TTY_ID 0x4
 #define SPAWN_FLAG_BACKGROUND 0x8
-#define SYSTEM_CMD_SET_KEYBOARD_LAYOUT 49
-#define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 50
 
 // ELF app metadata (mirrors src/sys/elf.h, kept in sync manually)
 #define BOREDOS_APP_METADATA_MAX_APP_NAME   64
