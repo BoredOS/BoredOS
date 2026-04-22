@@ -13,10 +13,33 @@ The documentation is organized into three main categories:
 
 ### 1. [Architecture](architecture/)
 Explains the logical layout of the kernel and internal components.
--   [`Core`](architecture/core.md): Kernel source layout and the boot process (Limine, Multiboot2).
--   [`Memory`](architecture/memory.md): Physical Memory Management (PMM) and Virtual Memory Management (VMM).
--   [`Filesystem`](architecture/filesystem.md): Virtual File System (VFS) and the RAM-based FAT32 simulation.
--   [`Window Manager`](architecture/window_manager.md): How the built-in Window Manager natively handles graphics, events, and compositing.
+
+#### System
+-   [`Core`](architecture/system/core.md): Kernel source layout and the boot process (Limine, Multiboot2).
+-   [`Processes & Scheduling`](architecture/system/processes.md): Multitasking, context switching, and ELF loading.
+-   [`Interrupts & Exceptions`](architecture/system/interrupts.md): IDT, GDT, and exception handling.
+
+#### Memory
+-   [`Memory (PMM/VMM)`](architecture/memory/memory.md): Physical Memory Management and Virtual Memory Management.
+-   [`Memory Manager`](architecture/memory/memory_manager.md): Slab allocator and block allocator for kernel heap.
+
+#### Storage & Filesystems
+-   [`Filesystem`](architecture/storage/filesystem.md): Virtual File System (VFS) and the RAM-based FAT32 simulation.
+-   [`AHCI Drivers`](architecture/storage/ahci_drivers.md): Hardware communication for block storage devices.
+
+#### Network
+-   [`Network Stack`](architecture/network/network_stack.md): TCP/IP implementation and socket APIs.
+-   [`Network Drivers`](architecture/network/network_drivers.md): Hardware interaction for network cards (e.g. e1000).
+
+#### Graphics
+-   [`Window Manager`](architecture/graphics/window_manager.md): Compositor, events, and overlapping windows.
+-   [`Rendering`](architecture/graphics/rendering.md): Framebuffer, font rendering, and image loading.
+
+#### Hardware
+-   [`PCI`](architecture/hardware/pci.md): PCI bus enumeration and device binding.
+-   [`Input`](architecture/hardware/input.md): PS/2 Keyboard and Mouse input handling.
+
+#### Misc
 -   [`Versioning`](architecture/versioning.md): The OS date-based version scheme (`YY.M[.x]`) and kernel semantic versioning (`MAJOR.MINOR.PATCH`).
 
 ### 2. [Building and Deployment](build/)
