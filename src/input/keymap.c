@@ -16,10 +16,20 @@ typedef struct {
     uint32_t result;
 } compose_entry_t;
 
-// QWERTY LAYOUT US
+/*
+HOW TO ADD A NEW LAYOUT:
+1. Add a new entry to the keymap_id_t enum in keymap.h
+2. Create a new keyboard_layout_t instance in keymap.c, filling the entries array with the appropriate codepoints for each keycode and modifier combination. Use 0 for unused combinations.
+3. Add the new layout to the g_layouts array in keymap.c
+4. (Optional) If your layout has dead keys, add the appropriate entries to the g_compose_table array in keymap.c, defining how dead keys combine with base characters to produce composed characters.
+5. Add the layout to /src/userland/gui/settings.c 
+*/
+
+// QWERTY LAYOUT US (DEFAULT)
 static const keyboard_layout_t layout_qwerty = {
     "QWERTY (US)",
     .entries = {
+        // [KEYCODE] = {normal, shift, altgr, shift_altgr, dead_mask, alpha}
         [KEY_1] = {'1', '!', 0, 0, 0, false},
         [KEY_2] = {'2', '@', 0, 0, 0, false},
         [KEY_3] = {'3', '#', 0, 0, 0, false},
