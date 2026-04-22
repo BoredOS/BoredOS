@@ -63,6 +63,9 @@ struct Window {
     void (*handle_key)(Window *win, int legacy, uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed);
     void (*handle_click)(Window *win, int x, int y);
     void (*handle_right_click)(Window *win, int x, int y);
+    void (*handle_mouse_down)(Window *win, int x, int y);
+    void (*handle_mouse_up)(Window *win, int x, int y);
+    void (*handle_mouse_move)(Window *win, int x, int y, uint8_t buttons);
     void (*handle_close)(Window *win);
     void (*handle_resize)(Window *win, int w, int h);
     bool resizable;

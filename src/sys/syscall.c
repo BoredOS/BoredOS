@@ -304,6 +304,9 @@ static uint64_t gui_cmd_window_create(const syscall_args_t *args) {
     win->paint = user_window_paint;
     win->handle_click = user_window_click;
     win->handle_right_click = user_window_right_click;
+    win->handle_mouse_down = user_window_mouse_down;
+    win->handle_mouse_up = user_window_mouse_up;
+    win->handle_mouse_move = user_window_mouse_move;
     win->handle_close = user_window_close;
     win->handle_key = user_window_key;
     win->handle_resize = user_window_resize;

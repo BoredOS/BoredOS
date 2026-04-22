@@ -14,8 +14,8 @@
 #define DEFAULT_ROWS 41
 #define SCROLLBACK_LINES 800
 #define SCROLLBACK_COLS 256
-#define CHAR_W 8
-#define DEFAULT_LINE_H 10
+static int g_char_w = 8;
+static int g_line_h = 10;
 #define TAB_BAR_H 20
 #define CONTENT_PAD_BOTTOM 20
 #define TAB_CLOSE_W 12
@@ -63,9 +63,25 @@ static int g_tab_count = 0;
 static int g_active_tab = 0;
 static int g_cols = DEFAULT_COLS;
 static int g_rows = DEFAULT_ROWS;
-static int g_line_h = DEFAULT_LINE_H;
-static int g_win_w = DEFAULT_COLS * CHAR_W;
-static int g_win_h = TAB_BAR_H + (DEFAULT_ROWS * DEFAULT_LINE_H);
+static int g_win_w = DEFAULT_COLS * 8;
+static int g_win_h = TAB_BAR_H + (DEFAULT_ROWS * 10);
+
+static void update_font_metrics(void) {
+    int h = (int)ui_get_font_height();
+    if (h > 0) g_line_h = h;
+    else g_line_h = 15;
+
+    // For non-monospace fonts, we find the widest character to use as our grid cell width
+    int max_w = 0;
+    for (int i = 32; i < 127; i++) {
+        char buf[2] = { (char)i, 0 };
+        int w = (int)ui_get_string_width(buf);
+        if (w > max_w) max_w = w;
+    }
+    
+    if (max_w > 0) g_char_w = max_w;
+    else g_char_w = 8;
+}
 
 static void str_copy(char *dst, const char *src, int max_len) {
     int i = 0;
@@ -563,7 +579,7 @@ static bool has_space(const char *s) {
 }
 
 static void terminal_resize(int w, int h) {
-    int min_w = CHAR_W * 40;
+    int min_w = g_char_w * 40;
     int min_h = TAB_BAR_H + (g_line_h * 10);
     if (w < min_w) w = min_w;
     if (h < min_h) h = min_h;
@@ -571,9 +587,9 @@ static void terminal_resize(int w, int h) {
     g_win_w = w;
     g_win_h = h;
 
-    int new_cols = w / CHAR_W;
+    int new_cols = w / g_char_w;
     int content_h = h - TAB_BAR_H - CONTENT_PAD_BOTTOM;
-    if (g_line_h <= 0) g_line_h = DEFAULT_LINE_H;
+    if (g_line_h <= 0) g_line_h = 15;
     if (content_h < g_line_h) content_h = g_line_h;
     int new_rows = content_h / g_line_h;
     if (new_cols < 10) new_cols = 10;
@@ -676,7 +692,7 @@ static void draw_tabs(void) {
         char label[64];
         get_tab_title(&g_tabs[i], title, sizeof(title));
         int text_w = tab_w - 10 - (TAB_CLOSE_PAD + TAB_CLOSE_W);
-        int max_chars = text_w / CHAR_W;
+        int max_chars = text_w / g_char_w;
         if (max_chars < 4) max_chars = 4;
         truncate_label(title, label, max_chars);
         ui_draw_string(g_win, x + 6, 4, label, 0xFFFFFFFF);
@@ -738,16 +754,16 @@ static void draw_session(TerminalSession *s) {
             }
 
             char str[2] = { ch, 0 };
-            int x = col * CHAR_W;
+            int x = col * g_char_w;
             int y = base_y + row * g_line_h;
-            ui_draw_string_bitmap(g_win, x, y, str, color);
+            ui_draw_string(g_win, x, y, str, color);
         }
     }
 
     if (s->scroll_offset == 0) {
-        int cx = s->cursor_col * CHAR_W;
+        int cx = s->cursor_col * g_char_w;
         int cy = base_y + s->cursor_row * g_line_h;
-        ui_draw_rect(g_win, cx, cy + g_line_h - 2, CHAR_W, 2, 0xFFFFFFFF);
+        ui_draw_rect(g_win, cx, cy + g_line_h - 2, g_char_w, 2, 0xFFFFFFFF);
     }
 
     ui_mark_dirty(g_win, 0, 0, g_win_w, g_win_h);
@@ -1072,9 +1088,15 @@ static void handle_key(gui_event_t *ev) {
 int main(void) {
     g_win = ui_window_create("Terminal", 60, 60, g_win_w, g_win_h);
     ui_window_set_resizable(g_win, true);
+    
+    char font_path[128];
+    if (read_config_value("TERMINAL_FONT", font_path, sizeof(font_path)) == 0) {
+        ui_set_font(g_win, font_path);
+    } else {
+        ui_set_font(g_win, "/Library/Fonts/JetBrainsMono-Regular.ttf");
+    }
+    update_font_metrics();
 
-    int fh = (int)ui_get_font_height();
-    if (fh > 0) g_line_h = fh;
     terminal_resize(g_win_w, g_win_h);
 
     int idx = create_tab();

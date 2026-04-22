@@ -3575,10 +3575,12 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
                 }
             }
         }
-        if (topmost && topmost->data) {
+        if (topmost) {
             active_mouse_capture_win = topmost;
-            if (my >= topmost->y + 20)
-                syscall_send_mouse_down_event(topmost, mx - topmost->x, my - topmost->y - 20);
+            int rel_x = mx - topmost->x;
+            int rel_y = my - topmost->y - 20;
+            if (rel_y >= 0 && topmost->handle_mouse_down)
+                topmost->handle_mouse_down(topmost, rel_x, rel_y);
         } else {
             active_mouse_capture_win = NULL;
         }
@@ -3600,10 +3602,11 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
             }
         }
         
-        if (target && target->data) {
+        if (target) {
+            int rel_x = mx - target->x;
             int rel_y = my - target->y - 20;
-            // Provide coordinates clamped if escaping bounds slightly on UP? Usually raw is fine.
-            syscall_send_mouse_up_event(target, mx - target->x, rel_y);
+            if (target->handle_mouse_up)
+                target->handle_mouse_up(target, rel_x, rel_y);
         }
         active_mouse_capture_win = NULL;
     }
@@ -3624,9 +3627,11 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
             }
         }
         
-        if (target && target->data) {
+        if (target) {
+            int rel_x = mx - target->x;
             int rel_y = my - target->y - 20;
-            syscall_send_mouse_move_event(target, mx - target->x, rel_y, buttons);
+            if (target->handle_mouse_move)
+                target->handle_mouse_move(target, rel_x, rel_y, buttons);
         }
     }
     
@@ -3638,8 +3643,6 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
         wm_mark_dirty(prev_mx, prev_my, CURSOR_W, CURSOR_H);
         wm_mark_dirty(mx, my, CURSOR_W, CURSOR_H);
     }
-    
-    prev_left = left;
 }
 
 void wm_handle_mouse(int dx, int dy, uint8_t buttons, int dz) {

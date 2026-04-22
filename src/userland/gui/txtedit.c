@@ -16,8 +16,8 @@
 
 #define EDITOR_MAX_LINES 128
 #define EDITOR_MAX_LINE_LEN 256
-#define EDITOR_LINE_HEIGHT 16
-#define EDITOR_CHAR_WIDTH 8
+static int editor_line_height = 16;
+static int editor_char_width = 8;
 
 typedef struct {
     char content[EDITOR_MAX_LINE_LEN];
@@ -99,7 +99,11 @@ static void editor_ensure_cursor_visible(void) {
     int header_h = 32;
     int footer_h = 24;
     int editor_h = win_h - header_h - footer_h;
-    int visible_lines = (editor_h - 10) / EDITOR_LINE_HEIGHT;
+    
+    if (editor_line_height == 0) editor_line_height = ui_get_font_height();
+    if (editor_line_height < 10) editor_line_height = 16;
+
+    int visible_lines = (editor_h - 10) / editor_line_height;
     
     if (cursor_line < scroll_top) {
         scroll_top = cursor_line;
@@ -267,25 +271,26 @@ static void editor_paint(ui_window_t win) {
     ui_draw_rounded_rect_filled(win, save_btn_x, save_btn_y, save_btn_w, save_btn_h, 6, COLOR_DARK_BORDER);
     ui_draw_string(win, save_btn_x + 18, save_btn_y + 4, "Save", COLOR_DARK_TEXT);
     
-    if (file_modified) {
-        ui_draw_string(win, padding + content_width - 180, 8, "[Modified]", COLOR_RED);
-    }
+    ui_draw_rect(win, 0, editor_y, win_w, editor_h, COLOR_DARK_BG);
     
-    // Editor background
-    ui_draw_rect(win, padding, editor_y, content_width, editor_h, COLOR_DARK_BG);
+    editor_line_height = ui_get_font_height();
+    if (editor_line_height < 10) editor_line_height = 16;
     
-    int text_start_x = padding + 40;
-    int available_width = content_width - 40;
-    int max_chars_per_line = available_width / EDITOR_CHAR_WIDTH;
-    if (max_chars_per_line < 1) max_chars_per_line = 1;
+    char max_line_str[16];
+    itoa(line_count, max_line_str);
+    int line_num_w = ui_get_string_width(max_line_str) + 10;
+    if (line_num_w < 30) line_num_w = 30;
+
+    int text_start_x = padding + line_num_w + 5;
+    int available_width = win_w - text_start_x - padding - 10;
     
-    int visible_lines = (editor_h - 10) / EDITOR_LINE_HEIGHT;
+    int visible_lines = (editor_h - 10) / editor_line_height;
     int max_display_lines = visible_lines;
     
     int display_line = 0;
     int line_idx = scroll_top;
     while (line_idx < line_count && display_line < max_display_lines) {
-        int display_y = editor_y + 5 + display_line * EDITOR_LINE_HEIGHT;
+        int display_y = editor_y + 5 + display_line * editor_line_height;
         
         // Line number
         char line_num_str[16];
@@ -315,14 +320,20 @@ static void editor_paint(ui_window_t win) {
         
         while ((char_idx < text_len || (text_len == 0 && first_pass)) && display_line < max_display_lines) {
             first_pass = 0;
-            int current_display_y = editor_y + 5 + display_line * EDITOR_LINE_HEIGHT;
+            int current_display_y = editor_y + 5 + display_line * editor_line_height;
             
             char segment[256];
             int segment_len = 0;
             int segment_start = char_idx;
             
-            while (char_idx < text_len && segment_len < max_chars_per_line) {
-                segment[segment_len++] = text[char_idx++];
+            while (char_idx < text_len && segment_len < 254) {
+                segment[segment_len] = text[char_idx];
+                segment[segment_len + 1] = 0;
+                if (ui_get_string_width(segment) > available_width) {
+                    break;
+                }
+                segment_len++;
+                char_idx++;
             }
             segment[segment_len] = 0;
             
@@ -354,9 +365,14 @@ static void editor_paint(ui_window_t win) {
                 } else if (cursor_col == text_len && segment_end == text_len) {
                     draw_cursor = 1;
                 }
+                
                 if (draw_cursor) {
-                    int cursor_x = text_start_x + ((cursor_col - segment_start) * EDITOR_CHAR_WIDTH);
-                    ui_draw_rect(win, cursor_x, current_display_y, 2, 10, COLOR_WHITE);
+                    char before_cursor[256];
+                    int len_before = cursor_col - segment_start;
+                    for(int i=0; i<len_before; i++) before_cursor[i] = segment[i];
+                    before_cursor[len_before] = 0;
+                    int cursor_x = text_start_x + ui_get_string_width(before_cursor);
+                    ui_draw_rect(win, cursor_x, current_display_y, 2, editor_line_height - 4, COLOR_WHITE);
                 }
             }
             

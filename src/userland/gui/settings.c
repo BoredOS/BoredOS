@@ -61,7 +61,6 @@ static widget_textbox_t tb_ip, tb_dns;
 static widget_button_t btn_apply, btn_back;
 
 #define MAX_WALLPAPERS 10
-#define MAX_FONTS 16
 
 static widget_button_t btn_main_wallpaper, btn_main_network, btn_main_desktop, btn_main_mouse, btn_main_fonts, btn_main_display, btn_main_keyboard;
 static widget_button_t btn_wp_colors[6];
@@ -75,7 +74,16 @@ static widget_button_t btn_net_set_ip, btn_net_set_dns;
 static widget_button_t btn_dt_cols_minus, btn_dt_cols_plus;
 static widget_button_t btn_dt_rows_minus, btn_dt_rows_plus;
 
-static widget_button_t btn_fonts[MAX_FONTS];
+typedef struct {
+    char path[128];
+    char name[48];
+} font_entry_t;
+
+static widget_button_t *btn_fonts = NULL;
+static font_entry_t *fonts = NULL;
+static int font_capacity = 0;
+static widget_scrollbar_t font_scrollbar;
+static int font_scroll_y = 0;
 static widget_textbox_t tb_custom_w, tb_custom_h;
 
 #define SETTINGS_ICON_MAIN_SIZE 32
@@ -199,12 +207,6 @@ static int desktop_max_rows_per_col = 10;
 static int desktop_max_cols = 10;
 static int mouse_speed = 10;
 
-// Font selection
-typedef struct {
-    char path[128];
-    char name[48];
-} font_entry_t;
-static font_entry_t fonts[MAX_FONTS];
 static int font_count = 0;
 static int selected_font = -1;
 
@@ -792,13 +794,25 @@ static void control_panel_paint_mouse(ui_window_t win) {
     ui_draw_string(win, offset_x + 280, section_y + 4, speed_str, COLOR_DARK_TEXT);
 }
 
+static void on_font_scroll(void *user_data, int new_scroll_y) {
+    (void)user_data;
+    font_scroll_y = new_scroll_y;
+}
+
 static void load_fonts(void) {
     font_count = 0;
-    FAT32_FileInfo info[MAX_FONTS];
-    int count = sys_list("/Library/Fonts", info, MAX_FONTS);
+    FAT32_FileInfo info[256]; 
+    int count = sys_list("/Library/Fonts", info, 256);
     if (count < 0) return;
 
-    for (int i = 0; i < count && font_count < MAX_FONTS; i++) {
+    if (fonts) free(fonts);
+    if (btn_fonts) free(btn_fonts);
+    
+    fonts = (font_entry_t *)malloc(sizeof(font_entry_t) * count);
+    btn_fonts = (widget_button_t *)malloc(sizeof(widget_button_t) * count);
+    font_capacity = count;
+
+    for (int i = 0; i < count; i++) {
         if (info[i].is_directory) continue;
         // check if .ttf (case-insensitive)
         int len = 0; while (info[i].name[len]) len++;
@@ -819,10 +833,14 @@ static void load_fonts(void) {
         for (int j = 0; j < nl - 4 && j < 47; j++) fe->name[j] = info[i].name[j];
         fe->name[(nl-4 < 47) ? nl-4 : 47] = 0;
 
-        widget_button_init(&btn_fonts[font_count], 8, 66 + (font_count * 40), 330, 35, "");
+        widget_button_init(&btn_fonts[font_count], 8, 0, 310, 35, "");
 
         font_count++;
     }
+
+    widget_scrollbar_init(&font_scrollbar, 330, 66, 12, 420);
+    font_scrollbar.content_height = font_count * 40;
+    font_scrollbar.on_scroll = (void(*)(void*,int))on_font_scroll;
 }
 
 static void control_panel_paint_fonts(ui_window_t win) {
@@ -833,17 +851,26 @@ static void control_panel_paint_fonts(ui_window_t win) {
     
     ui_draw_string(win, offset_x, offset_y + 40, "System Font:", COLOR_DARK_TEXT);
     
-    int item_y = offset_y + 60;
+    int list_y = 66;
+    int list_h = 420;
+    
+    // Draw fonts
     for (int i = 0; i < font_count; i++) {
+        int item_y = list_y + (i * 40) - font_scroll_y;
+        
+        // Only draw if visible
+        if (item_y + 35 < list_y || item_y > list_y + list_h) continue;
+        
+        btn_fonts[i].y = item_y;
         widget_button_draw(&settings_ctx, &btn_fonts[i]);
+        
         settings_draw_icon(win, SETTINGS_ICON_FONTS, offset_x + 10, item_y + 9, true);
-        // Font name
         ui_draw_string(win, offset_x + 40, item_y + 9, fonts[i].name, COLOR_DARK_TEXT);
         if (i == selected_font) {
-            ui_draw_string(win, offset_x + 290, item_y + 9, "*", 0xFF90EE90);
+            ui_draw_string(win, offset_x + 270, item_y + 9, "*", 0xFF90EE90);
         }
-        item_y += 40;
     }
+        widget_scrollbar_draw(&settings_ctx, &font_scrollbar);
 }
 
 static void control_panel_paint_display(ui_window_t win) {
@@ -1137,9 +1164,22 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
     }
 
     if (current_view == VIEW_FONTS) {
+        if (widget_scrollbar_handle_mouse(&font_scrollbar, x, y, is_down, NULL)) {
+            return;
+        }
+        int list_y = 66;
         for (int i=0; i<font_count; i++) {
+            int item_y = list_y + (i * 40) - font_scroll_y;
+            if (item_y + 35 < list_y || item_y > 486) continue;
+
+            btn_fonts[i].y = item_y;
             if (widget_button_handle_mouse(&btn_fonts[i], x, y, is_down, is_click, NULL)) {
-                if (is_click) { selected_font = i; sys_system(SYSTEM_CMD_SET_FONT, (uint64_t)fonts[i].path, 0, 0, 0); btn_fonts[i].pressed=false;} return;
+                if (is_click) { 
+                    selected_font = i; 
+                    sys_system(SYSTEM_CMD_SET_FONT, (uint64_t)fonts[i].path, 0, 0, 0); 
+                    btn_fonts[i].pressed=false;
+                } 
+                return;
             }
         }
     }
@@ -1326,48 +1366,76 @@ int main(int argc, char **argv) {
 
     init_settings_widgets();
 
-    desktop_snap_to_grid = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 1, 0, 0, 0);
-    desktop_auto_align   = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 2, 0, 0, 0);
+    desktop_snap_to_grid    = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 1, 0, 0, 0);
+    desktop_auto_align      = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 2, 0, 0, 0);
     desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
-    desktop_max_cols = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
-    mouse_speed = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
+    desktop_max_cols        = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
+    mouse_speed             = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
     load_settings_icons();
-    
-    // Set initial toggle states
-    chk_snap.checked = desktop_snap_to_grid;
-    chk_align.checked = desktop_auto_align;
-    drop_res.selected_idx = disp_sel_res;
+
+    // Set initial widget states
+    chk_snap.checked        = desktop_snap_to_grid;
+    chk_align.checked       = desktop_auto_align;
+    drop_res.selected_idx   = disp_sel_res;
     drop_color.selected_idx = disp_sel_color;
 
-    keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0,0,0,0);
+    keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0, 0, 0, 0);
     drop_keyboard.selected_idx = keyboard_layout;
 
     control_panel_paint(win);
     ui_mark_dirty(win, 0, 0, 350, 500);
 
-    load_wallpapers(); // loading wallpapers after painting to avoid delays on initial load
+    load_wallpapers(); // load after first paint to avoid startup delay
 
     gui_event_t ev;
     while (1) {
+        bool dirty = false;
+
         if (ui_get_event(win, &ev)) {
-
             if (ev.type == GUI_EVENT_PAINT) {
-                control_panel_paint(win);
-                ui_mark_dirty(win, 0, 0, 350, 500);
+                dirty = true;
 
-            } else if (ev.type == GUI_EVENT_CLICK || ev.type == GUI_EVENT_MOUSE_DOWN) {
+            } else if (ev.type == GUI_EVENT_CLICK ||
+                       ev.type == GUI_EVENT_MOUSE_DOWN ||
+                       ev.type == GUI_EVENT_MOUSE_MOVE ||
+                       ev.type == GUI_EVENT_MOUSE_UP) {
+                bool down = false;
+
+                if (ev.type == GUI_EVENT_MOUSE_DOWN || ev.type == GUI_EVENT_CLICK) {
+                    down = true;
+                } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
+                    down = (ev.arg3 & 1);
+                } else if (ev.type == GUI_EVENT_MOUSE_UP) {
+                    down = false;
+                }
+
                 control_panel_handle_mouse(
-                    ev.arg1, ev.arg2,
-                    ev.type == GUI_EVENT_MOUSE_DOWN,
+                    ev.arg1,
+                    ev.arg2,
+                    down,
                     ev.type == GUI_EVENT_CLICK
                 );
-                control_panel_paint(win);
-                ui_mark_dirty(win, 0, 0, 350, 500);
+                dirty = true;
+
+            } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
+                if (current_view == VIEW_FONTS) {
+                    font_scroll_y -= ev.arg1 * 20;
+                    int max_scroll = font_scrollbar.content_height - font_scrollbar.h;
+                    if (max_scroll < 0) max_scroll = 0;
+                    if (font_scroll_y < 0) font_scroll_y = 0;
+                    if (font_scroll_y > max_scroll) font_scroll_y = max_scroll;
+
+                    widget_scrollbar_update(
+                        &font_scrollbar,
+                        font_scrollbar.content_height,
+                        font_scroll_y
+                    );
+                    dirty = true;
+                }
 
             } else if (ev.type == GUI_EVENT_KEY) {
                 control_panel_handle_key((char)ev.arg1, true);
-                control_panel_paint(win);
-                ui_mark_dirty(win, 0, 0, 350, 500);
+                dirty = true;
 
             } else if (ev.type == GUI_EVENT_KEYUP) {
                 control_panel_handle_key((char)ev.arg1, false);
@@ -1376,6 +1444,10 @@ int main(int argc, char **argv) {
                 sys_exit(0);
             }
 
+            if (dirty) {
+                control_panel_paint(win);
+                ui_mark_dirty(win, 0, 0, 350, 500);
+            }
         } else {
             sleep(10);
         }

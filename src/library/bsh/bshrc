@@ -43,3 +43,4 @@ GLOB=true
 COMPLETE=true
 SUGGEST=true
 TERMINAL_COLOR=false
+TERMINAL_FONT="/Library/Fonts/JetBrainsMono-Regular.ttf"
