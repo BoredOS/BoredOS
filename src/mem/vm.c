@@ -132,7 +132,7 @@ static void vm_syscall(int id) {
                         if (keycode != KEY_NONE) {
                             uint32_t mods = keyboard_get_modifiers();
                             keymap_result_t r = keymap_translate_keycode(keycode, mods);
-                            if (r.is_text && !r.is_dead && r.codepoint > 0 && r.codepoint < 128) {
+                            if (r.is_text && !r.is_dead && r.codepoint > 0 && r.codepoint < 256) { // 256 bc 128 is max ASCII but we might have some extended chars
                                 c = (int)r.codepoint;
                                 break;
                             }

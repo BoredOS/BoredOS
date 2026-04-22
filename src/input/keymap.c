@@ -171,6 +171,7 @@ static const keyboard_layout_t *g_layouts[] = {
 };
 
 static keymap_id_t g_current = KEYMAP_QWERTY;
+static uint32_t g_active_dead = 0;
 
 static const compose_entry_t g_compose_table[] = {
     { '^', 'a', 0x00E2 }, { '^', 'e', 0x00EA }, { '^', 'i', 0x00EE }, { '^', 'o', 0x00F4 }, { '^', 'u', 0x00FB },
@@ -213,10 +214,12 @@ static keymap_result_t make_result(uint32_t cp, bool dead) {
 }
 
 keymap_result_t keymap_translate_keycode(uint16_t keycode, uint32_t mods) {
-    if (keycode <= 0 || keycode >= KEY_MAX) return make_result(0, false);
+    if (keycode <= 0 || keycode >= KEY_MAX) 
+        return make_result(0, false);
 
     const keymap_entry_t *e = &g_layouts[g_current]->entries[keycode];
-    if (!e->normal && !e->shift && !e->altgr && !e->shift_altgr) return make_result(0, false);
+    if (!e->normal && !e->shift && !e->altgr && !e->shift_altgr) 
+        return make_result(0, false);
 
     bool shift = (mods & KB_MOD_SHIFT) != 0;
     bool caps  = (mods & KB_MOD_CAPS) != 0;
@@ -242,7 +245,25 @@ keymap_result_t keymap_translate_keycode(uint16_t keycode, uint32_t mods) {
         dead_mask_bit = shift ? DEAD_SHIFT : DEAD_NORMAL;
     }
 
-    return make_result(cp, (e->dead_mask & dead_mask_bit) != 0);
+    bool is_dead = (e->dead_mask & dead_mask_bit) != 0;
+
+    if (is_dead && cp != 0) {
+        g_active_dead = cp;
+        return make_result(0, true);
+    }
+
+    if (g_active_dead && cp != 0) {
+        uint32_t combined = keymap_compose(g_active_dead, cp);
+        g_active_dead = 0;
+
+        if (combined != 0) {
+            return make_result(combined, false);
+        }
+
+        return make_result(cp, false);
+    }
+
+    return make_result(cp, false);
 }
 
 uint32_t keymap_compose(uint32_t dead_codepoint, uint32_t base_codepoint) {
