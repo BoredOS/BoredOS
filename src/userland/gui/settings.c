@@ -55,13 +55,14 @@ static widget_checkbox_t chk_snap;
 static widget_checkbox_t chk_align;
 static widget_dropdown_t drop_res;
 static widget_dropdown_t drop_color;
+static widget_dropdown_t drop_keyboard;
 static widget_textbox_t tb_r, tb_g, tb_b;
 static widget_textbox_t tb_ip, tb_dns;
 static widget_button_t btn_apply, btn_back;
 
 #define MAX_WALLPAPERS 10
 
-static widget_button_t btn_main_wallpaper, btn_main_network, btn_main_desktop, btn_main_mouse, btn_main_fonts, btn_main_display;
+static widget_button_t btn_main_wallpaper, btn_main_network, btn_main_desktop, btn_main_mouse, btn_main_fonts, btn_main_display, btn_main_keyboard;
 static widget_button_t btn_wp_colors[6];
 static widget_button_t btn_wp_patterns[2];
 static widget_button_t btn_wp_apply;
@@ -99,7 +100,8 @@ enum settings_icon_id {
     SETTINGS_ICON_MOUSE,
     SETTINGS_ICON_FONTS,
     SETTINGS_ICON_DISPLAY,
-    SETTINGS_ICON_COUNT
+    SETTINGS_ICON_KEYBOARD,
+    SETTINGS_ICON_COUNT,// must be last
 };
 
 static const char *settings_icon_names[SETTINGS_ICON_COUNT] = {
@@ -109,6 +111,7 @@ static const char *settings_icon_names[SETTINGS_ICON_COUNT] = {
     "input-mouse.png",
     "fonts.png",
     "preferences-desktop-display.png",
+    "input-keyboard.png"
 };
 
 static int settings_icon_main_state[SETTINGS_ICON_COUNT];
@@ -134,6 +137,7 @@ static uint32_t settings_icon_list_pixels[SETTINGS_ICON_COUNT][SETTINGS_ICON_LIS
 #define VIEW_MOUSE 4
 #define VIEW_FONTS 5
 #define VIEW_DISPLAY 6
+#define VIEW_KEYBOARD 7
 
 static int disp_sel_res = 2;
 static int disp_sel_color = 0;
@@ -148,6 +152,7 @@ static char net_ip[16] = "";
 static char net_dns[16] = "";
 static int focused_field = -1;
 static int input_cursor = 0;
+static int keyboard_layout = 0;
 
 static int dyn_res_w[3];
 static int dyn_res_h[3];
@@ -503,6 +508,13 @@ static void control_panel_paint_main(ui_window_t win) {
     settings_draw_icon(win, SETTINGS_ICON_DISPLAY, offset_x + 16, offset_y + item_y + 14, false);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Display", COLOR_DARK_TEXT);
     ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Screen resolution & color", COLOR_DKGRAY);
+
+    // Keyboard
+    item_y += item_h + item_spacing;
+    widget_button_draw(&settings_ctx, &btn_main_keyboard);
+    settings_draw_icon(win, SETTINGS_ICON_KEYBOARD, offset_x + 16, offset_y + item_y + 14, false);
+    ui_draw_string(win, offset_x + 60, offset_y + item_y + 15, "Keyboard", COLOR_DARK_TEXT);
+    ui_draw_string(win, offset_x + 60, offset_y + item_y + 35, "Keyboard layout", COLOR_DKGRAY);
 }
 
 static void control_panel_paint_wallpaper(ui_window_t win) {
@@ -891,6 +903,19 @@ static void control_panel_paint_display(ui_window_t win) {
     widget_dropdown_draw(&settings_ctx, &drop_color);
 }
 
+static void control_panel_paint_keyboard(ui_window_t win) {
+    int offset_x = 8;
+    int offset_y = 6;
+
+    widget_button_draw(&settings_ctx, &btn_back);
+
+    ui_draw_string(win, offset_x, offset_y + 40, "Keyboard Layout:", COLOR_DARK_TEXT);
+
+    widget_dropdown_draw(&settings_ctx, &drop_keyboard);
+
+    widget_button_draw(&settings_ctx, &btn_apply);
+}
+
 static void control_panel_paint(ui_window_t win) {
     // Fill background
     ui_draw_rect(win, 0, 0, 350, 500, COLOR_DARK_BG);
@@ -911,6 +936,8 @@ static void control_panel_paint(ui_window_t win) {
         control_panel_paint_fonts(win);
     } else if (current_view == VIEW_DISPLAY) {
         control_panel_paint_display(win);
+    } else if (current_view == VIEW_KEYBOARD) {
+        control_panel_paint_keyboard(win);
     }
 }
 
@@ -1185,6 +1212,14 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
             if (is_click) { current_view = VIEW_DISPLAY; focused_field = -1; btn_main_display.pressed = false; }
             return;
         }
+        if (widget_button_handle_mouse(&btn_main_keyboard, x, y, is_down, is_click, NULL)) {
+            if (is_click) {
+                current_view = VIEW_KEYBOARD;
+                focused_field = -1;
+                btn_main_keyboard.pressed = false;
+            }
+            return;
+        }
     }
 
     if (current_view == VIEW_MOUSE) {
@@ -1209,6 +1244,22 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
         }
         if (widget_textbox_handle_mouse(&tb_custom_h, x, y, is_click, NULL)) {
             focused_field = 4; disp_sel_res = 5; input_cursor = tb_custom_h.cursor_pos; return;
+        }
+    }
+
+    if (current_view == VIEW_KEYBOARD) {
+
+        if (widget_dropdown_handle_mouse(&drop_keyboard, x, y, is_click, NULL)) {
+            keyboard_layout = drop_keyboard.selected_idx;
+            return;
+        }
+
+        if (widget_button_handle_mouse(&btn_apply, x, y, is_down, is_click, NULL)) {
+            if (is_click) {
+                sys_system(SYSTEM_CMD_SET_KEYBOARD_LAYOUT, keyboard_layout, 0,0,0);
+                btn_apply.pressed = false;
+            }
+            return;
         }
     }
 }
@@ -1253,6 +1304,9 @@ static void init_settings_widgets(void) {
     static const char *color_opts[] = {"32-bit", "16-bit", "256 Colors", "Grayscale", "Monochrome"};
     widget_dropdown_init(&drop_color, 168, 66, 140, 30, color_opts, 5);
 
+    static const char *keyboard_opts[] = {"QWERTY", "AZERTY", "QWERTZ", "DVORAK"}; // add more layouts here 
+    widget_dropdown_init(&drop_keyboard, 8, 80, 200, 30, keyboard_opts, 4); // increment the last number when adding more layouts
+
     widget_textbox_init(&tb_r, 33, 226, 50, 18, rgb_r, 4);
     widget_textbox_init(&tb_g, 123, 226, 50, 18, rgb_g, 4);
     widget_textbox_init(&tb_b, 213, 226, 50, 18, rgb_b, 4);
@@ -1270,7 +1324,8 @@ static void init_settings_widgets(void) {
     widget_button_init(&btn_main_desktop, 8, 6 + item_y, 334, 60, ""); item_y += 70;
     widget_button_init(&btn_main_mouse, 8, 6 + item_y, 334, 60, ""); item_y += 70;
     widget_button_init(&btn_main_fonts, 8, 6 + item_y, 334, 60, ""); item_y += 70;
-    widget_button_init(&btn_main_display, 8, 6 + item_y, 334, 60, "");
+    widget_button_init(&btn_main_display, 8, 6 + item_y, 334, 60, ""); item_y += 70;
+    widget_button_init(&btn_main_keyboard, 8, 6 + item_y, 334, 60, "");
     
     // Wallpaper View Buttons
     widget_button_init(&btn_wp_colors[0], 8, 71, 91, 25, "");
@@ -1302,54 +1357,93 @@ static void init_settings_widgets(void) {
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
+
     ui_window_t win = ui_window_create("Settings", 200, 150, 350, 500);
     if (!win) return 1;
 
     generate_lumberjack_pattern();
-    
-    fetch_kernel_state();
-    
+    init_dynamic_resolutions();
+
     init_settings_widgets();
+
+    desktop_snap_to_grid    = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 1, 0, 0, 0);
+    desktop_auto_align      = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 2, 0, 0, 0);
+    desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
+    desktop_max_cols        = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
+    mouse_speed             = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
     load_settings_icons();
-    
-    // Set initial toggle states
-    chk_snap.checked = desktop_snap_to_grid;
-    chk_align.checked = desktop_auto_align;
-    drop_res.selected_idx = disp_sel_res;
+
+    // Set initial widget states
+    chk_snap.checked        = desktop_snap_to_grid;
+    chk_align.checked       = desktop_auto_align;
+    drop_res.selected_idx   = disp_sel_res;
     drop_color.selected_idx = disp_sel_color;
-    
+
+    keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0, 0, 0, 0);
+    drop_keyboard.selected_idx = keyboard_layout;
+
+    control_panel_paint(win);
+    ui_mark_dirty(win, 0, 0, 350, 500);
+
+    load_wallpapers(); // load after first paint to avoid startup delay
+
     gui_event_t ev;
     while (1) {
         bool dirty = false;
+
         if (ui_get_event(win, &ev)) {
             if (ev.type == GUI_EVENT_PAINT) {
                 dirty = true;
-            } else if (ev.type == GUI_EVENT_CLICK || ev.type == GUI_EVENT_MOUSE_DOWN ||
-                       ev.type == GUI_EVENT_MOUSE_MOVE || ev.type == GUI_EVENT_MOUSE_UP) {
-                bool down = (ev.type == GUI_EVENT_MOUSE_DOWN || ev.type == GUI_EVENT_CLICK);
-                if (ev.type == GUI_EVENT_MOUSE_MOVE) down = (ev.arg3 & 1);
-                if (ev.type == GUI_EVENT_MOUSE_UP) down = false;
-                
-                control_panel_handle_mouse(ev.arg1, ev.arg2, down, ev.type == GUI_EVENT_CLICK);
+
+            } else if (ev.type == GUI_EVENT_CLICK ||
+                       ev.type == GUI_EVENT_MOUSE_DOWN ||
+                       ev.type == GUI_EVENT_MOUSE_MOVE ||
+                       ev.type == GUI_EVENT_MOUSE_UP) {
+                bool down = false;
+
+                if (ev.type == GUI_EVENT_MOUSE_DOWN || ev.type == GUI_EVENT_CLICK) {
+                    down = true;
+                } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
+                    down = (ev.arg3 & 1);
+                } else if (ev.type == GUI_EVENT_MOUSE_UP) {
+                    down = false;
+                }
+
+                control_panel_handle_mouse(
+                    ev.arg1,
+                    ev.arg2,
+                    down,
+                    ev.type == GUI_EVENT_CLICK
+                );
                 dirty = true;
+
             } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
                 if (current_view == VIEW_FONTS) {
                     font_scroll_y -= ev.arg1 * 20;
                     int max_scroll = font_scrollbar.content_height - font_scrollbar.h;
+                    if (max_scroll < 0) max_scroll = 0;
                     if (font_scroll_y < 0) font_scroll_y = 0;
                     if (font_scroll_y > max_scroll) font_scroll_y = max_scroll;
-                    widget_scrollbar_update(&font_scrollbar, font_scrollbar.content_height, font_scroll_y);
+
+                    widget_scrollbar_update(
+                        &font_scrollbar,
+                        font_scrollbar.content_height,
+                        font_scroll_y
+                    );
                     dirty = true;
                 }
+
             } else if (ev.type == GUI_EVENT_KEY) {
                 control_panel_handle_key((char)ev.arg1, true);
                 dirty = true;
+
             } else if (ev.type == GUI_EVENT_KEYUP) {
                 control_panel_handle_key((char)ev.arg1, false);
+
             } else if (ev.type == GUI_EVENT_CLOSE) {
                 sys_exit(0);
             }
-            
+
             if (dirty) {
                 control_panel_paint(win);
                 ui_mark_dirty(win, 0, 0, 350, 500);
@@ -1358,6 +1452,7 @@ int main(int argc, char **argv) {
             sleep(10);
         }
     }
+
     return 0;
 }
 

@@ -44,9 +44,10 @@
 
 typedef struct {
     int type;
-    int arg1; // For click: x
-    int arg2; // For click: y
-    int arg3; // For click: button state
+    int arg1; // CLICK: x / KEY: legacy char-or-compat key
+    int arg2; // CLICK: y / KEY: keycode
+    int arg3; // CLICK: button state / KEY: modifier mask
+    int arg4; // KEY: Unicode codepoint (0 if none)
 } gui_event_t;
 
 // Window Handle

@@ -60,7 +60,7 @@ struct Window {
     
     // Callbacks
     void (*paint)(Window *win);
-    void (*handle_key)(Window *win, char c, bool pressed);
+    void (*handle_key)(Window *win, int legacy, uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed);
     void (*handle_click)(Window *win, int x, int y);
     void (*handle_right_click)(Window *win, int x, int y);
     void (*handle_mouse_down)(Window *win, int x, int y);
@@ -91,7 +91,7 @@ typedef struct {
 
 void wm_init(void);
 void wm_handle_mouse(int dx, int dy, uint8_t buttons, int dz);
-void wm_handle_key(char c, bool pressed);
+void wm_handle_key_event(uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed);
 void wm_handle_click(int x, int y);
 void wm_handle_right_click(int x, int y);
 void wm_process_input(void);
