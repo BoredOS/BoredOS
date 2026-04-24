@@ -177,6 +177,15 @@ Invalid sequences are replaced with:
 - UTF-8 encoding: `0xEF 0xBF 0xBD`
 
 ---
+### UTF-8 Byte Structure
+
+The following diagram illustrates how UTF-8 bytes are structured, including
+ASCII, continuation bytes, and multi-byte sequence headers:
+
+<img width="815" height="1003" alt="image" src="https://github.com/user-attachments/assets/0d289a94-6037-4039-87a3-125c0c0e83d0" />
+<sub>Source: <a href="https://www.youtube.com/watch?v=vpSkBV5vydg">Nic Barker — "UTF-8, Explained Simply"</a> (YouTube)</sub>
+
+---
 
 ### Control Signals
 
@@ -233,30 +242,10 @@ Example:
 
 ---
 
-## Limitations
+## Also worth watching
 
-- No full UTF-8 validation (overlong, surrogates not fully rejected)
-- No grapheme cluster handling
-- No Unicode normalization
+If you want to dive deeper or simply get a better intuitive understanding of UTF-8, the video below is highly recommended:
 
----
+[Nic Barker — "UTF-8, Explained Simply"](https://www.youtube.com/watch?v=vpSkBV5vydg)
 
-## Best Practices
 
-- Never iterate UTF-8 strings byte-by-byte
-- Always use provided helpers for navigation
-- Separate byte length from character count
-- Handle invalid sequences safely
-
----
-
-## Summary
-
-This module provides essential UTF-8 primitives for userland applications.
-
-It should be used whenever an application needs to safely:
-
-- decode UTF-8
-- encode Unicode
-- traverse text
-- handle user input correctly
