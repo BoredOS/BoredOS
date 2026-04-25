@@ -60,6 +60,7 @@ static widget_dropdown_t drop_keyboard;
 static widget_textbox_t tb_r, tb_g, tb_b;
 static widget_textbox_t tb_ip, tb_dns;
 static widget_button_t btn_apply, btn_back;
+static widget_slider_t slider_mouse;
 
 #define MAX_WALLPAPERS 10
 
@@ -784,10 +785,8 @@ static void control_panel_paint_mouse(ui_window_t win) {
     int section_y = offset_y + 65;
     ui_draw_string(win, offset_x, section_y, "Speed:", COLOR_DARK_TEXT);
     
-    ui_draw_rounded_rect_filled(win, offset_x + 60, section_y + 8, 200, 8, 4, COLOR_DARK_PANEL);
-    
-    int knob_x = offset_x + 60 + (mouse_speed - 1) * 190 / 49;
-    ui_draw_rounded_rect_filled(win, knob_x, section_y + 2, 10, 14, 3, 0xFF4A90E2);
+    slider_mouse.value = (float)mouse_speed;
+    widget_slider_draw(&settings_ctx, &slider_mouse);
     
     ui_draw_string(win, offset_x + 270, section_y + 4, "x", COLOR_DARK_TEXT);
     char speed_str[4];
@@ -981,6 +980,11 @@ static void fetch_kernel_state(void) {
     desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
     desktop_max_cols = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
     mouse_speed = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
+
+    if (mouse_speed < 1) mouse_speed = 1;
+    if (mouse_speed > 50) mouse_speed = 50;
+
+    slider_mouse.value = (float)mouse_speed;
     
     net_ipv4_address_t kip;
     if (sys_network_get_ip(&kip) == 0) {
@@ -1224,18 +1228,15 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
     }
 
     if (current_view == VIEW_MOUSE) {
-        if (is_down || is_click) {
-            int offset_x = 8;
-            int offset_y = 6;
-            int section_y = offset_y + 65;
-            if (x >= offset_x + 60 && x <= offset_x + 260 && y >= section_y && y <= section_y + 20) {
-                int new_speed = 1 + (x - (offset_x + 60)) * 49 / 200;
-                if (new_speed < 1) new_speed = 1;
-                if (new_speed > 50) new_speed = 50;
+        if (widget_slider_handle_mouse(&slider_mouse, x, y, is_down, is_click, NULL)) {
+            int new_speed = (int)(slider_mouse.value);
+            focused_field = -1; // slider doesn't use textbox, so clear focus on click
+
+            if (new_speed != mouse_speed) {
                 mouse_speed = new_speed;
                 save_mouse_config();
-                return;
             }
+            return;
         }
     }
     
@@ -1354,6 +1355,9 @@ static void init_settings_widgets(void) {
     // Display View Textboxes
     widget_textbox_init(&tb_custom_w, 8, 276, 60, 25, custom_res_w, 5);
     widget_textbox_init(&tb_custom_h, 88, 276, 60, 25, custom_res_h, 5);
+
+    widget_slider_init(&slider_mouse, 68, 71, 200, 20, 1.0f, 50.0f, (float)mouse_speed);
+    slider_mouse.step = 1.0f;
 }
 
 int main(int argc, char **argv) {

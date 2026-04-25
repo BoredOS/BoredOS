@@ -86,6 +86,29 @@ typedef struct {
     void (*on_toggle)(void *user_data, bool new_state);
 } widget_checkbox_t;
 
+// --- Slider ---
+typedef struct {
+    int x, y, w, h;
+
+    float min;
+    float max;
+    float value;
+    float step; // 0 = not steps
+
+    bool dragging;
+    bool hovered;
+
+    void (*on_change)(void *user_data, float value);
+} widget_slider_t;
+void widget_slider_init(widget_slider_t *sl, int x, int y, int w, int h,
+                        float min, float max, float value);
+
+void widget_slider_draw(widget_context_t *ctx, widget_slider_t *sl);
+
+bool widget_slider_handle_mouse(widget_slider_t *sl, int mx, int my,
+                                bool mouse_down, bool mouse_clicked,
+                                void *user_data);
+
 void widget_checkbox_init(widget_checkbox_t *cb, int x, int y, int w, int h, const char *text, bool is_radio);
 void widget_checkbox_draw(widget_context_t *ctx, widget_checkbox_t *cb);
 bool widget_checkbox_handle_mouse(widget_checkbox_t *cb, int mx, int my, bool mouse_clicked, void *user_data);

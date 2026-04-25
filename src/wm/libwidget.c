@@ -497,3 +497,149 @@ bool widget_checkbox_handle_mouse(widget_checkbox_t *cb, int mx, int my, bool mo
     }
     return false;
 }
+
+// --- Slider --- 
+void widget_slider_init(widget_slider_t *sl, int x, int y, int w, int h, float min, float max, float value) {
+    sl->x = x;
+    sl->y = y;
+    sl->w = w;
+    sl->h = h;
+
+    sl->min = min;
+    sl->max = max;
+    sl->value = value;
+    sl->step = 0.0f;
+
+    sl->dragging = false;
+    sl->hovered = false;
+    sl->on_change = NULL;
+}
+
+void widget_slider_draw(widget_context_t *ctx, widget_slider_t *sl) {
+    uint32_t track_bg = ctx->use_light_theme ? 0xFFD0D0D0 : 0xFF404040;
+    uint32_t fill_color = ctx->use_light_theme ? 0xFF007AFF : 0xFF4A90E2;
+    uint32_t thumb_color = ctx->use_light_theme ? 0xFF606060 : 0xFFDDDDDD;
+
+    if (sl->dragging) {
+        thumb_color = ctx->use_light_theme ? 0xFF404040 : 0xFFFFFFFF;
+    } else if (sl->hovered) {
+        thumb_color = ctx->use_light_theme ? 0xFF505050 : 0xFFF0F0F0;
+    }
+
+    int track_h = 4;
+    int track_y = sl->y + (sl->h - track_h) / 2;
+
+    float t = (sl->value - sl->min) / (sl->max - sl->min);
+    if (t < 0) t = 0;
+    if (t > 1) t = 1;
+
+    int thumb_x = sl->x + (int)(t * sl->w);
+
+    if (ctx->draw_rounded_rect_filled) {
+        ctx->draw_rounded_rect_filled(ctx->user_data, sl->x, track_y, sl->w, track_h, 2, track_bg);
+    } else {
+        ctx->draw_rect(ctx->user_data, sl->x, track_y, sl->w, track_h, track_bg);
+    }
+
+    if (ctx->draw_rounded_rect_filled) {
+        ctx->draw_rounded_rect_filled(ctx->user_data, sl->x, track_y, thumb_x - sl->x, track_h, 2, fill_color);
+    } else {
+        ctx->draw_rect(ctx->user_data, sl->x, track_y, thumb_x - sl->x, track_h, fill_color);
+    }
+
+    int radius = sl->h / 2;
+    int cx = thumb_x - radius;
+
+    if (ctx->draw_rounded_rect_filled) {
+        ctx->draw_rounded_rect_filled(ctx->user_data, cx, sl->y, sl->h, sl->h, radius, thumb_color);
+    } else {
+        ctx->draw_rect(ctx->user_data, cx, sl->y, sl->h, sl->h, thumb_color);
+    }
+}
+
+static float widget_roundf(float x) {
+    return (x >= 0.0f) ? (float)((int)(x + 0.5f)) : (float)((int)(x - 0.5f));
+}
+
+bool widget_slider_handle_mouse(widget_slider_t *sl, int mx, int my, bool mouse_down, bool mouse_clicked, void *user_data) {
+    bool in_bounds = (mx >= sl->x && mx < sl->x + sl->w &&
+                      my >= sl->y && my < sl->y + sl->h);
+
+    sl->hovered = in_bounds;
+
+    if (mouse_clicked && in_bounds) {
+        sl->dragging = true;
+    }
+
+    if (!mouse_down) {
+        sl->dragging = false;
+    }
+
+    if (sl->dragging) {
+        float t = (float)(mx - sl->x) / (float)sl->w;
+
+        if (t < 0) t = 0;
+        if (t > 1) t = 1;
+
+        float new_value = sl->min + t * (sl->max - sl->min);
+
+        if (sl->step > 0.0f) {
+             new_value = sl->min + widget_roundf((new_value - sl->min) / sl->step) * sl->step;
+        }
+
+        if (new_value != sl->value) {
+            sl->value = new_value;
+            if (sl->on_change) sl->on_change(user_data, sl->value);
+        }
+
+        return true;
+    }
+
+    return in_bounds;
+}
+
+static void widget_itoa(int value, char *buf) {
+    int i = 0;
+    int neg = 0;
+
+    if (value == 0) {
+        buf[0] = '0';
+        buf[1] = 0;
+        return;
+    }
+
+    if (value < 0) {
+        neg = 1;
+        value = -value;
+    }
+
+    while (value > 0) {
+        buf[i++] = (char)('0' + (value % 10));
+        value /= 10;
+    }
+
+    if (neg) {
+        buf[i++] = '-';
+    }
+
+    buf[i] = 0;
+
+    for (int a = 0, b = i - 1; a < b; a++, b--) {
+        char t = buf[a];
+        buf[a] = buf[b];
+        buf[b] = t;
+    }
+}
+
+void widget_slider_draw_value(widget_context_t *ctx, widget_slider_t *sl) {
+    if (!ctx->draw_string) return;
+
+    char buf[16];
+    widget_itoa((int)sl->value, buf);
+
+    ctx->draw_string(ctx->user_data,
+        sl->x + sl->w + 8,
+        sl->y + (sl->h - 8) / 2,
+        buf,
+        ctx->use_light_theme ? 0xFF000000 : 0xFFFFFFFF);
+}
