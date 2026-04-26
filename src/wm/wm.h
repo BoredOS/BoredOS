@@ -151,5 +151,7 @@ extern int desktop_max_cols;
 
 // Mouse Settings
 extern int mouse_speed;
+void wm_set_cursor_scale_tenths(int scale);
+int wm_get_cursor_scale_tenths(void);
 
 #endif

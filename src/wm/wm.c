@@ -256,9 +256,14 @@ static uint32_t timer_ticks = 0;
 
 static int last_cursor_x = 400;
 static int last_cursor_y = 300;
+static int last_cursor_w = 18;
+static int last_cursor_h = 18;
 
-#define CURSOR_W 18
-#define CURSOR_H 18
+#define CURSOR_BASE_W 18
+#define CURSOR_BASE_H 18
+#define CURSOR_SCALE_MIN_TENTHS 10
+#define CURSOR_SCALE_MAX_TENTHS 40
+#define CURSOR_SCALE_DEFAULT_TENTHS 10
 
 static bool periodic_refresh_pending = false;
 
@@ -281,9 +286,61 @@ int desktop_max_cols = 23;
 
 // Mouse Settings
 int mouse_speed = 10;       
+static int mouse_cursor_scale_tenths = CURSOR_SCALE_DEFAULT_TENTHS;
 static int mouse_accum_x = 0;
 static int mouse_accum_y = 0;
 Window *active_mouse_capture_win = NULL;
+
+static int cursor_clamp_scale_tenths(int scale) {
+    if (scale < CURSOR_SCALE_MIN_TENTHS) return CURSOR_SCALE_MIN_TENTHS;
+    if (scale > CURSOR_SCALE_MAX_TENTHS) return CURSOR_SCALE_MAX_TENTHS;
+    return scale;
+}
+
+static int cursor_scaled_size(int base, int scale_tenths) {
+    scale_tenths = cursor_clamp_scale_tenths(scale_tenths);
+    return (base * scale_tenths + 9) / 10;
+}
+
+static int cursor_width_for_scale(int scale_tenths) {
+    return cursor_scaled_size(CURSOR_BASE_W, scale_tenths);
+}
+
+static int cursor_height_for_scale(int scale_tenths) {
+    return cursor_scaled_size(CURSOR_BASE_H, scale_tenths);
+}
+
+static int cursor_current_width(void) {
+    return cursor_width_for_scale(mouse_cursor_scale_tenths);
+}
+
+static int cursor_current_height(void) {
+    return cursor_height_for_scale(mouse_cursor_scale_tenths);
+}
+
+void wm_set_cursor_scale_tenths(int scale) {
+    scale = cursor_clamp_scale_tenths(scale);
+
+    uint64_t rflags = wm_lock_acquire();
+    if (scale != mouse_cursor_scale_tenths) {
+        int old_w = cursor_current_width();
+        int old_h = cursor_current_height();
+
+        mouse_cursor_scale_tenths = scale;
+
+        wm_mark_dirty(last_cursor_x, last_cursor_y, last_cursor_w, last_cursor_h);
+        wm_mark_dirty(mx, my, old_w, old_h);
+        wm_mark_dirty(mx, my, cursor_current_width(), cursor_current_height());
+    }
+    wm_lock_release(rflags);
+}
+
+int wm_get_cursor_scale_tenths(void) {
+    uint64_t rflags = wm_lock_acquire();
+    int scale = mouse_cursor_scale_tenths;
+    wm_lock_release(rflags);
+    return scale;
+}
 
 // Helper to check if string ends with suffix
 static bool str_ends_with(const char *str, const char *suffix) {
@@ -2046,7 +2103,7 @@ void draw_window(Window *win) {
 
 void draw_cursor(int x, int y) {
     // '.' transparent, 'w' white outline, 'b' black fill
-    static const char cursor_bitmap[CURSOR_H][CURSOR_W + 1] = {
+    static const char cursor_bitmap[CURSOR_BASE_H][CURSOR_BASE_W + 1] = {
         "w.................",
         "ww................",
         "wbw...............",
@@ -2064,16 +2121,21 @@ void draw_cursor(int x, int y) {
         "wwwwbbbw..........",
         "....wbbw..........",
         ".....wbw..........",
-        "......ww..........."
+        "......ww.........."
     };
 
-    for (int r = 0; r < CURSOR_H; r++) {
-        for (int c = 0; c < CURSOR_W; c++) {
+    int draw_w = cursor_current_width();
+    int draw_h = cursor_current_height();
+
+    for (int y_off = 0; y_off < draw_h; y_off++) {
+        int r = (y_off * CURSOR_BASE_H) / draw_h;
+        for (int x_off = 0; x_off < draw_w; x_off++) {
+            int c = (x_off * CURSOR_BASE_W) / draw_w;
             char p = cursor_bitmap[r][c];
             if (p == 'w') {
-                put_pixel(x + c, y + r, COLOR_WHITE);
+                put_pixel(x + x_off, y + y_off, COLOR_WHITE);
             } else if (p == 'b') {
-                put_pixel(x + c, y + r, COLOR_BLACK);
+                put_pixel(x + x_off, y + y_off, COLOR_BLACK);
             }
         }
     }
@@ -2087,8 +2149,8 @@ static void erase_cursor(int x, int y) {
     // Clamp to screen
     int x1 = x < 0 ? 0 : x;
     int y1 = y < 0 ? 0 : y;
-    int x2 = x + CURSOR_W > sw ? sw : x + CURSOR_W;
-    int y2 = y + CURSOR_H > sh ? sh : y + CURSOR_H;
+    int x2 = x + cursor_current_width() > sw ? sw : x + cursor_current_width();
+    int y2 = y + cursor_current_height() > sh ? sh : y + cursor_current_height();
     int w = x2 - x1;
     int h = y2 - y1;
     
@@ -2492,8 +2554,10 @@ void wm_paint(void) {
     int sh = get_screen_height();
     uint64_t rflags;
     rflags = wm_lock_acquire();
-    wm_mark_dirty(last_cursor_x, last_cursor_y, CURSOR_W, CURSOR_H);
-    wm_mark_dirty(mx, my, CURSOR_W, CURSOR_H);
+    int cursor_w = cursor_current_width();
+    int cursor_h = cursor_current_height();
+    wm_mark_dirty(last_cursor_x, last_cursor_y, last_cursor_w, last_cursor_h);
+    wm_mark_dirty(mx, my, cursor_w, cursor_h);
 
     DirtyRect dirty = graphics_get_dirty_rect();
     if (menubar_dirty_pending) {
@@ -2567,6 +2631,8 @@ void wm_paint(void) {
     draw_cursor(mx, my);
     last_cursor_x = mx;
     last_cursor_y = my;
+    last_cursor_w = cursor_w;
+    last_cursor_h = cursor_h;
     graphics_flip_buffer();
     graphics_clear_dirty_no_lock();
     wm_lock_release(rflags);
@@ -3078,8 +3144,10 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
     if (my >= sh) my = sh - 1;
     
     if (move_x != 0 || move_y != 0) {
-        wm_mark_dirty(prev_mx, prev_my, CURSOR_W, CURSOR_H);
-        wm_mark_dirty(mx, my, CURSOR_W, CURSOR_H);
+        int cursor_w = cursor_current_width();
+        int cursor_h = cursor_current_height();
+        wm_mark_dirty(prev_mx, prev_my, cursor_w, cursor_h);
+        wm_mark_dirty(mx, my, cursor_w, cursor_h);
     }
     
     if (dz != 0) {
@@ -3640,8 +3708,10 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
     
     if (prev_mx != mx || prev_my != my) {
         // Cursor moved - just mark dirty cursor areas
-        wm_mark_dirty(prev_mx, prev_my, CURSOR_W, CURSOR_H);
-        wm_mark_dirty(mx, my, CURSOR_W, CURSOR_H);
+        int cursor_w = cursor_current_width();
+        int cursor_h = cursor_current_height();
+        wm_mark_dirty(prev_mx, prev_my, cursor_w, cursor_h);
+        wm_mark_dirty(mx, my, cursor_w, cursor_h);
     }
 }
 

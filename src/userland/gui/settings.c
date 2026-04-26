@@ -61,6 +61,7 @@ static widget_textbox_t tb_r, tb_g, tb_b;
 static widget_textbox_t tb_ip, tb_dns;
 static widget_button_t btn_apply, btn_back;
 static widget_slider_t slider_mouse;
+static widget_slider_t slider_cursor_size;
 
 #define MAX_WALLPAPERS 10
 
@@ -198,16 +199,20 @@ typedef struct {
     char name[64];
     uint32_t thumb[WALLPAPER_THUMB_W * WALLPAPER_THUMB_H];
     _Bool valid;
+    _Bool thumb_loaded;
 } wallpaper_entry_t;
 
 static wallpaper_entry_t wallpapers[MAX_WALLPAPERS];
 static int wallpaper_count = 0;
+static _Bool wallpapers_scanned = 0;
+static int next_wallpaper_thumb = 0;
 
 static _Bool desktop_snap_to_grid = 1;
 static _Bool desktop_auto_align = 1;
 static int desktop_max_rows_per_col = 10;
 static int desktop_max_cols = 10;
 static int mouse_speed = 10;
+static int mouse_cursor_scale_tenths = 10;
 
 static int font_count = 0;
 static int selected_font = -1;
@@ -226,6 +231,22 @@ static void cli_itoa(int num, char *str) {
         str[i] = (num % 10) + '0';
         num /= 10;
     }
+}
+
+static void format_scale_tenths(int scale_tenths, char *str) {
+    if (scale_tenths < 10) scale_tenths = 10;
+    if (scale_tenths > 40) scale_tenths = 40;
+
+    char whole[4];
+    cli_itoa(scale_tenths / 10, whole);
+    strcpy(str, whole);
+
+    int len = 0;
+    while (str[len]) len++;
+    str[len++] = '.';
+    str[len++] = (char)('0' + (scale_tenths % 10));
+    str[len++] = 'x';
+    str[len] = 0;
 }
 
 static void generate_lumberjack_pattern(void) {
@@ -385,7 +406,12 @@ static void load_settings_icons(void) {
 }
 
 static void load_wallpapers(void) {
+    if (wallpapers_scanned) return;
+
     wallpaper_count = 0;
+    next_wallpaper_thumb = 0;
+    wallpapers_scanned = 1;
+
     FAT32_FileInfo info[MAX_WALLPAPERS];
     int count = sys_list("/Library/images/Wallpapers", info, MAX_WALLPAPERS);
     if (count < 0) return;
@@ -402,6 +428,9 @@ static void load_wallpapers(void) {
         if (c1 != 'g' || c2 != 'p' || c3 != 'j') continue;
 
         wallpaper_entry_t *wp = &wallpapers[wallpaper_count];
+        wp->valid = 0;
+        wp->thumb_loaded = 0;
+
         // Set path
         char *pref = "/Library/images/Wallpapers/";
         int pl = 0; while (pref[pl]) { wp->path[pl] = pref[pl]; pl++; }
@@ -412,28 +441,6 @@ static void load_wallpapers(void) {
         for (int j = 0; j < nl - 4 && j < 63; j++) wp->name[j] = info[i].name[j];
         wp->name[(nl-4 < 63) ? nl-4 : 63] = 0;
 
-        // Load and generate thumbnail
-        int fd = sys_open(wp->path, "r");
-        if (fd >= 0) {
-            int size = sys_seek(fd, 0, 2); // SEEK_END
-            sys_seek(fd, 0, 0); // SEEK_SET
-            if (size > 0 && size < 8 * 1024 * 1024) {
-                    unsigned char *buf = (unsigned char *)malloc(size);
-                    if (buf) {
-                        sys_read(fd, buf, size);
-                        int img_w, img_h, channels;
-                        unsigned char *img = stbi_load_from_memory(buf, size, &img_w, &img_h, &channels, 4);
-                        if (img && img_w > 0 && img_h > 0) {
-                            scale_rgba_to_argb(img, img_w, img_h, wp->thumb, WALLPAPER_THUMB_W, WALLPAPER_THUMB_H);
-                            wp->valid = 1;
-                            stbi_image_free(img);
-                        }
-                        free(buf); // Release memory
-                    }
-            }
-            sys_close(fd);
-        }
-
         wallpaper_count++;
     }
 
@@ -442,6 +449,44 @@ static void load_wallpapers(void) {
         int ty = (i / 3) * (WALLPAPER_THUMB_H + 30);
         widget_button_init(&btn_wp_thumbs[i], 8 + tx, 306 + ty, WALLPAPER_THUMB_W + 8, WALLPAPER_THUMB_H + 20, "");
     }
+}
+
+static _Bool load_next_wallpaper_thumb(void) {
+    if (!wallpapers_scanned) return 0;
+
+    while (next_wallpaper_thumb < wallpaper_count) {
+        wallpaper_entry_t *wp = &wallpapers[next_wallpaper_thumb++];
+        if (wp->thumb_loaded) continue;
+
+        wp->thumb_loaded = 1;
+
+        int fd = sys_open(wp->path, "r");
+        if (fd >= 0) {
+            int size = sys_seek(fd, 0, 2); // SEEK_END
+            sys_seek(fd, 0, 0); // SEEK_SET
+            if (size > 0 && size < 8 * 1024 * 1024) {
+                unsigned char *buf = (unsigned char *)malloc(size);
+                if (buf) {
+                    int bytes_read = sys_read(fd, buf, size);
+                    if (bytes_read > 0) {
+                        int img_w, img_h, channels;
+                        unsigned char *img = stbi_load_from_memory(buf, bytes_read, &img_w, &img_h, &channels, 4);
+                        if (img && img_w > 0 && img_h > 0) {
+                            scale_rgba_to_argb(img, img_w, img_h, wp->thumb, WALLPAPER_THUMB_W, WALLPAPER_THUMB_H);
+                            wp->valid = 1;
+                        }
+                        if (img) stbi_image_free(img);
+                    }
+                    free(buf);
+                }
+            }
+            sys_close(fd);
+        }
+
+        return 1;
+    }
+
+    return 0;
 }
 
 static uint32_t parse_rgb_separate(const char *r, const char *g, const char *b) {
@@ -464,7 +509,6 @@ static uint32_t parse_rgb_separate(const char *r, const char *g, const char *b) 
 static void control_panel_paint_main(ui_window_t win) {
     int offset_x = 8;
     int offset_y = 6;
-    int win_w = 350;
     
     int item_y = 0;
     int item_h = 60;
@@ -617,11 +661,13 @@ static void control_panel_paint_wallpaper(ui_window_t win) {
         
         widget_button_draw(&settings_ctx, &btn_wp_thumbs[i]);
         if (wallpapers[i].valid) {
-            for (int py = 0; py < WALLPAPER_THUMB_H; py++) {
-                for (int px = 0; px < WALLPAPER_THUMB_W; px++) {
-                    ui_draw_rect(win, button_x + tx + 4 + px, button_y + ty + 4 + py, 1, 1, wallpapers[i].thumb[py * WALLPAPER_THUMB_W + px]);
-                }
-            }
+            ui_draw_image(win, button_x + tx + 4, button_y + ty + 4,
+                          WALLPAPER_THUMB_W, WALLPAPER_THUMB_H,
+                          wallpapers[i].thumb);
+        } else {
+            ui_draw_rounded_rect_filled(win, button_x + tx + 4, button_y + ty + 4,
+                                        WALLPAPER_THUMB_W, WALLPAPER_THUMB_H, 4,
+                                        0xFF3A3A3A);
         }
         ui_draw_string(win, button_x + tx + 8, button_y + ty + WALLPAPER_THUMB_H + 8, wallpapers[i].name, 0xFFFFFFFF);
     }
@@ -792,6 +838,16 @@ static void control_panel_paint_mouse(ui_window_t win) {
     char speed_str[4];
     cli_itoa(mouse_speed, speed_str);
     ui_draw_string(win, offset_x + 280, section_y + 4, speed_str, COLOR_DARK_TEXT);
+
+    section_y += 40;
+    ui_draw_string(win, offset_x, section_y, "Size:", COLOR_DARK_TEXT);
+
+    slider_cursor_size.value = (float)mouse_cursor_scale_tenths;
+    widget_slider_draw(&settings_ctx, &slider_cursor_size);
+
+    char scale_str[8];
+    format_scale_tenths(mouse_cursor_scale_tenths, scale_str);
+    ui_draw_string(win, offset_x + 270, section_y + 4, scale_str, COLOR_DARK_TEXT);
 }
 
 static void on_font_scroll(void *user_data, int new_scroll_y) {
@@ -950,6 +1006,7 @@ static void save_desktop_config(void) {
 
 static void save_mouse_config(void) {
     sys_system(SYSTEM_CMD_SET_MOUSE_SPEED, mouse_speed, 0, 0, 0);
+    sys_system(SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE, mouse_cursor_scale_tenths, 0, 0, 0);
 }
 
 static int parse_ip(const char* str, net_ipv4_address_t* ip) {
@@ -974,46 +1031,7 @@ static int parse_ip(const char* str, net_ipv4_address_t* ip) {
     return 0;
 }
 
-static void fetch_kernel_state(void) {
-    desktop_snap_to_grid = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 1, 0, 0, 0);
-    desktop_auto_align = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 2, 0, 0, 0);
-    desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
-    desktop_max_cols = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
-    mouse_speed = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
-
-    if (mouse_speed < 1) mouse_speed = 1;
-    if (mouse_speed > 50) mouse_speed = 50;
-
-    slider_mouse.value = (float)mouse_speed;
-    
-    net_ipv4_address_t kip;
-    if (sys_network_get_ip(&kip) == 0) {
-        char bp[4];
-        net_ip[0] = 0;
-        for (int i=0; i<4; i++) {
-            cli_itoa(kip.bytes[i], bp);
-            strcat(net_ip, bp);
-            if (i < 3) strcat(net_ip, ".");
-        }
-    }
-
-    if (sys_get_dns_server(&kip) == 0) {
-        char bp[4];
-        net_dns[0] = 0;
-        for (int i=0; i<4; i++) {
-            cli_itoa(kip.bytes[i], bp);
-            strcat(net_dns, bp);
-            if (i < 3) strcat(net_dns, ".");
-        }
-    }
-
-    init_dynamic_resolutions();
-    load_wallpapers();
-}
-
 static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click) {
-    int win_w = 350;
-    
     if (current_view != VIEW_MAIN && widget_button_handle_mouse(&btn_back, x, y, is_down, is_click, NULL)) {
         if (is_click) {
             current_view = VIEW_MAIN;
@@ -1191,7 +1209,12 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
 
     if (current_view == VIEW_MAIN) {
         if (widget_button_handle_mouse(&btn_main_wallpaper, x, y, is_down, is_click, NULL)) {
-            if (is_click) { current_view = VIEW_WALLPAPER; focused_field = -1; btn_main_wallpaper.pressed = false; }
+            if (is_click) {
+                current_view = VIEW_WALLPAPER;
+                focused_field = -1;
+                btn_main_wallpaper.pressed = false;
+                load_wallpapers();
+            }
             return;
         }
         if (widget_button_handle_mouse(&btn_main_network, x, y, is_down, is_click, NULL)) {
@@ -1234,6 +1257,17 @@ static void control_panel_handle_mouse(int x, int y, bool is_down, bool is_click
 
             if (new_speed != mouse_speed) {
                 mouse_speed = new_speed;
+                save_mouse_config();
+            }
+            return;
+        }
+
+        if (widget_slider_handle_mouse(&slider_cursor_size, x, y, is_down, is_click, NULL)) {
+            int new_scale = (int)(slider_cursor_size.value);
+            focused_field = -1;
+
+            if (new_scale != mouse_cursor_scale_tenths) {
+                mouse_cursor_scale_tenths = new_scale;
                 save_mouse_config();
             }
             return;
@@ -1358,6 +1392,9 @@ static void init_settings_widgets(void) {
 
     widget_slider_init(&slider_mouse, 68, 71, 200, 20, 1.0f, 50.0f, (float)mouse_speed);
     slider_mouse.step = 1.0f;
+
+    widget_slider_init(&slider_cursor_size, 68, 111, 200, 20, 10.0f, 40.0f, (float)mouse_cursor_scale_tenths);
+    slider_cursor_size.step = 1.0f;
 }
 
 int main(int argc, char **argv) {
@@ -1377,6 +1414,9 @@ int main(int argc, char **argv) {
     desktop_max_rows_per_col = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 3, 0, 0, 0);
     desktop_max_cols        = sys_system(SYSTEM_CMD_GET_DESKTOP_PROP, 4, 0, 0, 0);
     mouse_speed             = sys_system(SYSTEM_CMD_GET_MOUSE_SPEED, 0, 0, 0, 0);
+    mouse_cursor_scale_tenths = sys_system(SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE, 0, 0, 0, 0);
+    if (mouse_cursor_scale_tenths < 10) mouse_cursor_scale_tenths = 10;
+    if (mouse_cursor_scale_tenths > 40) mouse_cursor_scale_tenths = 40;
     load_settings_icons();
 
     // Set initial widget states
@@ -1391,8 +1431,6 @@ int main(int argc, char **argv) {
     control_panel_paint(win);
     ui_mark_dirty(win, 0, 0, 350, 500);
 
-    load_wallpapers(); // load after first paint to avoid startup delay
-
     gui_event_t ev;
     while (1) {
         bool dirty = false;
@@ -1402,12 +1440,11 @@ int main(int argc, char **argv) {
                 dirty = true;
 
             } else if (ev.type == GUI_EVENT_CLICK ||
-                       ev.type == GUI_EVENT_MOUSE_DOWN ||
                        ev.type == GUI_EVENT_MOUSE_MOVE ||
                        ev.type == GUI_EVENT_MOUSE_UP) {
                 bool down = false;
 
-                if (ev.type == GUI_EVENT_MOUSE_DOWN || ev.type == GUI_EVENT_CLICK) {
+                if (ev.type == GUI_EVENT_CLICK) {
                     down = true;
                 } else if (ev.type == GUI_EVENT_MOUSE_MOVE) {
                     down = (ev.arg3 & 1);
@@ -1415,13 +1452,15 @@ int main(int argc, char **argv) {
                     down = false;
                 }
 
-                control_panel_handle_mouse(
-                    ev.arg1,
-                    ev.arg2,
-                    down,
-                    ev.type == GUI_EVENT_CLICK
-                );
-                dirty = true;
+                if (ev.type != GUI_EVENT_MOUSE_MOVE || down) {
+                    control_panel_handle_mouse(
+                        ev.arg1,
+                        ev.arg2,
+                        down,
+                        ev.type == GUI_EVENT_CLICK
+                    );
+                    dirty = true;
+                }
 
             } else if (ev.type == GUI_EVENT_MOUSE_WHEEL) {
                 if (current_view == VIEW_FONTS) {
@@ -1455,10 +1494,14 @@ int main(int argc, char **argv) {
                 ui_mark_dirty(win, 0, 0, 350, 500);
             }
         } else {
-            sleep(10);
+            if (current_view == VIEW_WALLPAPER && load_next_wallpaper_thumb()) {
+                control_panel_paint(win);
+                ui_mark_dirty(win, 0, 0, 350, 500);
+            } else {
+                sleep(10);
+            }
         }
     }
 
     return 0;
 }
-
