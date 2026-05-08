@@ -16,8 +16,7 @@
 #define COLOR_DKGRAY      0xFF808080
 #define COLOR_WHITE       0xFFFFFFFF
 
-#define EDITOR_MAX_LINES 128
-#define EDITOR_MAX_LINE_LEN 256
+#define EDITOR_MAX_LINE_LEN 512
 static int editor_line_height = 16;
 
 typedef struct {
@@ -25,8 +24,9 @@ typedef struct {
     int length;
 } EditorLine;
 
-static EditorLine lines[EDITOR_MAX_LINES];
-static int line_count = 1;
+static EditorLine **lines = NULL;
+static int line_count = 0;
+static int line_capacity = 0;
 static int cursor_line = 0;
 static int cursor_col = 0;
 static int scroll_top = 0;
@@ -81,14 +81,39 @@ static void editor_resolve_path(const char *input, char *out, int max_len) {
     editor_strncat(out, input, max_len);
 }
 
-static void editor_clear_all(void) {
-    for (int i = 0; i < EDITOR_MAX_LINES; i++) {
-        for (int j = 0; j < EDITOR_MAX_LINE_LEN; j++) {
-            lines[i].content[j] = 0;
-        }
-        lines[i].length = 0;
+static void add_line(int at) {
+    if (line_count >= line_capacity) {
+        int new_capacity = (line_capacity == 0) ? 128 : line_capacity * 2;
+        EditorLine **new_lines = (EditorLine**)realloc(lines, new_capacity * sizeof(EditorLine*));
+        if (!new_lines) return;
+        lines = new_lines;
+        line_capacity = new_capacity;
     }
-    line_count = 1;
+    for (int i = line_count; i > at; i--) lines[i] = lines[i - 1];
+    lines[at] = (EditorLine*)malloc(sizeof(EditorLine));
+    lines[at]->length = 0;
+    lines[at]->content[0] = 0;
+    line_count++;
+}
+
+static void remove_line(int at) {
+    if (at < 0 || at >= line_count) return;
+    free(lines[at]);
+    for (int i = at; i < line_count - 1; i++) lines[i] = lines[i + 1];
+    line_count--;
+}
+
+static void editor_clear_all(void) {
+    if (lines) {
+        for (int i = 0; i < line_count; i++) {
+            if (lines[i]) free(lines[i]);
+        }
+        free(lines);
+    }
+    lines = NULL;
+    line_count = 0;
+    line_capacity = 0;
+    add_line(0);
     cursor_line = 0;
     cursor_col = 0;
     scroll_top = 0;
@@ -96,21 +121,110 @@ static void editor_clear_all(void) {
     file_modified = 0;
 }
 
+static int count_display_lines(int physical_line, int available_width) {
+    if (physical_line < 0 || physical_line >= line_count) return 0;
+    const char *text = lines[physical_line]->content;
+    int text_len = lines[physical_line]->length;
+    if (text_len == 0) return 1;
+    
+    int count = 0;
+    int char_idx = 0;
+    while (char_idx < text_len) {
+        char segment[256];
+        int segment_len = 0;
+        int segment_start = char_idx;
+        while (char_idx < text_len && segment_len < 254) {
+            segment[segment_len] = text[char_idx];
+            segment[segment_len + 1] = 0;
+            if (ui_get_string_width(segment) > available_width) break;
+            segment_len++;
+            char_idx++;
+        }
+        if (char_idx < text_len && segment_len > 0) {
+            int last_space = -1;
+            for (int i = segment_len - 1; i >= 0; i--) {
+                if (segment[i] == ' ') { last_space = i; break; }
+            }
+            if (last_space > 0) char_idx = segment_start + last_space + 1;
+        }
+        count++;
+    }
+    return count;
+}
+
 static void editor_ensure_cursor_visible(void) {
     int header_h = 32;
     int footer_h = 24;
     int editor_h = win_h - header_h - footer_h;
+    int padding = 4;
     
-    if (editor_line_height == 0) editor_line_height = ui_get_font_height();
+    char max_line_str[16];
+    itoa(line_count, max_line_str);
+    int line_num_w = ui_get_string_width(max_line_str) + 10;
+    if (line_num_w < 30) line_num_w = 30;
+    int text_start_x = padding + line_num_w + 5;
+    int available_width = win_w - text_start_x - padding - 10;
+    
+    if (editor_line_height <= 0) editor_line_height = ui_get_font_height();
     if (editor_line_height < 10) editor_line_height = 16;
+    int visible_display_lines = (editor_h - 10) / editor_line_height;
 
-    int visible_lines = (editor_h - 10) / editor_line_height;
-    
-    if (cursor_line < scroll_top) {
-        scroll_top = cursor_line;
+    int cursor_disp = 0;
+    for (int i = 0; i < cursor_line; i++) {
+        cursor_disp += count_display_lines(i, available_width);
     }
-    if (cursor_line >= scroll_top + visible_lines) {
-        scroll_top = cursor_line - visible_lines + 1;
+    
+    const char *text = lines[cursor_line]->content;
+    int text_len = lines[cursor_line]->length;
+    int char_idx = 0;
+    int segment_idx = 0;
+    while (char_idx < cursor_col) {
+        char segment[256];
+        int segment_len = 0;
+        int segment_start = char_idx;
+        while (char_idx < text_len && segment_len < 254) {
+            segment[segment_len] = text[char_idx];
+            segment[segment_len + 1] = 0;
+            if (ui_get_string_width(segment) > available_width) break;
+            segment_len++;
+            char_idx++;
+        }
+        if (char_idx < text_len && segment_len > 0) {
+            int last_space = -1;
+            for (int i = segment_len - 1; i >= 0; i--) {
+                if (segment[i] == ' ') { last_space = i; break; }
+            }
+            if (last_space > 0) {
+                int end_of_seg = segment_start + last_space + 1;
+                if (cursor_col < end_of_seg) break; 
+                char_idx = end_of_seg;
+            }
+        }
+        if (char_idx <= cursor_col) segment_idx++;
+        else break;
+    }
+    cursor_disp += segment_idx;
+
+    int scroll_disp = 0;
+    for (int i = 0; i < scroll_top; i++) {
+        scroll_disp += count_display_lines(i, available_width);
+    }
+
+    if (cursor_disp < scroll_disp) {
+        while (scroll_top > 0) {
+            scroll_top--;
+            int new_scroll_disp = 0;
+            for (int i = 0; i < scroll_top; i++) new_scroll_disp += count_display_lines(i, available_width);
+            if (cursor_disp >= new_scroll_disp) break;
+        }
+    } else if (cursor_disp >= scroll_disp + visible_display_lines) {
+        // Move scroll_top down until cursor is visible
+        while (scroll_top < cursor_line) {
+            scroll_top++;
+            int new_scroll_disp = 0;
+            for (int i = 0; i < scroll_top; i++) new_scroll_disp += count_display_lines(i, available_width);
+            if (cursor_disp < new_scroll_disp + visible_display_lines) break;
+        }
     }
 }
 
@@ -138,24 +252,24 @@ void editor_open_file(const char *filename) {
     int line = 0;
     int col = 0;
     
-    for (int i = 0; i < bytes_read && line < EDITOR_MAX_LINES; i++) {
+    for (int i = 0; i < bytes_read; i++) {
         char ch = buffer[i];
         if (ch == '\n') {
-            lines[line].content[col] = 0;
-            lines[line].length = col;
-            line++;
+            lines[line]->content[col] = 0;
+            lines[line]->length = col;
+            add_line(++line);
             col = 0;
         } else if (ch != '\r') {
             if (col < EDITOR_MAX_LINE_LEN - 1) {
-                lines[line].content[col] = ch;
+                lines[line]->content[col] = ch;
                 col++;
             }
         }
     }
     
     if (col > 0) {
-        lines[line].content[col] = 0;
-        lines[line].length = col;
+        lines[line]->content[col] = 0;
+        lines[line]->length = col;
         line++;
     }
     
@@ -170,7 +284,7 @@ static void editor_save_file(void) {
     if (fd < 0) return;
     
     for (int i = 0; i < line_count; i++) {
-        sys_write_fs(fd, lines[i].content, lines[i].length);
+        sys_write_fs(fd, lines[i]->content, lines[i]->length);
         sys_write_fs(fd, "\n", 1);
     }
     sys_close(fd);
@@ -178,35 +292,37 @@ static void editor_save_file(void) {
 }
 
 static void editor_insert_char(int legacy, uint32_t codepoint) {
-    if (cursor_line >= EDITOR_MAX_LINES) return;
-    EditorLine *line = &lines[cursor_line];
+    EditorLine *line = lines[cursor_line];
     
     if (legacy == '\n') {
-        if (line_count >= EDITOR_MAX_LINES) return;
-        for (int j = line_count; j > cursor_line; j--) {
-            lines[j] = lines[j - 1];
-        }
-        line_count++;
+        add_line(cursor_line + 1);
         
-        for (int k = 0; k < EDITOR_MAX_LINE_LEN; k++) {
-            lines[cursor_line + 1].content[k] = 0;
-        }
-        lines[cursor_line + 1].length = 0;
-        
-        int current_len = lines[cursor_line].length;
+        int current_len = lines[cursor_line]->length;
         int new_len = current_len - cursor_col;
         
         for (int i = 0; i < new_len; i++) {
-            lines[cursor_line + 1].content[i] = lines[cursor_line].content[cursor_col + i];
+            lines[cursor_line + 1]->content[i] = lines[cursor_line]->content[cursor_col + i];
         }
-        lines[cursor_line + 1].content[new_len] = 0;
-        lines[cursor_line + 1].length = new_len;
+        lines[cursor_line + 1]->content[new_len] = 0;
+        lines[cursor_line + 1]->length = new_len;
         
-        lines[cursor_line].content[cursor_col] = 0;
-        lines[cursor_line].length = cursor_col;
+        lines[cursor_line]->content[cursor_col] = 0;
+        lines[cursor_line]->length = cursor_col;
         
         cursor_line++;
         cursor_col = 0;
+    } else if (legacy == KEY_TAB) {
+        for (int i = 0; i < 4; i++) {
+            if (line->length < EDITOR_MAX_LINE_LEN - 1) {
+                for (int j = line->length; j > cursor_col; j--) {
+                    line->content[j] = line->content[j - 1];
+                }
+                line->content[cursor_col] = ' ';
+                line->length++;
+                cursor_col++;
+            }
+        }
+        line->content[line->length] = 0;
     } else if (legacy == KEY_BACKSPACE) {
         if (cursor_col > 0) {
             const char *prev = text_prev_utf8(line->content, line->content + cursor_col);
@@ -219,26 +335,21 @@ static void editor_insert_char(int legacy, uint32_t codepoint) {
             cursor_col -= char_len;
             line->content[line->length] = 0;
         } else if (cursor_line > 0) {
-            EditorLine *prev = &lines[cursor_line - 1];
-            int merge_point = prev->length;
+            int prev_idx = cursor_line - 1;
+            int merge_point = lines[prev_idx]->length;
             
             int i = 0;
             while (i < line->length && (merge_point + i) < EDITOR_MAX_LINE_LEN - 1) {
-                prev->content[merge_point + i] = line->content[i];
+                lines[prev_idx]->content[merge_point + i] = line->content[i];
                 i++;
             }
-            prev->content[merge_point + i] = 0;
-            prev->length = merge_point + i;
+            lines[prev_idx]->content[merge_point + i] = 0;
+            lines[prev_idx]->length = merge_point + i;
             
-            for (int j = cursor_line; j < line_count - 1; j++) {
-                lines[j] = lines[j + 1];
-            }
-            lines[line_count - 1].length = 0;
-            lines[line_count - 1].content[0] = 0;
-            
+            int old_line = cursor_line;
             cursor_line--;
             cursor_col = merge_point;
-            line_count--;
+            remove_line(old_line);
         }
     } else if (codepoint >= 32 && codepoint != 127) {
         char utf8[4];
@@ -323,8 +434,8 @@ static void editor_paint(ui_window_t win) {
         line_num_str[str_len] = 0;
         ui_draw_string(win, padding + 4, display_y, line_num_str, COLOR_DKGRAY);
         
-        const char *text = lines[line_idx].content;
-        int text_len = lines[line_idx].length;
+        const char *text = lines[line_idx]->content;
+        int text_len = lines[line_idx]->length;
         int char_idx = 0;
         _Bool first_pass = 1;
         
@@ -332,11 +443,11 @@ static void editor_paint(ui_window_t win) {
             first_pass = 0;
             int current_display_y = editor_y + 5 + display_line * editor_line_height;
             
-            char segment[256];
+            char segment[EDITOR_MAX_LINE_LEN];
             int segment_len = 0;
             int segment_start = char_idx;
             
-            while (char_idx < text_len && segment_len < 254) {
+            while (char_idx < text_len && segment_len < EDITOR_MAX_LINE_LEN - 2) {
                 segment[segment_len] = text[char_idx];
                 segment[segment_len + 1] = 0;
                 if (ui_get_string_width(segment) > available_width) {
@@ -423,27 +534,27 @@ static void editor_handle_key(int legacy, uint32_t codepoint, bool pressed) {
     if (legacy == KEY_UP) { // UP
         if (cursor_line > 0) {
             cursor_line--;
-            if (cursor_col > lines[cursor_line].length) cursor_col = lines[cursor_line].length;
+            if (cursor_col > lines[cursor_line]->length) cursor_col = lines[cursor_line]->length;
             if (cursor_line < scroll_top) scroll_top = cursor_line;
         }
     } else if (legacy == KEY_DOWN) { // DOWN
         if (cursor_line < line_count - 1) {
             cursor_line++;
-            if (cursor_col > lines[cursor_line].length) cursor_col = lines[cursor_line].length;
+            if (cursor_col > lines[cursor_line]->length) cursor_col = lines[cursor_line]->length;
             editor_ensure_cursor_visible();
         }
     } else if (legacy == KEY_LEFT) { // LEFT
         if (cursor_col > 0) {
-            const char *prev = text_prev_utf8(lines[cursor_line].content, lines[cursor_line].content + cursor_col);
-            cursor_col = (int)(prev - lines[cursor_line].content);
+            const char *prev = text_prev_utf8(lines[cursor_line]->content, lines[cursor_line]->content + cursor_col);
+            cursor_col = (int)(prev - lines[cursor_line]->content);
         } else if (cursor_line > 0) {
             cursor_line--;
-            cursor_col = lines[cursor_line].length;
+            cursor_col = lines[cursor_line]->length;
         }
     } else if (legacy == KEY_RIGHT) { // RIGHT
-        if (cursor_col < lines[cursor_line].length) {
-            const char *next = text_next_utf8(lines[cursor_line].content + cursor_col);
-            cursor_col = (int)(next - lines[cursor_line].content);
+        if (cursor_col < lines[cursor_line]->length) {
+            const char *next = text_next_utf8(lines[cursor_line]->content + cursor_col);
+            cursor_col = (int)(next - lines[cursor_line]->content);
         } else if (cursor_line < line_count - 1) {
             cursor_line++;
             cursor_col = 0;
@@ -469,6 +580,7 @@ static void editor_handle_click(int x, int y) {
 int main(int argc, char **argv) {
     ui_window_t win = ui_window_create("Text Editor", 100, 150, win_w, win_h);
     if (!win) return 1;
+    ui_window_set_resizable(win, 1);
 
     editor_clear_all();
     if (argc > 1) {
@@ -489,6 +601,12 @@ int main(int argc, char **argv) {
                 ui_mark_dirty(win, 0, 0, win_w, win_h);
             } else if (ev.type == GUI_EVENT_KEY) {
                 editor_handle_key(ev.arg1, (uint32_t)ev.arg4, true);
+                editor_paint(win);
+                ui_mark_dirty(win, 0, 32, win_w, win_h - 32);
+            } else if (ev.type == GUI_EVENT_RESIZE) {
+                win_w = ev.arg1;
+                win_h = ev.arg2;
+                editor_ensure_cursor_visible();
                 editor_paint(win);
                 ui_mark_dirty(win, 0, 0, win_w, win_h);
             } else if (ev.type == GUI_EVENT_KEYUP) {
