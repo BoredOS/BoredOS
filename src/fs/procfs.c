@@ -200,6 +200,35 @@ int procfs_read(void *fs_private, void *handle, void *buf, int size) {
                     k_strcpy(out + k_strlen(out), "\n");
                 }
             }
+        } else if (k_strcmp(h->type, "datetime") == 0) {
+            extern void rtc_get_datetime(int *year, int *month, int *day, int *hour, int *minute, int *second);
+            int y, m, d, h_val, min, s;
+            rtc_get_datetime(&y, &m, &d, &h_val, &min, &s);
+            
+            char buf[16];
+            k_itoa(y, buf);
+            k_strcpy(out, buf);
+            k_strcpy(out + k_strlen(out), "-");
+            if (m < 10) k_strcpy(out + k_strlen(out), "0");
+            k_itoa(m, buf);
+            k_strcpy(out + k_strlen(out), buf);
+            k_strcpy(out + k_strlen(out), "-");
+            if (d < 10) k_strcpy(out + k_strlen(out), "0");
+            k_itoa(d, buf);
+            k_strcpy(out + k_strlen(out), buf);
+            k_strcpy(out + k_strlen(out), " ");
+            if (h_val < 10) k_strcpy(out + k_strlen(out), "0");
+            k_itoa(h_val, buf);
+            k_strcpy(out + k_strlen(out), buf);
+            k_strcpy(out + k_strlen(out), ":");
+            if (min < 10) k_strcpy(out + k_strlen(out), "0");
+            k_itoa(min, buf);
+            k_strcpy(out + k_strlen(out), buf);
+            k_strcpy(out + k_strlen(out), ":");
+            if (s < 10) k_strcpy(out + k_strlen(out), "0");
+            k_itoa(s, buf);
+            k_strcpy(out + k_strlen(out), buf);
+            k_strcpy(out + k_strlen(out), "\n");
         } else if (k_strcmp(h->type, "meminfo") == 0) {
             extern MemStats memory_get_stats(void);
             MemStats stats = memory_get_stats();
@@ -370,6 +399,8 @@ int procfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entries, in
         entries[out-1].is_directory = 0;
         k_strcpy(entries[out++].name, "meminfo");
         entries[out-1].is_directory = 0;
+        k_strcpy(entries[out++].name, "datetime");
+        entries[out-1].is_directory = 0;
         k_strcpy(entries[out++].name, "devices");
         entries[out-1].is_directory = 0;
 
@@ -417,7 +448,7 @@ bool procfs_exists(void *fs_private, const char *path) {
 
     if (k_strcmp(path, "version") == 0 || k_strcmp(path, "uptime") == 0) return true;
     if (k_strcmp(path, "cpuinfo") == 0 || k_strcmp(path, "meminfo") == 0) return true;
-    if (k_strcmp(path, "devices") == 0) return true;
+    if (k_strcmp(path, "datetime") == 0 || k_strcmp(path, "devices") == 0) return true;
 
     return false;
 }
