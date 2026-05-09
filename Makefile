@@ -76,7 +76,7 @@ NASMFLAGS = -f elf64
 LIMINE_VERSION = 10.8.2
 LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERSION)
 
-.PHONY: all clean run limine-setup run-windows run-mac run-linux
+.PHONY: all clean run limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
 
 all:
 	$(call PRINT_STEP,STARTING BOREDOS BUILD)
@@ -420,8 +420,8 @@ $(OVMF_VARS):
 		cp $(OVMF_VARS_TMPL) $(OVMF_VARS); \
 	fi
 
-run-hd: disk.qcow2 $(OVMF_VARS)
-	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE)
+run-hd-mac: disk.qcow2 $(OVMF_VARS)
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE ON MACOS)
 	qemu-system-x86_64 -m 4G -serial stdio -boot c \
 	    -smp 4 \
 		-audiodev coreaudio,id=audio0 -machine pcspk-audiodev=audio0 \
@@ -442,4 +442,27 @@ run-linux: $(ISO_IMAGE) disk.qcow2
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
 		-display gtk,show-cursor=off \
 		-device ahci,id=ahci -drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
+		-cpu max
+
+run-hd-windows: disk.qcow2
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE ON WINDOWS)
+	qemu-system-x86_64 -m 4G -serial stdio -boot c \
+	    -smp 4 \
+		-audiodev dsound,id=audio0 -machine pcspk-audiodev=audio0 \
+		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
+		-device ahci,id=ahci \
+		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
+		-cpu max
+
+run-hd-linux: disk.qcow2 $(OVMF_VARS)
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE ON LINUX)
+	qemu-system-x86_64 -m 4G -serial stdio -boot c \
+	    -smp 4 \
+		-audiodev pa,id=audio0 -machine pcspk-audiodev=audio0 \
+		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
+		-display gtk,show-cursor=off \
+		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
+		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-device ahci,id=ahci \
+		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max
