@@ -434,18 +434,16 @@ int keymap_legacy_key(uint16_t keycode, uint32_t codepoint) {
         case KEY_ENTER:
         case KEY_KP_ENTER:   return '\n';
 
-        case KEY_SPACE:      return ' ';
-
         case KEY_ARROW_UP:    return 17;
         case KEY_ARROW_DOWN:  return 18;
         case KEY_ARROW_LEFT:  return 19;
         case KEY_ARROW_RIGHT: return 20;
 
         case KEY_LEFT_CTRL:
-        case KEY_RIGHT_CTRL:  return 161;
+        case KEY_RIGHT_CTRL:  return 21;
         case KEY_LEFT_SHIFT:
-        case KEY_RIGHT_SHIFT: return 162;
-        case KEY_LEFT_ALT:    return 163;
+        case KEY_RIGHT_SHIFT: return 24;
+        case KEY_LEFT_ALT:    return 25;
         case KEY_RIGHT_ALT:   return 22;  // for compat w/ doom
         case KEY_CAPS_LOCK:   return 23;  // same here
         case KEY_DELETE:      return 127;

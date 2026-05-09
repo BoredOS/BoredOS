@@ -188,12 +188,11 @@ bool keyboard_handle_set1_scancode(uint8_t scancode, keyboard_event_t *ev) {
     ev->pressed = pressed;
     ev->mods = keyboard_get_modifiers();
 
-    keymap_result_t r = keymap_translate_keycode(keycode, ev->mods);
-    ev->codepoint = r.codepoint;
-
     if (!pressed) {
         return true;
     }
+
+    keymap_result_t r = keymap_translate_keycode(keycode, ev->mods);
 
     if (r.is_dead) {
         g_kb.dead_key = r.codepoint;

@@ -89,15 +89,16 @@ int DG_GetKey(int* pressed, unsigned char* key) {
         } else if (ev.type == GUI_EVENT_KEY || ev.type == GUI_EVENT_KEYUP) {
             unsigned char k = (unsigned char)ev.arg1;
             unsigned char dk = k;
-            if (k == 17) dk = KEY_UPARROW;
+            if (ev.arg2 == 57) dk = 32;
+            else if (k == 17) dk = KEY_UPARROW;
             else if (k == 18) dk = KEY_DOWNARROW;
             else if (k == 19) dk = KEY_LEFTARROW;
             else if (k == 20) dk = KEY_RIGHTARROW;
-            else if (k == 161) dk = KEY_FIRE;
+            else if (k == 21) dk = KEY_FIRE;
             else if (k == 22) dk = KEY_RALT;
             else if (k == 23) dk = KEY_CAPSLOCK;
-            else if (k == 162) dk = KEY_RSHIFT;
-            else if (k == 163) dk = KEY_LALT;
+            else if (k == 24) dk = KEY_RSHIFT;
+            else if (k == 25) dk = KEY_LALT;
             else if (k == 27) dk = KEY_ESCAPE;
             else if (k == '\b') dk = KEY_BACKSPACE;
             else if (k == '\t') dk = KEY_TAB;
@@ -105,7 +106,6 @@ int DG_GetKey(int* pressed, unsigned char* key) {
             else if (k >= 141 && k <= 150) dk = KEY_F1 + (k - 141);
             else if (k == 151) dk = KEY_F11;
             else if (k == 152) dk = KEY_F12;
-            else if (k == ' ') dk = KEY_USE;
             else if (k == '\n' || k == '\r') dk = KEY_ENTER;
             else if (k >= 'A' && k <= 'Z') dk = k + 32;
 
