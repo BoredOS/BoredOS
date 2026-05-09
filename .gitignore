@@ -15,6 +15,7 @@ src/userland/bin/
 **/.DS_Store
 .DS_Store
 *.o
+*.a
 
 # Others
 .gitignore

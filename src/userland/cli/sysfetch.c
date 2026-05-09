@@ -53,6 +53,7 @@ static uint32_t ansi_to_boredos_color(int code) {
         case 95: return 0xFFFF77FF; // Bright Magenta
         case 96: return 0xFF66D9EF; // Bright Cyan
         case 97: return 0xFFFFFFFF; // Bright White
+        case 38: return 0xFF473ba3; // Bored Blue
         default: return default_color;
     }
 }
@@ -62,8 +63,16 @@ static void printf_ansi(const char *str) {
     if (original_color == 0) original_color = 0xFFCCCCCC;
 
     while (*str) {
+        bool is_escape = false;
         if (*str == '\033' && *(str + 1) == '[') {
-            str += 2; // Skip escape and [
+            str += 2;
+            is_escape = true;
+        } else if (*str == '\\' && *(str + 1) == '0' && *(str + 2) == '3' && *(str + 3) == '3' && *(str + 4) == '[') {
+            str += 5;
+            is_escape = true;
+        }
+
+        if (is_escape) {
             int code = 0;
             while (*str >= '0' && *str <= '9') {
                 code = code * 10 + (*str - '0');
@@ -87,6 +96,10 @@ static int strlen_ansi(const char *str) {
     while (*str) {
         if (*str == '\033' && *(str + 1) == '[') {
             str += 2;
+            while (*str && *str != 'm') str++;
+            if (*str == 'm') str++;
+        } else if (*str == '\\' && *(str + 1) == '0' && *(str + 2) == '3' && *(str + 3) == '3' && *(str + 4) == '[') {
+            str += 5;
             while (*str && *str != 'm') str++;
             if (*str == 'm') str++;
         } else {
@@ -173,14 +186,26 @@ static void load_config() {
 static void load_ascii_art() {
     int fd = sys_open(config.ascii_art_file, "r");
     if (fd < 0) {
-        strcpy(ascii_lines[0], "\033[35m====================== \033[97m__    ____  ____ \033[0m");
-        strcpy(ascii_lines[1], "\033[35m===================== \033[97m/ /_  / __ \\/ ___\\\033[0m");
-        strcpy(ascii_lines[2], "\033[34m==================== \033[97m/ __ \\/ / / /\\___ \\\033[0m");
-        strcpy(ascii_lines[3], "\033[34m=================== \033[97m/ /_/ / /_/ /____/ /\033[0m");
-        strcpy(ascii_lines[4], "\033[36m================== \033[97m/_.___/\\____//_____/ \033[0m");
-        strcpy(ascii_lines[5], "\033[36m=================                       \033[0m");
+        strcpy(ascii_lines[0],  "\033[38m       @@@@\033[0m");
+        strcpy(ascii_lines[1],  "\033[38m     @@@@@@@\033[0m");
+        strcpy(ascii_lines[2],  "\033[38m      @@@@@@\033[0m");
+        strcpy(ascii_lines[3],  "\033[38m      @@@@@@@\033[0m");
+        strcpy(ascii_lines[4],  "\033[38m       @@@@@@@      @@@@@@\033[0m");
+        strcpy(ascii_lines[5],  "\033[38m        @@@@@@   @@@@@@@@@@@@\033[0m");
+        strcpy(ascii_lines[6],  "\033[38m         @@@@@@ @@@@@@@@@@@@@@a\033[0m");
+        strcpy(ascii_lines[7],  "\033[38m         @@@@@@@@@@@X  @@@@@@@@w\033[0m");
+        strcpy(ascii_lines[8],  "\033[38m          @@@@@@@@       @@@@@@@\033[0m");
+        strcpy(ascii_lines[9],  "\033[38m           @@@@@@M        @@@@@@\033[0m");
+        strcpy(ascii_lines[10], "\033[38m           @@@@@@@        @@@@@@\033[0m");
+        strcpy(ascii_lines[11], "\033[38m            @@@@@@@     @@@@@@@@\033[0m");
+        strcpy(ascii_lines[12], "\033[38m             @@@@@@@@@@@@@@@@@@\033[0m");
+        strcpy(ascii_lines[13], "\033[38m             i@@@@@@@@@@@@@@@\033[0m");
+        strcpy(ascii_lines[14], "\033[38m              @@@@@@@\033[0m");
+        strcpy(ascii_lines[15], "\033[38m @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\033[0m");
+        strcpy(ascii_lines[16], "\033[38m @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\033[0m");
+        strcpy(ascii_lines[17], "\033[38m @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\033[0m");
         
-        ascii_line_count = 6;
+        ascii_line_count = 18;
         return;
     }
     

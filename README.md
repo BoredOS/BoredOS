@@ -1,7 +1,7 @@
 # BoredOS 
 
 <div align="center">
-  <img src="boredos.svg" alt="BoredOS Logo" width="450" />
+  <img src="branding/bOS_full_gradient_cropped.png" alt="BoredOS Logo" width="450" />
   <p><em>A modern x86_64 hobbyist operating system built from the ground up.</em></p>
 
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
@@ -12,9 +12,9 @@
 
 ---
 
-BoredOS is a x86_64 operating system featuring a custom Desktop Environment (DE), a dedicated Window Manager (BoredWM), and a FAT32 filesystem. It balances low-level kernel exploration with a surprisingly capable userspace.
+BoredOS is a x86_64 operating system featuring a custom DE, LwIP networking, SMP, FAT32 filesystem and fully functional userland.
 
-![Screenshot](screenshot.jpg)
+![Screenshot](branding/screenshot.jpg)
 > [!NOTE]
 > *The screenshot above may represent a previous build and is subject to change as the UI evolves.*
 
@@ -49,10 +49,10 @@ BoredOS is a x86_64 operating system featuring a custom Desktop Environment (DE)
 
 Explore the internal workings of BoredOS via our comprehensive guides in the [`docs/`](docs/) directory.
 
-* 📖 **[Documentation Index](docs/README.md)** – Start here.
-* 🏗️ **[Architecture Overview](docs/architecture/core.md)** – Deep dive into the kernel.
-* 🔨 **[Building and Running](docs/build/usage.md)** – Setup your build environment.
-* 🚀 **[AppDev SDK](docs/appdev/custom_apps.md)** – Build your own apps for BoredOS.
+* **[Documentation Index](docs/README.md)** – Start here.
+* **[Architecture Overview](docs/architecture/core.md)** – Deep dive into the kernel.
+* **[Building and Running](docs/build/usage.md)** – Setup your build environment.
+* **[AppDev SDK](docs/appdev/custom_apps.md)** – Build your own apps for BoredOS.
 
 ---
 
@@ -67,6 +67,12 @@ If you find this project interesting or helpful, consider fueling the developmen
 
 ---
 
+## Contributors
+
+- **BoredDevNL** — Project creator and lead maintainer.
+- **Lluciocc** — Contributor.
+- **Artemix1508** - Artworks.
+
 ## Project Disclaimer & Heritage
 
 **BoredOS** is the successor to **[BrewKernel](https://github.com/boreddevnl/brewkernel)**, a project initiated in 2023. 
@@ -78,10 +84,6 @@ While BrewKernel served as the foundational learning ground for this OS, it has 
 
 ---
 
-## Contributors
-
-- **BoredDevNL** — Project creator and lead maintainer.
-- **Lluciocc** — Contributor.
 
 ## License
 

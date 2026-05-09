@@ -11,8 +11,9 @@
 #include <stddef.h>
 #include <stdint.h>
 
-#define VIEWER_MAX_W 4096
-#define VIEWER_MAX_H 4096
+#define VIEWER_MAX_W 1024
+#define VIEWER_MAX_H 768
+#define VIEWER_MAX_GIF_FRAMES 100
 
 static uint32_t *viewer_pixels = NULL;
 static uint32_t **viewer_frames = NULL;
@@ -28,6 +29,13 @@ static bool viewer_has_image = false;
 static char viewer_file_path[256];
 static bool resize_pending = false;
 static uint64_t last_resize_tick = 0;
+
+static void viewer_scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h, uint32_t *dst, int dst_w, int dst_h);
+
+static uint32_t *viewer_scaled_pixels = NULL;
+static int viewer_scaled_w = 0;
+static int viewer_scaled_h = 0;
+static int viewer_scaled_frame = -1;
 
 static int win_w = 500;
 static int win_h = 400;
@@ -150,6 +158,21 @@ static void viewer_paint(ui_window_t win) {
 
     if (disp_w <= 0 || disp_h <= 0) return;
 
+    if (viewer_scaled_pixels && viewer_scaled_w == disp_w && viewer_scaled_h == disp_h && viewer_scaled_frame == viewer_current_frame) {
+        ui_draw_image(win, ox, oy, disp_w, disp_h, viewer_scaled_pixels);
+        return;
+    }
+
+    if (disp_w == viewer_img_w && disp_h == viewer_img_h) {
+        ui_draw_image(win, ox, oy, disp_w, disp_h, pixels);
+        if (viewer_scaled_pixels) free(viewer_scaled_pixels);
+        viewer_scaled_pixels = NULL;
+        viewer_scaled_w = disp_w;
+        viewer_scaled_h = disp_h;
+        viewer_scaled_frame = viewer_current_frame;
+        return;
+    }
+
     uint32_t *temp_buf = malloc(disp_w * disp_h * sizeof(uint32_t));
     if (temp_buf) {
         // Fixed-point 16.16
@@ -172,7 +195,13 @@ static void viewer_paint(ui_window_t win) {
             curr_y += step_y;
         }
         ui_draw_image(win, ox, oy, disp_w, disp_h, temp_buf);
-        free(temp_buf);
+        
+        // Update cache
+        if (viewer_scaled_pixels) free(viewer_scaled_pixels);
+        viewer_scaled_pixels = temp_buf;
+        viewer_scaled_w = disp_w;
+        viewer_scaled_h = disp_h;
+        viewer_scaled_frame = viewer_current_frame;
     }
 }
 
@@ -216,6 +245,10 @@ void viewer_open_file(const char *path) {
         free(viewer_frames); viewer_frames = NULL;
     }
     if (viewer_delays) { free(viewer_delays); viewer_delays = NULL; }
+    if (viewer_scaled_pixels) { free(viewer_scaled_pixels); viewer_scaled_pixels = NULL; }
+    viewer_scaled_w = 0;
+    viewer_scaled_h = 0;
+    viewer_scaled_frame = -1;
     viewer_frame_count = 0;
     viewer_current_frame = 0;
     viewer_has_image = false;
@@ -225,14 +258,8 @@ void viewer_open_file(const char *path) {
     int *delays = NULL;
     int frame_count = 1;
 
-    // Check if it's a GIF - more robust check
-    bool is_gif = (total_read > 4 && buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F');
-
-    if (is_gif) {
-        rgba = stbi_load_gif_from_memory(buf, total_read, &delays, &img_w, &img_h, &frame_count, &channels, 4);
-    } else {
-        rgba = stbi_load_from_memory(buf, total_read, &img_w, &img_h, &channels, 4);
-    }
+    // Fast load first frame first
+    rgba = stbi_load_from_memory(buf, total_read, &img_w, &img_h, &channels, 4);
 
     if (!rgba || img_w <= 0 || img_h <= 0) {
         if (rgba) stbi_image_free(rgba);
@@ -251,20 +278,39 @@ void viewer_open_file(const char *path) {
         fit_h = VIEWER_MAX_H;
     }
 
+    viewer_pixels = malloc(fit_w * fit_h * sizeof(uint32_t));
+    if (viewer_pixels) {
+        viewer_scale_rgba_to_argb(rgba, img_w, img_h, viewer_pixels, fit_w, fit_h);
+        viewer_img_w = fit_w;
+        viewer_img_h = fit_h;
+        viewer_has_image = true;
+    }
+    stbi_image_free(rgba);
+    rgba = NULL;
+
+    bool is_gif = (total_read > 4 && buf[0] == 'G' && buf[1] == 'I' && buf[2] == 'F');
+
+    if (is_gif) {
+        rgba = stbi_load_gif_from_memory(buf, total_read, &delays, &img_w, &img_h, &frame_count, &channels, 4);
+    }
+
+    if (!rgba || img_w <= 0 || img_h <= 0) {
+        if (rgba) stbi_image_free(rgba);
+        free(buf);
+        return;
+    }
+
     if (frame_count > 1 && delays) {
+        if (frame_count > VIEWER_MAX_GIF_FRAMES) frame_count = VIEWER_MAX_GIF_FRAMES;
         viewer_frames = malloc(frame_count * sizeof(uint32_t *));
         viewer_delays = malloc(frame_count * sizeof(int));
         if (viewer_frames && viewer_delays) {
             viewer_frame_count = frame_count;
             for (int i = 0; i < frame_count; i++) {
                 viewer_frames[i] = malloc(fit_w * fit_h * sizeof(uint32_t));
+                viewer_delays[i] = delays[i];
                 if (viewer_frames[i]) {
                     viewer_scale_rgba_to_argb(rgba + (i * img_w * img_h * 4), img_w, img_h, viewer_frames[i], fit_w, fit_h);
-                    viewer_delays[i] = delays[i];
-                } else {
-                    // Memory exhausted, stop here
-                    viewer_frame_count = i;
-                    break;
                 }
             }
             viewer_img_w = fit_w;

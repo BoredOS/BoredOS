@@ -20,6 +20,53 @@ static volatile const char *pending_wallpaper_path = NULL;
 static char pending_path_buf[256];
 
 #define WALLPAPER_CONF_PATH "/Library/BWM/Wallpaper/wallpaper"
+#define WALLPAPER_CACHE_PATH "/Library/Caches/Wallpaper.bin"
+
+static void wallpaper_save_cache(void) {
+    if (!wp_pixels || wp_width <= 0 || wp_height <= 0) return;
+    fat32_mkdir("/Library/Caches");
+    FAT32_FileHandle *fh = fat32_open(WALLPAPER_CACHE_PATH, "w");
+    if (fh && fh->valid) {
+        uint32_t w = (uint32_t)wp_width;
+        uint32_t h = (uint32_t)wp_height;
+        fat32_write(fh, &w, 4);
+        fat32_write(fh, &h, 4);
+        fat32_write(fh, wp_pixels, w * h * 4);
+        fat32_close(fh);
+    }
+}
+
+static int wallpaper_load_cache(void) {
+    if (!fat32_exists(WALLPAPER_CACHE_PATH)) return 0;
+    FAT32_FileHandle *fh = fat32_open(WALLPAPER_CACHE_PATH, "r");
+    if (!fh || !fh->valid) return 0;
+    
+    uint32_t w, h;
+    fat32_read(fh, &w, 4);
+    fat32_read(fh, &h, 4);
+    
+    if (w != (uint32_t)get_screen_width() || h != (uint32_t)get_screen_height()) {
+        fat32_close(fh);
+        return 0;
+    }
+    
+    if (!wp_pixels) {
+        wp_pixels = (uint32_t*)kmalloc(MAX_WP_WIDTH * MAX_WP_HEIGHT * sizeof(uint32_t));
+        if (!wp_pixels) { fat32_close(fh); return 0; }
+    }
+    
+    uint32_t total_size = w * h * 4;
+    uint32_t bytes_read = fat32_read(fh, wp_pixels, total_size);
+    fat32_close(fh);
+    
+    if (bytes_read == total_size) {
+        wp_width = (int)w;
+        wp_height = (int)h;
+        graphics_set_bg_image(wp_pixels, wp_width, wp_height);
+        return 1;
+    }
+    return 0;
+}
 
 // Simple nearest-neighbor scale from decoded RGBA to ARGB pixel buffer
 static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h,
@@ -72,6 +119,7 @@ static int decode_and_set_wallpaper(const unsigned char *jpg_data, unsigned int 
     stbi_image_free(rgba);
 
     graphics_set_bg_image(wp_pixels, wp_width, wp_height);
+    wallpaper_save_cache();
     return 1;
 }
 
@@ -190,13 +238,17 @@ int wallpaper_get_width(void) { return wp_width; }
 int wallpaper_get_height(void) { return wp_height; }
 
 void wallpaper_init(void) {
-    wallpaper_load_setting();
-    
-    if (pending_wallpaper_path == NULL) {
-        if (fat32_exists("/Library/images/Wallpapers/bored.jpg")) {
-            wallpaper_request_set_from_file("/Library/images/Wallpapers/bored.jpg");
-        } else if (fat32_exists("/Library/images/Wallpapers/moon.jpg")) {
-            wallpaper_request_set_from_file("/Library/images/Wallpapers/moon.jpg");
+    if (wallpaper_load_cache()) {
+        serial_str("[WALLPAPER] Loaded from cache\n");
+    } else {
+        wallpaper_load_setting();
+        
+        if (pending_wallpaper_path == NULL) {
+            if (fat32_exists("/Library/images/Wallpapers/boredos.png")) {
+                wallpaper_request_set_from_file("/Library/images/Wallpapers/boredos.png");
+            } else if (fat32_exists("/Library/images/Wallpapers/mountain.jpg")) {
+                wallpaper_request_set_from_file("/Library/images/Wallpapers/mountain.jpg");
+            }
         }
     }
 }

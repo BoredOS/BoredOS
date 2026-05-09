@@ -175,34 +175,25 @@ void log_fail(const char *msg) {
 }
 
 static void print_verbose_boot_banner(void) {
-    kconsole_set_color(0xFFB589D6);
-    serial_write("==================== ");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("__    ____  ____ \n");
-
-    kconsole_set_color(0xFFB589D6);
-    serial_write("=================== ");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("/ /_  / __ \\/ ___\\\n");
-
-    kconsole_set_color(0xFF569CD6);
-    serial_write("================== ");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("/ __ \\/ / / /\\___ \\\n");
-
-    kconsole_set_color(0xFF569CD6);
-    serial_write("================= ");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("/ /_/ / /_/ /____/ /\n");
-
-    kconsole_set_color(0xFF4EC9B0);
-    serial_write("================ ");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("/_.___/\\____//_____/ \n");
-
-    kconsole_set_color(0xFF4EC9B0);
-    serial_write("===============                       \n");
-
+    kconsole_set_color(0xFF473ba3);
+    serial_write("       @@@@\n");
+    serial_write("     @@@@@@@\n");
+    serial_write("      @@@@@@\n");
+    serial_write("      @@@@@@@\n");
+    serial_write("       @@@@@@@      @@@@@@\n");
+    serial_write("        @@@@@@   @@@@@@@@@@@@\n");
+    serial_write("         @@@@@@ @@@@@@@@@@@@@@a\n");
+    serial_write("         @@@@@@@@@@@X  @@@@@@@@w\n");
+    serial_write("          @@@@@@@@       @@@@@@@\n");
+    serial_write("           @@@@@@M        @@@@@@\n");
+    serial_write("           @@@@@@@        @@@@@@\n");
+    serial_write("            @@@@@@@     @@@@@@@@\n");
+    serial_write("             @@@@@@@@@@@@@@@@@@\n");
+    serial_write("             i@@@@@@@@@@@@@@@\n");
+    serial_write("              @@@@@@@\n");
+    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
+    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
     kconsole_set_color(0xFFFFFFFF);
     serial_write("\n");
 }

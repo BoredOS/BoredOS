@@ -1,6 +1,3 @@
-# BoredOS Makefile
-# Target Architecture: x86_64
-# Host: macOS
 # Copyright (c) 2023-2026 Chris (boreddevnl)
 # This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 # This header needs to maintain in any file it is present in, as per the GPL license terms.
@@ -205,6 +202,8 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/Library/conf
 	mkdir -p $(BUILD_DIR)/initrd/Library/bsh
 	mkdir -p $(BUILD_DIR)/initrd/Library/BWM/Wallpaper
+	mkdir -p $(BUILD_DIR)/initrd/Library/art
+	mkdir -p $(BUILD_DIR)/initrd/Library/images/branding
 	mkdir -p $(BUILD_DIR)/initrd/docs
 	mkdir -p $(BUILD_DIR)/initrd/boot
 	mkdir -p $(BUILD_DIR)/initrd/mnt
@@ -249,6 +248,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@cp $(SRC_DIR)/userland/libc/sys/*.h $(BUILD_DIR)/initrd/usr/include/sys/
 	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/include/libc/
 	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/local/include/
+	@cp $(SRC_DIR)/userland/stb_image.h $(BUILD_DIR)/initrd/usr/include/
 
 	@printf "$(YELLOW)[COPY]$(RESET) Wallpapers..."
 	@for f in $(SRC_DIR)/images/wallpapers/*; do \
@@ -275,6 +275,18 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 		fi \
 	done
 
+	@printf "$(YELLOW)[COPY]$(RESET) BoredOS icons..."
+	@mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/boredos
+	@for f in $(SRC_DIR)/images/icons/boredos/*.png; do \
+		if [ -f "$$f" ]; then \
+			printf "  -> $$f"; \
+			cp "$$f" $(BUILD_DIR)/initrd/Library/images/icons/boredos/; \
+		fi \
+	done
+
+	@printf "$(YELLOW)[COPY]$(RESET) Branding assets..."
+	@cp -r branding/* $(BUILD_DIR)/initrd/Library/images/branding/
+
 	@printf "$(YELLOW)[COPY]$(RESET) Fonts..."
 	@for f in $(SRC_DIR)/fonts/*.ttf; do \
 		if [ -f "$$f" ]; then \
@@ -299,6 +311,9 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@printf "$(YELLOW)[COPY]$(RESET) DOOM assets..."
 	@if [ -f $(SRC_DIR)/userland/games/doom/doom1.wad ]; then printf "  -> doom1.wad"; cp $(SRC_DIR)/userland/games/doom/doom1.wad $(BUILD_DIR)/initrd/Library/DOOM/; fi
 
+	@printf "$(YELLOW)[COPY]$(RESET) ASCII art..."
+	@if [ -f $(SRC_DIR)/library/art/boredos.txt ]; then printf "  -> boredos.txt"; cp $(SRC_DIR)/library/art/boredos.txt $(BUILD_DIR)/initrd/Library/art/; fi
+
 	@printf "$(YELLOW)[COPY]$(RESET) Documentation..."
 	@for f in $$(find docs -name '*.md' 2>/dev/null); do \
 		if [ -f "$$f" ]; then \
@@ -313,7 +328,6 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@if [ -f README.md ]; then printf "  -> README.md"; cp README.md $(BUILD_DIR)/initrd/; fi
 	@if [ -f LICENSE ]; then printf "  -> LICENSE"; cp LICENSE $(BUILD_DIR)/initrd/; fi
 	@if [ -f limine.conf ]; then printf "  -> limine.conf"; cp limine.conf $(BUILD_DIR)/initrd/; fi
-	@if [ -f $(SRC_DIR)/userland/gui/about.c ]; then printf "  -> about.c"; cp $(SRC_DIR)/userland/gui/about.c $(BUILD_DIR)/initrd/; fi
 	
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar..."
 	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
@@ -341,7 +355,7 @@ $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar limine.conf limine-setup
 	printf "    module_path: boot():/initrd.tar" >> $(ISO_DIR)/limine.conf
 	
 	@printf "$(YELLOW)[COPY]$(RESET) Optional splash image..."
-	@if [ -f splash.jpg ]; then printf "  -> splash.jpg"; cp splash.jpg $(ISO_DIR)/; else printf "  -> no splash.jpg found"; fi
+	@if [ -f branding/splash.jpg ]; then printf "  -> splash.jpg"; cp branding/splash.jpg $(ISO_DIR)/splash.jpg; else printf "  -> no splash.jpg found"; fi
 	
 	@printf "$(YELLOW)[COPY]$(RESET) Limine boot files..."
 	cp limine/limine-bios.sys $(ISO_DIR)/

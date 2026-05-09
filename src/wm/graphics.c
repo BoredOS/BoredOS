@@ -13,6 +13,7 @@ static struct limine_framebuffer *g_fb = NULL;
 static uint32_t g_bg_color = 0xFF696969;
 
 extern void serial_write(const char *str);
+extern uint32_t blend_src_over_dst(uint32_t dst, uint32_t src);
 
 static int g_color_mode = 0;
 
@@ -24,6 +25,9 @@ static uint32_t *g_bg_image = NULL;
 static int g_bg_image_w = 0;
 static int g_bg_image_h = 0;
 static bool g_use_image = false;
+static uint32_t *g_logo_pixels = NULL;
+static int g_logo_w = 0;
+static int g_logo_h = 0;
 
 static DirtyRect g_dirty = {0, 0, 0, 0, false};
 static spinlock_t graphics_lock = SPINLOCK_INIT;
@@ -744,7 +748,44 @@ void graphics_set_bg_image(uint32_t *pixels, int w, int h) {
     g_use_pattern = false;
 }
 
+void graphics_set_logo_pixels(uint32_t *pixels, int w, int h) {
+    g_logo_pixels = pixels;
+    g_logo_w = w;
+    g_logo_h = h;
+}
+
 void draw_boredos_logo(int x, int y, int scale) {
+    if (g_logo_pixels) {
+        for (int r = 0; r < g_logo_h; r++) {
+            for (int c = 0; c < g_logo_w; c++) {
+                uint32_t pixel = g_logo_pixels[r * g_logo_w + c];
+                uint8_t a = (pixel >> 24) & 0xFF;
+                if (a == 0) continue;
+                
+                if (scale == 1) {
+                    if (a == 255) {
+                        put_pixel(x + c, y + r, pixel);
+                    } else {
+                        uint32_t dst = graphics_get_pixel(x + c, y + r);
+                        put_pixel(x + c, y + r, blend_src_over_dst(dst, pixel));
+                    }
+                } else {
+                    for (int sy = 0; sy < scale; sy++) {
+                        for (int sx = 0; sx < scale; sx++) {
+                            if (a == 255) {
+                                put_pixel(x + (c * scale) + sx, y + (r * scale) + sy, pixel);
+                            } else {
+                                uint32_t dst = graphics_get_pixel(x + (c * scale) + sx, y + (r * scale) + sy);
+                                put_pixel(x + (c * scale) + sx, y + (r * scale) + sy, blend_src_over_dst(dst, pixel));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return;
+    }
+
     // Width: 60, Height: 16
     // 1: Magenta, 2: Blue, 3: Cyan, 4: White, 0: Deadspace
     static const uint8_t boredos_bmp[] = {

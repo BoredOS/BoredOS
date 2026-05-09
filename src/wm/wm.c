@@ -862,7 +862,7 @@ static dock_icon_entry_t dock_icons[DOCK_ICON_COUNT] = {
     {"libreoffice-writer.png", DOCK_ICON_UNTRIED, {0}},
 };
 
-static uint32_t blend_src_over_dst(uint32_t dst, uint32_t src) {
+uint32_t blend_src_over_dst(uint32_t dst, uint32_t src) {
     uint32_t sa = (src >> 24) & 0xFF;
     if (sa == 0) return dst;
     if (sa == 255) return 0xFF000000 | (src & 0x00FFFFFF);
@@ -2581,7 +2581,7 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
     } else if (pass == 2) {
         if (0 < cy + ch && 30 > cy) {
             draw_rect(0, 0, sw, 30, COLOR_MENUBAR_BG);
-            draw_boredos_logo(8, 8, 1);
+            draw_boredos_logo(8, 4, 1);
             draw_clock(sw - 80, 12);
         }
         
@@ -4078,7 +4078,52 @@ void wm_process_deferred_thumbs(void) {
     }
 }
 
+static void wm_load_menu_logo(void) {
+    const char *path = "/Library/images/icons/boredos/bOS13.png";
+    FAT32_FileHandle *fh = fat32_open(path, "r");
+    if (!fh) return;
+
+    uint32_t size = fh->size;
+    unsigned char *encoded = (unsigned char*)kmalloc(size);
+    if (!encoded) {
+        fat32_close(fh);
+        return;
+    }
+
+    int total = 0;
+    while (total < (int)size) {
+        int chunk = fat32_read(fh, encoded + total, (int)size - total);
+        if (chunk <= 0) break;
+        total += chunk;
+    }
+    fat32_close(fh);
+
+    int w = 0, h = 0, channels = 0;
+    unsigned char *rgba = stbi_load_from_memory(encoded, total, &w, &h, &channels, 4);
+    kfree(encoded);
+
+    if (!rgba) return;
+
+    uint32_t *pixels = (uint32_t*)kmalloc(w * h * 4);
+    if (!pixels) {
+        stbi_image_free(rgba);
+        return;
+    }
+
+    for (int i = 0; i < w * h; i++) {
+        uint32_t r = rgba[i * 4];
+        uint32_t g = rgba[i * 4 + 1];
+        uint32_t b = rgba[i * 4 + 2];
+        uint32_t a = rgba[i * 4 + 3];
+        pixels[i] = (a << 24) | (r << 16) | (g << 8) | b;
+    }
+
+    stbi_image_free(rgba);
+    graphics_set_logo_pixels(pixels, w, h);
+}
+
 void wm_init(void) {
+    wm_load_menu_logo();
     disk_manager_init();
     log_ok("Disk Manager ready");
     

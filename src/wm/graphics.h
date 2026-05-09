@@ -38,6 +38,7 @@ void graphics_copy_screenbuffer(uint32_t *dest);
 
 
 void draw_boredos_logo(int x, int y, int scale);
+void graphics_set_logo_pixels(uint32_t *pixels, int w, int h);
 
 // Get screen dimensions
 int get_screen_width(void);

@@ -6,83 +6,77 @@
 #include "syscall.h"
 #include "libc/libui.h"
 #include "libc/stdlib.h"
+#include "libc/string.h"
+#include "stb_image.h"
 #include <stdbool.h>
 
-static uint32_t ansi_to_boredos_color(int code) {
-    uint32_t default_color = 0xFFFFFFFF;
+static uint32_t *branding_pixels = NULL;
+static int branding_w = 0;
+static int branding_h = 0;
 
-    switch (code) {
-        case 0: return default_color;
-        case 30: return 0xFF000000; // Black
-        case 31: return 0xFFFF4444; // Red
-        case 32: return 0xFF6A9955; // Green
-        case 33: return 0xFFFFFF00; // Yellow
-        case 34: return 0xFF569CD6; // Blue
-        case 35: return 0xFFB589D6; // Magenta
-        case 36: return 0xFF4EC9B0; // Cyan
-        case 37: return 0xFFCCCCCC; // White
-        case 90: return 0xFF808080; // Bright Black (Gray)
-        case 91: return 0xFFFF6B6B; // Bright Red
-        case 92: return 0xFF78DE78; // Bright Green
-        case 93: return 0xFFFFFF55; // Bright Yellow
-        case 94: return 0xFF87CEEB; // Bright Blue
-        case 95: return 0xFFFF77FF; // Bright Magenta
-        case 96: return 0xFF66D9EF; // Bright Cyan
-        case 97: return 0xFFFFFFFF; // Bright White
-        default: return default_color;
-    }
-}
-
-static void draw_ansi_string(ui_window_t win, int x, int y, const char *str) {
-    uint32_t current_color = 0xFFFFFFFF;
-    int current_x = x;
-    char segment[256];
-    int seg_idx = 0;
-
-    while (*str) {
-        if (*str == '\033' && *(str + 1) == '[') {
-            if (seg_idx > 0) {
-                segment[seg_idx] = 0;
-                ui_draw_string_bitmap(win, current_x, y, segment, current_color);
-                current_x += seg_idx * 8; // Bitmap font is exactly 8px wide
-                seg_idx = 0;
-            }
-
-            str += 2;
-            int code = 0;
-            while (*str >= '0' && *str <= '9') {
-                code = code * 10 + (*str - '0');
-                str++;
-            }
-            if (*str == 'm') {
-                current_color = ansi_to_boredos_color(code);
-                str++;
-            }
-        } else {
-            segment[seg_idx++] = *str++;
+static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h, uint32_t *dst, int dst_w, int dst_h) {
+    if (src_w == dst_w && src_h == dst_h) {
+        for (int i = 0; i < dst_w * dst_h; i++) {
+            int idx = i * 4;
+            dst[i] = ((uint32_t)rgba[idx + 3] << 24) | ((uint32_t)rgba[idx] << 16) | 
+                     ((uint32_t)rgba[idx + 1] << 8) | rgba[idx + 2];
         }
+        return;
     }
 
-    if (seg_idx > 0) {
-        segment[seg_idx] = 0;
-        ui_draw_string_bitmap(win, current_x, y, segment, current_color);
+    uint32_t step_x = (src_w << 16) / dst_w;
+    uint32_t step_y = (src_h << 16) / dst_h;
+    uint32_t curr_y = 0;
+
+    for (int y = 0; y < dst_h; y++) {
+        uint32_t src_y = curr_y >> 16;
+        if (src_y >= (uint32_t)src_h) src_y = src_h - 1;
+        uint32_t curr_x = 0;
+        uint32_t src_row_off = src_y * src_w;
+        uint32_t dst_row_off = y * dst_w;
+        for (int x = 0; x < dst_w; x++) {
+            uint32_t src_x = curr_x >> 16;
+            if (src_x >= (uint32_t)src_w) src_x = src_w - 1;
+            int idx = (src_row_off + src_x) * 4;
+            dst[dst_row_off + x] = ((uint32_t)rgba[idx + 3] << 24) | 
+                                   ((uint32_t)rgba[idx] << 16) | 
+                                   ((uint32_t)rgba[idx + 1] << 8) | 
+                                   rgba[idx + 2];
+            curr_x += step_x;
+        }
+        curr_y += step_y;
     }
 }
 
-static void draw_ascii_logo(ui_window_t win, int x, int y) {
-    const char *logo[] = {
-        "\033[35m==================== \033[97m__    ____  ____ \033[0m",
-        "\033[35m=================== \033[97m/ /_  / __ \\/ ___\\\033[0m",
-        "\033[34m================== \033[97m/ __ \\/ / / /\\___ \\\033[0m",
-        "\033[34m================= \033[97m/ /_/ / /_/ /____/ /\033[0m",
-        "\033[36m================ \033[97m/_.___/\\____//_____/ \033[0m",
-        "\033[36m===============                       \033[0m",
-        NULL
-    };
+static void load_branding_image(void) {
+    const char *path = "/Library/images/branding/bOS_full_gradient_cropped.png";
+    int fd = sys_open(path, "r");
+    if (fd < 0) return;
 
-    for (int i = 0; logo[i] != NULL; i++) {
-        draw_ansi_string(win, x, y + (i * 10), logo[i]); // Bitmap line height is 10px
+    uint32_t size = sys_size(fd);
+    if (size == 0) { sys_close(fd); return; }
+
+    unsigned char *buf = malloc(size);
+    if (!buf) { sys_close(fd); return; }
+
+    sys_read(fd, (char*)buf, size);
+    sys_close(fd);
+
+    int img_w, img_h, channels;
+    unsigned char *rgba = stbi_load_from_memory(buf, size, &img_w, &img_h, &channels, 4);
+    free(buf);
+
+    if (!rgba) return;
+
+    // Scale to fit width (350px)
+    branding_w = 350;
+    branding_h = (img_h * branding_w) / img_w;
+    
+    branding_pixels = malloc(branding_w * branding_h * sizeof(uint32_t));
+    if (branding_pixels) {
+        scale_rgba_to_argb(rgba, img_w, img_h, branding_pixels, branding_w, branding_h);
     }
+    stbi_image_free(rgba);
 }
 
 static void about_paint(ui_window_t win) {
@@ -94,8 +88,11 @@ static void about_paint(ui_window_t win) {
     int offset_x = 15;
     int offset_y = 35;
     
-    draw_ascii_logo(win, 14, offset_y);
+    if (branding_pixels) {
+        ui_draw_image(win, offset_x, offset_y, branding_w, branding_h, branding_pixels);
+    }
     
+    int text_y = offset_y + branding_h + 15;
     int fh = ui_get_font_height();
     int fd_v = sys_open("/proc/version", "r");
     char v_buf[1024]; v_buf[0] = 0;
@@ -131,19 +128,20 @@ static void about_paint(ui_window_t win) {
         }
     }
 
-    ui_draw_string(win, offset_x, offset_y + 105, os_name_str, 0xFFFFFFFF);
-    ui_draw_string(win, offset_x, offset_y + 105 + fh, os_version_str, 0xFFFFFFFF);
-    ui_draw_string(win, offset_x, offset_y + 105 + fh*2, kernel_version_str, 0xFFFFFFFF);
-    ui_draw_string(win, offset_x, offset_y + 105 + fh*3, build_date_str, 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y, os_name_str, 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y + fh, os_version_str, 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y + fh*2, kernel_version_str, 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y + fh*3, build_date_str, 0xFFFFFFFF);
     
     // Copyright
-    ui_draw_string(win, offset_x, offset_y + 105 + fh*4, "(C) 2026 boreddevnl.", 0xFFFFFFFF);
-    ui_draw_string(win, offset_x, offset_y + 105 + fh*5, "All rights reserved.", 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y + fh*4, "(C) 2026 boreddevnl.", 0xFFFFFFFF);
+    ui_draw_string(win, offset_x, text_y + fh*5, "All rights reserved.", 0xFFFFFFFF);
     
     ui_mark_dirty(win, 0, 0, w, h);
 }
 
 int main(void) {
+    load_branding_image();
     ui_window_t win_about = ui_window_create("About BoredOS", 250, 180, 380, 260);
     
     about_paint(win_about);
