@@ -8,16 +8,11 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-// Initialize wallpaper subsystem
 void wallpaper_init(void);
-
-// Request wallpaper change by file path (safe from interrupt context)
 void wallpaper_request_set_from_file(const char *path);
-
-// Process pending wallpaper actions (call from main loop only!)
+void wallpaper_save_setting(const char *path);
+void wallpaper_load_setting(void);
 void wallpaper_process_pending(void);
-
-// Get decoded wallpaper pixel buffer
 uint32_t* wallpaper_get_pixels(void);
 int wallpaper_get_width(void);
 int wallpaper_get_height(void);

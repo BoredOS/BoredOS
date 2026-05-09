@@ -18,16 +18,18 @@ typedef enum {
 } DiskType;
 
 typedef struct Disk {
-    char devname[16];           // Device name: "sda", "sdb", "sda1", etc.
+    char devname[16];
     DiskType type;
     bool is_fat32;
-    char label[32];             // Human-readable label
-    uint32_t partition_lba_offset;  // LBA offset of partition (0 for whole disk)
-    uint32_t total_sectors;     // Total sectors on this device/partition
-
-    // Function pointers for driver operations
+    bool is_esp;
+    char label[32];
+    uint32_t partition_lba_offset;
+    uint32_t total_sectors;
     int (*read_sector)(struct Disk *disk, uint32_t sector, uint8_t *buffer);
     int (*write_sector)(struct Disk *disk, uint32_t sector, const uint8_t *buffer);
+    int (*read_sectors)(struct Disk *disk, uint32_t sector, uint32_t count, uint8_t *buffer);
+    int (*write_sectors)(struct Disk *disk, uint32_t sector, uint32_t count, const uint8_t *buffer);
+    int (*sync)(struct Disk *disk);
 
     // Private driver data
     void *driver_data;
@@ -38,6 +40,17 @@ typedef struct Disk {
     bool registered;
 } Disk;
 
+typedef struct {
+    uint32_t lba_start;
+    uint32_t sector_count;
+    uint8_t  part_type;
+    uint8_t  flags;
+    char     label[36];
+} disk_partition_spec_t;
+
+#define PART_FLAG_ESP       0x01
+#define MIN_INSTALL_SECTORS 2097152 
+
 // Initialization and scanning
 void disk_manager_init(void);
 void disk_manager_scan(void);
@@ -45,7 +58,7 @@ void disk_manager_scan(void);
 // Device registration
 void disk_register(Disk *disk);
 void disk_register_partition(Disk *parent, uint32_t lba_offset, uint32_t sector_count,
-                             bool is_fat32, int part_num);
+                             bool is_fat32, bool is_esp, int part_num);
 
 // Lookup
 Disk* disk_get_by_name(const char *devname);
@@ -58,5 +71,12 @@ const char* disk_get_next_dev_name(void);   // Returns "sda", "sdb", etc.
 // Backward compat (deprecated — wraps disk_get_by_name)
 Disk* disk_get_by_letter(char letter);
 char disk_get_next_free_letter(void);
+
+int disk_write_gpt(Disk *disk, disk_partition_spec_t *parts, int count);
+int disk_write_mbr(Disk *disk, disk_partition_spec_t *parts, int count);
+
+int disk_sync(Disk *disk);
+
+int disk_rescan(Disk *disk);
 
 #endif

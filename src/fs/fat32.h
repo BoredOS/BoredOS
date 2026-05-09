@@ -163,6 +163,9 @@ char fat32_get_current_drive(void);
 void fat32_normalize_path(const char *path, char *normalized);
 bool fs_starts_with(const char *str, const char *prefix);
 
+// Root volume sync helpers
+void fat32_set_root_volume(void *fs_private);
+
 // Desktop Limit
 void fat32_set_desktop_limit(int limit);
 

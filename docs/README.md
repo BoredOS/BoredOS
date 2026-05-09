@@ -58,6 +58,7 @@ The SDK and toolchain guides for creating your own `.elf` userland binaries.
 -   [`ELF App Metadata`](appdev/elf_metadata.md): How to declare app icons and descriptions using source annotations, how the build system embeds them into `.note.boredos.app` ELF sections, and how the kernel reads them at runtime.
 -   [`Example Apps`](appdev/examples/README.md): A collection of sample C applications ranging from basic terminal output to advanced TCP networking.
 -   [`Grapher`](appdev/grapher.md): Full reference for the built-in mathematical graphing application — equation syntax, keyboard controls, architecture, and configuration.
+-   [`Native TCC`](appdev/tcc.md): How to use the Tiny C Compiler (TCC) to build and run C applications directly on BoredOS.
 
 ### 4. [Usage](usage/)
 General guides on how to interact with the OS.

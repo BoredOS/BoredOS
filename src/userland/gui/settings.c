@@ -12,6 +12,8 @@
 #include "../../wm/libwidget.h"
 #include "utf-8.h"
 
+extern void sys_parallel_run(void (*fn)(void*), void **args, int count);
+
 #define COLOR_COFFEE    0xFF6B4423
 #define COLOR_TEAL      0xFF008080
 #define COLOR_GREEN     0xFF008000
@@ -405,9 +407,8 @@ static void load_settings_icons(void) {
     );
 }
 
-static void load_wallpapers(void) {
-    if (wallpapers_scanned) return;
-
+static void decode_wallpapers_task(void *arg) {
+    (void)arg;
     wallpaper_count = 0;
     next_wallpaper_thumb = 0;
     wallpapers_scanned = 1;
@@ -485,6 +486,11 @@ static _Bool load_next_wallpaper_thumb(void) {
 
         return 1;
     }
+}
+
+static void load_wallpapers(void) {
+    void *job_args[1] = { NULL };
+    sys_parallel_run(decode_wallpapers_task, job_args, 1);
 
     return 0;
 }

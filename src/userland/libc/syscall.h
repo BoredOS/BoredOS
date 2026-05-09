@@ -3,6 +3,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 // Standard syscalls available from Kernel mode
 #define SYS_EXIT  0
@@ -242,5 +243,52 @@ void sys_yield(void);
 // ELF metadata API
 int sys_get_elf_metadata(const char *path, boredos_app_metadata_t *out_metadata);
 int sys_get_elf_primary_image(const char *path, char *out_path, size_t out_path_size);
+
+// Disk Management Syscalls
+
+#define SYSTEM_CMD_DISK_GET_COUNT  100
+#define SYSTEM_CMD_DISK_GET_INFO   101
+#define SYSTEM_CMD_DISK_MOUNT      105
+#define SYSTEM_CMD_DISK_UMOUNT     106
+#define SYSTEM_CMD_DISK_RESCAN     107
+#define SYSTEM_CMD_DISK_SYNC       109  
+
+#define SYSTEM_CMD_DISK_WRITE_GPT      102
+#define SYSTEM_CMD_DISK_WRITE_MBR      103
+#define SYSTEM_CMD_DISK_MKFS_FAT32     104
+#define SYSTEM_CMD_DISK_REPLACE_KERNEL 108
+
+typedef struct {
+    char     devname[16];
+    char     label[32];
+    uint32_t type;           
+    uint32_t total_sectors;
+    bool     is_partition;
+    bool     is_fat32;
+    bool     is_esp;
+    uint32_t lba_offset;
+} disk_info_t;
+
+typedef struct {
+    uint32_t lba_start;
+    uint32_t sector_count;
+    uint8_t  part_type;
+    uint8_t  flags;
+    char     label[36];
+} partition_spec_t;
+
+#define PART_FLAG_ESP       0x01
+#define MIN_INSTALL_SECTORS 2097152  
+
+int sys_disk_get_count(void);
+int sys_disk_get_info(int index, disk_info_t *out);
+int sys_disk_write_gpt(const char *devname, partition_spec_t *parts, int count);
+int sys_disk_write_mbr(const char *devname, partition_spec_t *parts, int count);
+int sys_disk_mkfs_fat32(const char *devname, const char *label);
+int sys_disk_mount(const char *devname, const char *mountpoint);
+int sys_disk_umount(const char *mountpoint);
+int sys_disk_sync(const char *mountpoint);
+int sys_disk_rescan(const char *devname);
+int sys_disk_replace_kernel(const char *src_path, const char *esp_mountpoint);
 
 #endif

@@ -11,6 +11,7 @@
 #include "memory_manager.h"
 #include "process.h"
 #include "app_metadata.h"
+extern void serial_write(const char *str);
 #define EXPLORER_ITEM_HEIGHT 80
 #define EXPLORER_ITEM_WIDTH 120
 #define EXPLORER_COLS 4
@@ -806,9 +807,15 @@ void explorer_open_directory(const char *path) {
 }
 
 void explorer_open_target(const char *path) {
+    serial_write("[EXPLORER] Opening target: ");
+    serial_write(path);
+    serial_write("\n");
+
     if (vfs_is_directory(path)) {
+        serial_write("[EXPLORER] Target is directory\n");
         explorer_open_directory(path);
     } else {
+        serial_write("[EXPLORER] Target is file, checking extensions...\n");
         if (explorer_str_ends_with(path, ".elf")) {
             process_create_elf(path, NULL, false, -1);
         } else if (explorer_str_ends_with(path, ".pdf")) {
@@ -820,6 +827,7 @@ void explorer_open_target(const char *path) {
         } else if (explorer_is_image_file(path)) {
             process_create_elf("/bin/viewer.elf", path, false, -1);
         } else {
+            serial_write("[EXPLORER] Unknown file type, falling back to txtedit\n");
             process_create_elf("/bin/txtedit.elf", path, false, -1);
         }
     }

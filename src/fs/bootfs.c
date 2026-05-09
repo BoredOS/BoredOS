@@ -3,6 +3,8 @@
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 
 #include "bootfs.h"
+#include "disk.h"
+#include "fat32.h"
 #include "../sys/bootfs_state.h"
 #include "vfs.h"
 #include "core/kutils.h"
@@ -12,6 +14,14 @@
 
 extern void serial_write(const char *str);
 extern void serial_write_hex(uint64_t value);
+
+typedef struct bootfs_custom_file {
+    char name[128];       /* filename relative to /boot, e.g. "boredos.elf" */
+    uint8_t *data;
+    uint32_t size;
+    uint32_t capacity;    /* 0 = read-only initrd pointer; >0 = heap-allocated writable */
+    struct bootfs_custom_file *next;
+} bootfs_custom_file_t;
 
 typedef struct {
     char path[512];
@@ -55,6 +65,32 @@ static vfs_fs_ops_t bootfs_ops = {
 };
 
 bootfs_state_t g_bootfs_state = {0};
+static char g_limine_conf_path[64] = "";
+
+static bootfs_custom_file_t *bootfs_find_custom(const char *name) {
+    bootfs_custom_file_t *f = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
+    while (f) {
+        if (k_strcmp(f->name, name) == 0) return f;
+        f = f->next;
+    }
+    return NULL;
+}
+
+void bootfs_register_file(const char *name, void *data, uint32_t size) {
+    if (!name || !data) return;
+    bootfs_custom_file_t *f = bootfs_find_custom(name);
+    if (!f) {
+        f = (bootfs_custom_file_t*)kmalloc(sizeof(bootfs_custom_file_t));
+        if (!f) return;
+        k_memset(f, 0, sizeof(bootfs_custom_file_t));
+        k_strcpy(f->name, name);
+        f->next = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
+        g_bootfs_state.custom_files = f;
+    }
+    f->data = (uint8_t*)data;
+    f->size = size;
+    f->capacity = 0;
+}
 
 static bool is_metadata_path(const char *path) {
     if (!path) return false;
@@ -162,9 +198,27 @@ static int bootfs_read(void *fs_private, void *handle, void *buf, int size) {
         k_strcpy(content_buffer + k_strlen(content_buffer), size_buf);
         k_strcpy(content_buffer + k_strlen(content_buffer), " bytes\n");
         content_len = k_strlen(content_buffer);
+    } else if (k_strcmp(h->path, "initrd.tar") == 0) {
+        kfree(content_buffer);
+        if (h->offset >= (int)g_bootfs_state.initrd_size) return 0;
+        int avail = (int)g_bootfs_state.initrd_size - h->offset;
+        int to_read = (size < avail) ? size : avail;
+        k_memcpy(buf, (uint8_t*)g_bootfs_state.initrd_ptr + h->offset, to_read);
+        h->offset += to_read;
+        return to_read;
     } else if (is_metadata_file(h->path)) {
         content_len = generate_metadata_content(h->path, content_buffer, 4096);
     } else {
+        bootfs_custom_file_t *cf = bootfs_find_custom(h->path);
+        if (cf) {
+            kfree(content_buffer);
+            if (h->offset >= (int)cf->size) return 0;
+            int avail = (int)cf->size - h->offset;
+            int to_read = (avail < size) ? avail : size;
+            k_memcpy(buf, cf->data + h->offset, to_read);
+            h->offset += to_read;
+            return to_read;
+        }
         kfree(content_buffer);
         return -1;
     }
@@ -204,14 +258,12 @@ static int bootfs_write(void *fs_private, void *handle, const void *buf, int siz
         g_bootfs_state.limine_conf_len = h->offset;
     }
     
-    extern vfs_file_t* vfs_open(const char *path, const char *mode);
-    extern int vfs_write(vfs_file_t *file, const void *buf, int size);
-    extern void vfs_close(vfs_file_t *file);
-    
-    vfs_file_t *fat_conf = vfs_open("/limine.conf", "w");
-    if (fat_conf) {
-        vfs_write(fat_conf, g_bootfs_state.limine_conf, g_bootfs_state.limine_conf_len);
-        vfs_close(fat_conf);
+    if (g_limine_conf_path[0] != '\0') {
+        vfs_file_t *fat_conf = vfs_open(g_limine_conf_path, "w");
+        if (fat_conf) {
+            vfs_write(fat_conf, g_bootfs_state.limine_conf, g_bootfs_state.limine_conf_len);
+            vfs_close(fat_conf);
+        }
     }
     
     return write_size;
@@ -268,10 +320,25 @@ static int bootfs_readdir(void *fs_private, const char *rel_path, vfs_dirent_t *
         }
         
         if (count < max) {
+            k_strcpy(entries[count].name, "initrd.tar");
+            entries[count].size = g_bootfs_state.initrd_size;
+            entries[count].is_directory = 0;
+            count++;
+        }
+        
+        if (count < max) {
             k_strcpy(entries[count].name, "metadata");
             entries[count].size = 0;
             entries[count].is_directory = 1;
             count++;
+        }
+        bootfs_custom_file_t *cf = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
+        while (cf && count < max) {
+            k_strcpy(entries[count].name, cf->name);
+            entries[count].size = cf->size;
+            entries[count].is_directory = 0;
+            count++;
+            cf = cf->next;
         }
     }
     else if (k_strcmp(rel_path, "metadata") == 0) {
@@ -400,11 +467,14 @@ static bool bootfs_exists(void *fs_private, const char *rel_path) {
     if (rel_path[0] == '\0') return true;
     
     if (k_strcmp(rel_path, "limine.conf") == 0) return true;
+    if (k_strcmp(rel_path, "efi") == 0) return true;
     if (k_strcmp(rel_path, "kernel") == 0) return true;
     if (k_strcmp(rel_path, "initrd") == 0) return true;
+    if (k_strcmp(rel_path, "initrd.tar") == 0) return true;
     
     if (k_strcmp(rel_path, "metadata") == 0) return true;
     if (is_metadata_file(rel_path)) return true;
+    if (bootfs_find_custom(rel_path)) return true;
     
     return false;
 }
@@ -414,6 +484,7 @@ static bool bootfs_is_dir(void *fs_private, const char *rel_path) {
     if (rel_path[0] == '/') rel_path++;
     
     if (rel_path[0] == '\0') return true;
+    if (k_strcmp(rel_path, "efi") == 0) return true;
     if (k_strcmp(rel_path, "metadata") == 0) return true; 
     
     return false;
@@ -444,17 +515,22 @@ static int bootfs_get_info(void *fs_private, const char *rel_path, vfs_dirent_t 
         info->size = g_bootfs_state.kernel_size;
         info->is_directory = 0;
         return 0;
-    }
-    
-    if (k_strcmp(rel_path, "initrd") == 0) {
+    } else if (k_strcmp(rel_path, "initrd") == 0) {
         k_strcpy(info->name, "initrd");
         info->size = g_bootfs_state.initrd_size;
         info->is_directory = 0;
         return 0;
-    }
-    
-    if (k_strcmp(rel_path, "metadata") == 0) {
+    } else if (k_strcmp(rel_path, "initrd.tar") == 0) {
+        k_strcpy(info->name, "initrd.tar");
+        info->size = g_bootfs_state.initrd_size;
+        info->is_directory = 0;
+        return 0;
+    } else if (k_strcmp(rel_path, "metadata") == 0) {
         k_strcpy(info->name, "metadata");
+        info->is_directory = 1;
+        return 0;
+    } else if (k_strcmp(rel_path, "efi") == 0) {
+        k_strcpy(info->name, "efi");
         info->is_directory = 1;
         return 0;
     }
@@ -464,6 +540,14 @@ static int bootfs_get_info(void *fs_private, const char *rel_path, vfs_dirent_t 
         int len = generate_metadata_content(rel_path, temp_buf, 4096);
         k_strcpy(info->name, rel_path + 9); 
         info->size = len;
+        info->is_directory = 0;
+        return 0;
+    }
+    
+    bootfs_custom_file_t *cf = bootfs_find_custom(rel_path);
+    if (cf) {
+        k_strcpy(info->name, cf->name);
+        info->size = cf->size;
         info->is_directory = 0;
         return 0;
     }
@@ -487,10 +571,15 @@ static uint32_t bootfs_get_size(void *file_handle) {
         return g_bootfs_state.kernel_size;
     } else if (k_strcmp(h->path, "initrd") == 0) {
         return g_bootfs_state.initrd_size;
+    } else if (k_strcmp(h->path, "initrd.tar") == 0) {
+        return g_bootfs_state.initrd_size;
     } else if (is_metadata_file(h->path)) {
         char temp_buf[4096];
         return generate_metadata_content(h->path, temp_buf, 4096);
     }
+    
+    bootfs_custom_file_t *cf = bootfs_find_custom(h->path);
+    if (cf) return cf->size;
     
     return 0;
 }
@@ -518,24 +607,55 @@ void bootfs_init(void) {
     bootfs_state_init();
 }
 
+void bootfs_mount_boot_partition(void) {
+    int count = disk_get_count();
+    Disk *esp = NULL;
+    
+    for (int i = 0; i < count; i++) {
+        Disk *d = disk_get_by_index(i);
+        if (d && d->is_esp) {
+            esp = d;
+            break;
+        }
+    }
+    
+    if (esp) {
+        void *fs_private = fat32_mount_volume(esp);
+        if (fs_private) {
+            vfs_mount("/boot/efi", esp->devname, "fat32", fat32_get_realfs_ops(), fs_private);
+            serial_write("[BOOTFS] Mounted ESP at /boot/efi\n");
+        }
+    } else {
+        serial_write("[BOOTFS] No ESP found for mounting\n");
+    }
+}
+
 void bootfs_refresh_from_disk(void) {
     extern vfs_file_t* vfs_open(const char *path, const char *mode);
     extern int vfs_read(vfs_file_t *file, void *buf, int size);
     extern void vfs_close(vfs_file_t *file);
     
-    vfs_file_t *boot_conf = vfs_open("/limine.conf", "r");
+    vfs_file_t *boot_conf = vfs_open("/boot/efi/limine.conf", "r");
+    if (boot_conf) {
+        k_strcpy(g_limine_conf_path, "/boot/efi/limine.conf");
+    } else {
+        boot_conf = vfs_open("/limine.conf", "r");
+        if (boot_conf) {
+            k_strcpy(g_limine_conf_path, "/limine.conf");
+        }
+    }
+
     if (boot_conf) {
         int bytes_read = vfs_read(boot_conf, g_bootfs_state.limine_conf, 2047);
         if (bytes_read > 0) {
             g_bootfs_state.limine_conf[bytes_read] = '\0';
             g_bootfs_state.limine_conf_len = bytes_read;
-            serial_write("[BOOTFS] Loaded limine.conf from partition: ");
-            extern void serial_write_hex(uint64_t value);
-            serial_write_hex(bytes_read);
-            serial_write(" bytes\n");
+            serial_write("[BOOTFS] Loaded limine.conf from ");
+            serial_write(g_limine_conf_path);
+            serial_write("\n");
         }
         vfs_close(boot_conf);
     } else {
-        serial_write("[BOOTFS] Warning: /limine.conf not found on partition\n");
+        serial_write("[BOOTFS] Warning: limine.conf not found on disk\n");
     }
 }

@@ -3,6 +3,25 @@
 #include <stdint.h>
 
 #include "errno.h"
+#include "sys/mman.h"
+
+void *mmap(void *addr, unsigned long length, int prot, int flags, int fd, long offset) {
+    (void)addr; (void)length; (void)prot; (void)flags; (void)fd; (void)offset;
+    errno = ENOSYS;
+    return MAP_FAILED;
+}
+
+int munmap(void *addr, unsigned long length) {
+    (void)addr; (void)length;
+    errno = ENOSYS;
+    return -1;
+}
+
+int mprotect(void *addr, unsigned long length, int prot) {
+    (void)addr; (void)length; (void)prot;
+    errno = ENOSYS;
+    return -1;
+}
 #include "fcntl.h"
 #include "stdlib.h"
 #include "string.h"

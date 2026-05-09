@@ -52,26 +52,6 @@ static char* str_istrstr(const char* haystack, const char* needle) {
     return NULL;
 }
 
-static long strtol(const char* nptr, char** endptr, int base) {
-    long res = 0;
-    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n' || *nptr == '\r') nptr++;
-    bool neg = false;
-    if (*nptr == '-') { neg = true; nptr++; }
-    else if (*nptr == '+') nptr++;
-    
-    while (*nptr) {
-        int v = -1;
-        if (*nptr >= '0' && *nptr <= '9') v = *nptr - '0';
-        else if (*nptr >= 'a' && *nptr <= 'z') v = *nptr - 'a' + 10;
-        else if (*nptr >= 'A' && *nptr <= 'Z') v = *nptr - 'A' + 10;
-        if (v < 0 || v >= base) break;
-        res = res * base + v;
-        nptr++;
-    }
-    if (endptr) *endptr = (char*)nptr;
-    return neg ? -res : res;
-}
-
 #define TAG_NONE 0
 #define TAG_IMG 1
 #define TAG_INPUT 2
@@ -309,7 +289,7 @@ static int fetch_content(const char *url, char *dest_buf, int max_len, bool prog
         char pbuf[10]; itoa(current_port, pbuf);
         s = pbuf; while(*s) *r++ = *s++;
     }
-    s = "\r\nUser-Agent: BoredOS/1.0\r\nAccept: */*\r\nConnection: close\r\n\r\n"; while(*s) *r++ = *s++;
+    s = "\r\nUser-Agent: BoredOS/BoredBrowserium\r\nAccept: */*\r\nConnection: close\r\n\r\n"; while(*s) *r++ = *s++;
     
     sys_tcp_send(request, r - request);
     

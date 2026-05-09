@@ -152,6 +152,12 @@ typedef struct {
 #define HBA_PORT_CMD_FRE    0x0010  // FIS Receive Enable
 #define HBA_PORT_CMD_FR     0x4000  // FIS Receive Running
 #define HBA_PORT_CMD_CR     0x8000  // Command List Running
+#define HBA_PORT_IS_TFES    (1u << 30) 
+
+#define ATA_SR_BSY     0x80
+#define ATA_SR_DRDY    0x40
+#define ATA_SR_DRQ     0x08
+#define ATA_SR_ERR     0x01
 
 // ============================================================================
 // ATA Commands

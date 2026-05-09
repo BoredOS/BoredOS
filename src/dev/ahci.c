@@ -46,10 +46,9 @@ static void ahci_strcpy(char *d, const char *s) {
 
 // Kernel virtual to physical address conversion
 extern uint64_t v2p(uint64_t vaddr);
-
-// ============================================================================
-// Port Setup
-// ============================================================================
+extern uint64_t p2v(uint64_t paddr);
+static int ahci_disk_sync(Disk *disk);
+static int ahci_find_free_slot(HBA_PORT *port);
 
 static void ahci_stop_cmd(HBA_PORT *port) {
     // Clear ST (Start)
@@ -116,8 +115,7 @@ static void ahci_port_rebase(ahci_port_state_t *ps) {
     port->fb = (uint32_t)(fb_phys & 0xFFFFFFFF);
     port->fbu = (uint32_t)(fb_phys >> 32);
 
-    // Allocate command table for slot 0 (256-byte aligned, room for 8 PRDT entries)
-    int cmd_tbl_size = sizeof(HBA_CMD_TBL) + 8 * sizeof(HBA_PRDT_ENTRY);
+    int cmd_tbl_size = sizeof(HBA_CMD_TBL) + 32 * sizeof(HBA_PRDT_ENTRY);
     ps->cmd_tbl = (HBA_CMD_TBL*)kmalloc_aligned(cmd_tbl_size, 256);
     if (!ps->cmd_tbl) return;
     mem_memset(ps->cmd_tbl, 0, cmd_tbl_size);
@@ -135,10 +133,6 @@ static void ahci_port_rebase(ahci_port_state_t *ps) {
     ahci_start_cmd(port);
 }
 
-// ============================================================================
-// Sector I/O
-// ============================================================================
-
 static int ahci_find_free_slot(HBA_PORT *port) {
     uint32_t slots = (port->sact | port->ci);
     for (int i = 0; i < 32; i++) {
@@ -146,6 +140,76 @@ static int ahci_find_free_slot(HBA_PORT *port) {
     }
     return -1;
 }
+
+static int ahci_identify(int port_num, uint32_t *sectors, char *model) {
+    ahci_port_state_t *ps = &ports[port_num];
+    HBA_PORT *port = ps->port;
+
+    uint64_t rflags = spinlock_acquire_irqsave(&ps->lock);
+    port->is = 0xFFFFFFFF;
+    int slot = ahci_find_free_slot(port);
+    if (slot < 0) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+
+    HBA_CMD_HEADER *cmd_hdr = &ps->cmd_list[slot];
+    cmd_hdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
+    cmd_hdr->w = 0;
+    cmd_hdr->prdtl = 1;
+
+    HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
+    mem_memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + 32 * sizeof(HBA_PRDT_ENTRY));
+
+    uint16_t *buf = (uint16_t*)kmalloc_aligned(512, 512);
+    uint64_t phys = v2p((uint64_t)buf);
+
+    cmd_tbl->prdt[0].dba = (uint32_t)(phys & 0xFFFFFFFF);
+    cmd_tbl->prdt[0].dbau = (uint32_t)(phys >> 32);
+    cmd_tbl->prdt[0].dbc = 511; // 512 bytes
+    cmd_tbl->prdt[0].i = 1;
+
+    FIS_REG_H2D *fis = (FIS_REG_H2D*)(&cmd_tbl->cfis);
+    fis->fis_type = FIS_TYPE_REG_H2D;
+    fis->c = 1;  // Command
+    fis->command = 0xEC; // IDENTIFY DEVICE
+
+    // Wait for port to be idle
+    int timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --timeout > 0);
+    if (timeout <= 0) { kfree(buf); spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+
+    port->ci = (1 << slot);
+
+    while (1) {
+        if ((port->ci & (1 << slot)) == 0) break;
+        if (port->is & HBA_PORT_IS_TFES) { kfree(buf); spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+    }
+
+    // Extract sectors (28-bit LBA for now, or 48-bit if supported)
+    uint32_t s28 = *((uint32_t*)&buf[60]);
+    uint64_t s48 = *((uint64_t*)&buf[100]);
+
+    if (s48 > 0) *sectors = (uint32_t)s48;
+    else *sectors = s28;
+
+    // Extract model name (Words 27-46, 40 bytes, big-endian shorts)
+    for (int i = 0; i < 20; i++) {
+        model[i*2] = (char)(buf[27+i] >> 8);
+        model[i*2+1] = (char)(buf[27+i] & 0xFF);
+    }
+    model[40] = 0;
+
+    // Swap bytes in model string (ATA strings are byte-swapped)
+    for (int i = 0; i < 40; i += 2) {
+        char tmp = model[i];
+        model[i] = model[i+1];
+        model[i+1] = tmp;
+    }
+
+    kfree(buf);
+    spinlock_release_irqrestore(&ps->lock, rflags);
+    return 0;
+}
+
+
 
 int ahci_read_sectors(int port_num, uint64_t lba, uint32_t count, uint8_t *buffer) {
     if (!ahci_initialized || port_num < 0 || port_num >= MAX_AHCI_PORTS) return -1;
@@ -167,14 +231,38 @@ int ahci_read_sectors(int port_num, uint64_t lba, uint32_t count, uint8_t *buffe
     cmd_hdr->prdtl = 1;
 
     HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
-    mem_memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + sizeof(HBA_PRDT_ENTRY));
+    mem_memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + 32 * sizeof(HBA_PRDT_ENTRY));
 
-    // Setup PRDT
-    uint64_t buf_phys = v2p((uint64_t)buffer);
-    cmd_tbl->prdt[0].dba = (uint32_t)(buf_phys & 0xFFFFFFFF);
-    cmd_tbl->prdt[0].dbau = (uint32_t)(buf_phys >> 32);
-    cmd_tbl->prdt[0].dbc = (count * 512) - 1;   // 0-based byte count
-    cmd_tbl->prdt[0].i = 1;
+    extern uint64_t paging_get_pml4_phys(void);
+    extern uint64_t paging_virt2phys(uint64_t pml4_phys, uint64_t virtual_addr);
+    uint64_t pml4 = paging_get_pml4_phys();
+    uint64_t buf_addr = (uint64_t)buffer;
+    uint32_t remaining = count * 512;
+    int prd_idx = 0;
+
+    while (remaining > 0 && prd_idx < 32) {
+        uint64_t phys = paging_virt2phys(pml4, buf_addr);
+        if (!phys) {
+            spinlock_release_irqrestore(&ps->lock, rflags);
+            return -1;
+        }
+
+        uint32_t offset = buf_addr & 0xFFF;
+        uint32_t can_do = 4096 - offset;
+        if (can_do > remaining) can_do = remaining;
+
+        cmd_tbl->prdt[prd_idx].dba = (uint32_t)(phys & 0xFFFFFFFF);
+        cmd_tbl->prdt[prd_idx].dbau = (uint32_t)(phys >> 32);
+        cmd_tbl->prdt[prd_idx].dbc = can_do - 1; // 0-based
+        cmd_tbl->prdt[prd_idx].i = 0;
+
+        buf_addr += can_do;
+        remaining -= can_do;
+        prd_idx++;
+    }
+    
+    if (prd_idx > 0) cmd_tbl->prdt[prd_idx - 1].i = 1; // Interrupt on last
+    cmd_hdr->prdtl = prd_idx;
 
     // Setup Command FIS
     FIS_REG_H2D *fis = (FIS_REG_H2D*)&cmd_tbl->cfis;
@@ -238,13 +326,39 @@ int ahci_write_sectors(int port_num, uint64_t lba, uint32_t count, const uint8_t
     cmd_hdr->prdtl = 1;
 
     HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
-    mem_memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + sizeof(HBA_PRDT_ENTRY));
+    mem_memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + 32 * sizeof(HBA_PRDT_ENTRY));
 
-    uint64_t buf_phys = v2p((uint64_t)buffer);
-    cmd_tbl->prdt[0].dba = (uint32_t)(buf_phys & 0xFFFFFFFF);
-    cmd_tbl->prdt[0].dbau = (uint32_t)(buf_phys >> 32);
-    cmd_tbl->prdt[0].dbc = (count * 512) - 1;
-    cmd_tbl->prdt[0].i = 1;
+    // Setup PRDT - handle buffers spanning multiple physical pages
+    extern uint64_t paging_get_pml4_phys(void);
+    extern uint64_t paging_virt2phys(uint64_t pml4_phys, uint64_t virtual_addr);
+    uint64_t pml4 = paging_get_pml4_phys();
+    uint64_t buf_addr = (uint64_t)buffer;
+    uint32_t remaining = count * 512;
+    int prd_idx = 0;
+
+    while (remaining > 0 && prd_idx < 32) {
+        uint64_t phys = paging_virt2phys(pml4, buf_addr);
+        if (!phys) {
+            spinlock_release_irqrestore(&ps->lock, rflags);
+            return -1;
+        }
+
+        uint32_t offset = buf_addr & 0xFFF;
+        uint32_t can_do = 4096 - offset;
+        if (can_do > remaining) can_do = remaining;
+
+        cmd_tbl->prdt[prd_idx].dba = (uint32_t)(phys & 0xFFFFFFFF);
+        cmd_tbl->prdt[prd_idx].dbau = (uint32_t)(phys >> 32);
+        cmd_tbl->prdt[prd_idx].dbc = can_do - 1; // 0-based
+        cmd_tbl->prdt[prd_idx].i = 0;
+
+        buf_addr += can_do;
+        remaining -= can_do;
+        prd_idx++;
+    }
+
+    if (prd_idx > 0) cmd_tbl->prdt[prd_idx - 1].i = 1; // Interrupt on last
+    cmd_hdr->prdtl = prd_idx;
 
     FIS_REG_H2D *fis = (FIS_REG_H2D*)&cmd_tbl->cfis;
     fis->fis_type = FIS_TYPE_REG_H2D;
@@ -321,6 +435,24 @@ static int ahci_disk_write_sector(Disk *disk, uint32_t sector, const uint8_t *bu
     return ahci_write_sectors(data->ahci_port, (uint64_t)sector, 1, buffer);
 }
 
+static int ahci_disk_read_sectors(Disk *disk, uint32_t sector, uint32_t count, uint8_t *buffer) {
+    AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
+    if (disk->is_partition && disk->parent) {
+        AHCIDriverData *pdata = (AHCIDriverData*)disk->parent->driver_data;
+        return ahci_read_sectors(pdata->ahci_port, (uint64_t)sector + disk->partition_lba_offset, count, buffer);
+    }
+    return ahci_read_sectors(data->ahci_port, (uint64_t)sector, count, buffer);
+}
+
+static int ahci_disk_write_sectors(Disk *disk, uint32_t sector, uint32_t count, const uint8_t *buffer) {
+    AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
+    if (disk->is_partition && disk->parent) {
+        AHCIDriverData *pdata = (AHCIDriverData*)disk->parent->driver_data;
+        return ahci_write_sectors(pdata->ahci_port, (uint64_t)sector + disk->partition_lba_offset, count, buffer);
+    }
+    return ahci_write_sectors(data->ahci_port, (uint64_t)sector, count, buffer);
+}
+
 // ============================================================================
 // Initialization
 // ============================================================================
@@ -368,9 +500,7 @@ void ahci_init(void) {
     serial_write_hex((uint32_t)abar_phys);
     serial_write("\n");
 
-    // Map ABAR region into kernel virtual address space
-    // Identity-map several pages to cover the HBA memory (at least 0x1100 bytes)
-    uint64_t abar_virt = abar_phys; // Use identity mapping
+    uint64_t abar_virt = p2v(abar_phys);
     for (uint64_t offset = 0; offset < 0x2000; offset += 4096) {
         paging_map_page(paging_get_pml4_phys(), abar_virt + offset,
                         abar_phys + offset,
@@ -409,6 +539,7 @@ void ahci_init(void) {
             ahci_port_rebase(&ports[i]);
             ports[i].active = true;
             active_port_count++;
+            ahci_initialized = true;
 
             // Register as a block device
             Disk *disk = (Disk*)kmalloc(sizeof(Disk));
@@ -418,85 +549,36 @@ void ahci_init(void) {
 
                 disk->devname[0] = 0; // Auto-assign
                 disk->type = DISK_TYPE_SATA;
-                ahci_strcpy(disk->label, "SATA Drive");
-                disk->read_sector = ahci_disk_read_sector;
-                disk->write_sector = ahci_disk_write_sector;
-                disk->driver_data = drv;
+                
+                uint32_t sectors = 0;
+                char model[64];
+    if (ahci_identify(i, &sectors, model) == 0) {
+        ahci_strcpy(disk->label, model);
+        disk->total_sectors = sectors;
+    } else {
+        ahci_strcpy(disk->label, "SATA Drive");
+        disk->total_sectors = 0;
+    }
+
+    disk->read_sector = ahci_disk_read_sector;
+    disk->write_sector = ahci_disk_write_sector;
+    disk->read_sectors = ahci_disk_read_sectors;
+    disk->write_sectors = ahci_disk_write_sectors;
+    disk->sync = ahci_disk_sync;
+    disk->driver_data = drv;
                 disk->partition_lba_offset = 0;
-                disk->total_sectors = 0;
                 disk->parent = NULL;
                 disk->is_partition = false;
                 disk->is_fat32 = false;
 
                 disk_register(disk);
 
-                // Let disk_manager parse partitions — we call a scan function
-                extern void disk_manager_scan_partitions(Disk *disk);
-                // Inline MBR parse for this disk
                 extern void serial_write(const char *str);
+                extern int disk_rescan(Disk *disk);
                 serial_write("[AHCI] Probing partitions on /dev/");
                 serial_write(disk->devname);
                 serial_write("...\n");
-
-                // Read MBR sector 0
-                uint8_t *mbr_buf = (uint8_t*)kmalloc(512);
-                if (mbr_buf) {
-                    if (ahci_disk_read_sector(disk, 0, mbr_buf) == 0) {
-                        if (mbr_buf[510] == 0x55 && mbr_buf[511] == 0xAA) {
-                            // Parse MBR partition table
-                            typedef struct {
-                                uint8_t  status;
-                                uint8_t  chs_first[3];
-                                uint8_t  type;
-                                uint8_t  chs_last[3];
-                                uint32_t lba_start;
-                                uint32_t sector_count;
-                            } __attribute__((packed)) MBR_Part;
-
-                            MBR_Part *parts = (MBR_Part*)&mbr_buf[446];
-                            int pn = 1;
-                            for (int p = 0; p < 4; p++) {
-                                if (parts[p].type == 0x00 || parts[p].sector_count == 0)
-                                    continue;
-
-                                bool fat32 = false;
-                                if (parts[p].type == 0x0B || parts[p].type == 0x0C) {
-                                    // Verify BPB
-                                    uint8_t *pbuf = (uint8_t*)kmalloc(512);
-                                    if (pbuf) {
-                                        if (ahci_disk_read_sector(disk, parts[p].lba_start, pbuf) == 0) {
-                                            if (pbuf[510] == 0x55 && pbuf[511] == 0xAA) {
-                                                uint16_t bps = *(uint16_t*)&pbuf[11];
-                                                uint16_t spf16 = *(uint16_t*)&pbuf[22];
-                                                uint32_t spf32 = *(uint32_t*)&pbuf[36];
-                                                if (bps == 512 && spf16 == 0 && spf32 > 0)
-                                                    fat32 = true;
-                                            }
-                                        }
-                                        kfree(pbuf);
-                                    }
-                                }
-
-                                disk_register_partition(disk, parts[p].lba_start,
-                                                        parts[p].sector_count, fat32, pn);
-                                pn++;
-                            }
-
-                            // Fallback: raw FAT32
-                            if (pn == 1) {
-                                uint16_t bps = *(uint16_t*)&mbr_buf[11];
-                                uint16_t spf16 = *(uint16_t*)&mbr_buf[22];
-                                uint32_t spf32 = *(uint32_t*)&mbr_buf[36];
-                                if (bps == 512 && spf16 == 0 && spf32 > 0) {
-                                    disk->is_fat32 = true;
-                                    disk->partition_lba_offset = 0;
-                                    serial_write("[AHCI] Raw FAT32 volume detected\n");
-                                }
-                            }
-                        }
-                    }
-                    kfree(mbr_buf);
-                }
+                disk_rescan(disk);
             }
         } else if (type == 1) {
             serial_write("[AHCI] Port ");
@@ -514,3 +596,52 @@ void ahci_init(void) {
         serial_write("[AHCI] No active SATA ports found\n");
     }
 }
+
+int ahci_flush_cache(int port_num) {
+    HBA_PORT *port = &abar->ports[port_num];
+    ahci_port_state_t *ps = &ports[port_num];
+
+    if (port_num < 0 || port_num >= 32 || !ps->active) return -1;
+
+    uint64_t rflags = spinlock_acquire_irqsave(&ps->lock);
+
+    port->is = 0xFFFFFFFF; // Clear interrupts
+    int slot = ahci_find_free_slot(port);
+    if (slot == -1) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+
+    HBA_CMD_HEADER *cmd_header = (HBA_CMD_HEADER*)p2v(port->clb);
+    cmd_header += slot;
+    cmd_header->cfl = sizeof(FIS_REG_H2D) / 4;
+    cmd_header->w = 0;
+    cmd_header->prdtl = 0;
+
+    HBA_CMD_TBL *cmd_tbl = (HBA_CMD_TBL*)p2v(cmd_header->ctba);
+    for (int i = 0; i < 256; i++) ((uint8_t*)cmd_tbl)[i] = 0;
+
+    FIS_REG_H2D *fis = (FIS_REG_H2D*)(&cmd_tbl->cfis);
+    fis->fis_type = FIS_TYPE_REG_H2D;
+    fis->c = 1;
+    fis->command = 0xEA; // FLUSH CACHE EXT
+
+    // Wait for port to be ready
+    int timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --timeout > 0);
+    if (timeout == 0) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+
+    port->ci = (1 << slot);
+
+    while (1) {
+        if ((port->ci & (1 << slot)) == 0) break;
+        if (port->is & HBA_PORT_IS_TFES) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+    }
+
+    spinlock_release_irqrestore(&ps->lock, rflags);
+    return 0;
+}
+
+static int ahci_disk_sync(Disk *disk) {
+    AHCIDriverData *drv = (AHCIDriverData*)disk->driver_data;
+    if (!drv) return -1;
+    return ahci_flush_cache(drv->ahci_port);
+}
+

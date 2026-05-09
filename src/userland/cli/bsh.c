@@ -866,11 +866,25 @@ static void prompt_write_with_right(const char *left_tmpl, const char *right_tmp
     }
 }
 
-static void redraw_input(const char *prompt_tmpl, const char *line, int len) {
+static void redraw_input(const char *prompt_tmpl, const char *line, int len, int cursor) {
     sys_write(1, "\r", 1);
     prompt_write_with_right(prompt_tmpl, g_cfg.prompt_right);
     sys_write(1, line, len);
     sys_write(1, "\x1b[K", 3);
+    
+    int diff = len - cursor;
+    if (diff > 0) {
+        int char_diff = text_strlen_utf8(line + cursor);
+        if (char_diff > 0) {
+            char num[16];
+            char seq[32];
+            itoa(char_diff, num);
+            str_copy(seq, "\x1b[", sizeof(seq));
+            str_append(seq, num, sizeof(seq));
+            str_append(seq, "D", sizeof(seq));
+            sys_write(1, seq, (int)strlen(seq));
+        }
+    }
 }
 
 static void show_matches(const char *prompt_tmpl, const char *line, int len, char matches[][MAX_MATCH_LEN], int count) {
@@ -880,7 +894,7 @@ static void show_matches(const char *prompt_tmpl, const char *line, int len, cha
         sys_write(1, "  ", 2);
     }
     sys_write(1, "\n", 1);
-    redraw_input(prompt_tmpl, line, len);
+    redraw_input(prompt_tmpl, line, len, len);
 }
 
 static int pid_exists(int pid) {
@@ -1424,6 +1438,7 @@ static bool run_script(const char *path) {
 
 static int read_line(char *out, int max_len, const char *prompt_tmpl) {
     int len = 0;
+    int cursor = 0;
     int hist_index = g_history_count;
     bool search_mode = false;
     char saved_line[MAX_LINE];
@@ -1463,15 +1478,15 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
         }
 
         if (ch == '\b' || ch == 127) {
-            if (len > 0) {
-                // Find previous UTF-8 character boundary
-                const char *prev = text_prev_utf8(out, out + len);
-                len = (int)(prev - out);
-                out[len] = 0;
-                
-                // Send only ONE backspace sequence to the terminal
-                // because the terminal is now codepoint-based.
-                sys_write(1, "\b \b", 3);
+            if (cursor > 0) {
+                const char *prev = text_prev_utf8(out, out + cursor);
+                int shift = (int)(out + cursor - prev);
+                for (int i = cursor; i <= len; i++) {
+                    out[i - shift] = out[i];
+                }
+                cursor -= shift;
+                len -= shift;
+                redraw_input(prompt_tmpl, out, len, cursor);
             }
             search_mode = false;
             hist_index = g_history_count;
@@ -1524,7 +1539,8 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
                 out[token_start] = 0;
                 str_append(out, matches[0], max_len);
                 len = (int)strlen(out);
-                redraw_input(prompt_tmpl, out, len);
+                cursor = len;
+                redraw_input(prompt_tmpl, out, len, cursor);
             } else {
                 int common_len = common_prefix_len(matches, match_count);
                 if (common_len > token_len) {
@@ -1535,14 +1551,33 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
                     out[token_start] = 0;
                     str_append(out, prefix_buf, max_len);
                     len = (int)strlen(out);
-                    redraw_input(prompt_tmpl, out, len);
+                    cursor = len;
+                    redraw_input(prompt_tmpl, out, len, cursor);
                 } else {
                     show_matches(prompt_tmpl, out, len, matches, match_count);
+                    cursor = len;
                 }
             }
             search_mode = false;
             hist_index = g_history_count;
             continue;
+        }
+
+        if (ch == 27) {
+            char seq[2];
+            int g1 = 0, g2 = 0;
+            int retries = 0;
+            while (g1 <= 0 && retries < 10) { g1 = sys_tty_read_in(&seq[0], 1); if (g1 <= 0) { sleep(1); retries++; } }
+            retries = 0;
+            while (g2 <= 0 && retries < 10) { g2 = sys_tty_read_in(&seq[1], 1); if (g2 <= 0) { sleep(1); retries++; } }
+            
+            if (g1 > 0 && g2 > 0 && seq[0] == '[') {
+                if (seq[1] == 'A') ch = 17;
+                else if (seq[1] == 'B') ch = 18;
+                else if (seq[1] == 'C') ch = 19;
+                else if (seq[1] == 'D') ch = 20;
+            }
+            if (ch == 27) continue;
         }
 
         if (ch == 17) { // Up
@@ -1565,7 +1600,8 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
                 hist_index = found;
                 str_copy(out, g_history[hist_index], max_len);
                 len = (int)strlen(out);
-                redraw_input(prompt_tmpl, out, len);
+                cursor = len;
+                redraw_input(prompt_tmpl, out, len, cursor);
             }
             continue;
         }
@@ -1583,20 +1619,44 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
                 hist_index = found;
                 str_copy(out, g_history[hist_index], max_len);
                 len = (int)strlen(out);
+                cursor = len;
             } else {
                 search_mode = false;
                 hist_index = g_history_count;
                 str_copy(out, saved_line, max_len);
                 len = (int)strlen(out);
+                cursor = len;
             }
-            redraw_input(prompt_tmpl, out, len);
+            redraw_input(prompt_tmpl, out, len, cursor);
+            continue;
+        }
+
+        if (ch == 20) { // Left
+            if (cursor > 0) {
+                const char *prev = text_prev_utf8(out, out + cursor);
+                if (prev) cursor = (int)(prev - out);
+                redraw_input(prompt_tmpl, out, len, cursor);
+            }
+            continue;
+        }
+
+        if (ch == 19) { // Right
+            if (cursor < len) {
+                const char *next = text_next_utf8(out + cursor);
+                if (next && *next) cursor = (int)(next - out);
+                else cursor = len;
+                redraw_input(prompt_tmpl, out, len, cursor);
+            }
             continue;
         }
 
         if (((unsigned char)ch >= 32 || (signed char)ch < 0) && len < max_len - 1) {
-            out[len++] = ch;
-            out[len] = 0;
-            sys_write(1, &ch, 1);
+            for (int i = len; i >= cursor; i--) {
+                out[i + 1] = out[i];
+            }
+            out[cursor++] = ch;
+            len++;
+            redraw_input(prompt_tmpl, out, len, cursor);
             search_mode = false;
             hist_index = g_history_count;
         }

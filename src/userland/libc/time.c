@@ -3,6 +3,7 @@
 #include "time.h"
 #include "stdio.h"
 #include "syscall.h"
+#include "sys/time.h"
 
 static int _b_is_leap(int year) {
     return ((year % 4) == 0 && (year % 100) != 0) || ((year % 400) == 0);
@@ -163,4 +164,14 @@ __attribute__((weak)) time_t mktime(struct tm *tm) {
         tm->tm_hour,
         tm->tm_min,
         tm->tm_sec);
+}
+
+int gettimeofday(struct timeval *tv, void *tz) {
+    (void)tz;
+    if (tv) {
+        time_t t = time(NULL);
+        tv->tv_sec = (long)t;
+        tv->tv_usec = 0;
+    }
+    return 0;
 }

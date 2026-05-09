@@ -90,6 +90,7 @@ typedef struct {
 } lumos_state_t;
 
 void wm_init(void);
+void wm_run_loop(void);
 void wm_handle_mouse(int dx, int dy, uint8_t buttons, int dz);
 void wm_handle_key_event(uint16_t keycode, uint32_t codepoint, uint32_t mods, bool pressed);
 void wm_handle_click(int x, int y);

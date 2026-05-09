@@ -157,3 +157,15 @@ double fclamp(double x, double lo, double hi) {
     if (x > hi) return hi;
     return x;
 }
+
+double ldexp(double x, int exp) {
+    if (exp >= 0) { while (exp--) x *= 2.0; }
+    else { while (exp++) x /= 2.0; }
+    return x;
+}
+
+long double ldexpl(long double x, int exp) {
+    if (exp >= 0) { while (exp--) x *= 2.0L; }
+    else { while (exp++) x /= 2.0L; }
+    return x;
+}

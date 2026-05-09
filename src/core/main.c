@@ -33,6 +33,7 @@
 #include "sys/module_manager.h"
 #include "sys/bootfs_state.h"
 #include "input/keymap.h"
+#include "input/keyboard.h"
 
 extern void sysfs_init_subsystems(void);
 
@@ -234,6 +235,119 @@ static void fat32_mkdir_recursive(const char *path) {
     }
 }
 
+static bool cmdline_has_flag(const char *cmdline, const char *flag) {
+    if (!cmdline || !flag || !flag[0]) return false;
+    int flag_len = (int)k_strlen(flag);
+    const char *p = cmdline;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        const char *start = p;
+        while (*p && *p != ' ') p++;
+        int len = (int)(p - start);
+        if (len == flag_len && k_strncmp(start, flag, (size_t)flag_len) == 0) return true;
+    }
+    return false;
+}
+
+static bool cmdline_read_value(const char *cmdline, const char *key, char *out, int out_len) {
+    if (!cmdline || !key || !out || out_len <= 1) return false;
+    int key_len = (int)k_strlen(key);
+    const char *p = cmdline;
+    while (*p) {
+        while (*p == ' ') p++;
+        if (!*p) break;
+        if (k_strncmp(p, key, (size_t)key_len) == 0) {
+            const char *val = p + key_len;
+            int i = 0;
+            while (*val && *val != ' ' && i < out_len - 1) {
+                out[i++] = *val++;
+            }
+            out[i] = '\0';
+            return i > 0;
+        }
+        while (*p && *p != ' ') p++;
+    }
+    return false;
+}
+
+static void boot_parse_cmdline(const char *cmdline, uint32_t media_type) {
+    g_bootfs_state.boot_flags = 0;
+    g_bootfs_state.root_device[0] = '\0';
+
+    char root_arg[32];
+    if (cmdline_read_value(cmdline, "root=", root_arg, (int)sizeof(root_arg))) {
+        const char *dev = root_arg;
+        if (dev[0] == '/' && dev[1] == 'd' && dev[2] == 'e' && dev[3] == 'v' && dev[4] == '/') {
+            dev += 5;
+        }
+        int i = 0;
+        while (dev[i] && i < (int)sizeof(g_bootfs_state.root_device) - 1) {
+            g_bootfs_state.root_device[i] = dev[i];
+            i++;
+        }
+        g_bootfs_state.root_device[i] = '\0';
+        if (i > 0) g_bootfs_state.boot_flags |= BOOT_FLAG_ROOT_SET;
+    }
+
+    bool force_live = cmdline_has_flag(cmdline, "--live");
+    bool force_disk = cmdline_has_flag(cmdline, "--disk");
+
+    if (force_live) {
+        g_bootfs_state.boot_flags |= BOOT_FLAG_LIVE | BOOT_FLAG_FORCED;
+    } else if (force_disk) {
+        g_bootfs_state.boot_flags |= BOOT_FLAG_DISK | BOOT_FLAG_FORCED;
+    } else if (g_bootfs_state.boot_flags & BOOT_FLAG_ROOT_SET) {
+        g_bootfs_state.boot_flags |= BOOT_FLAG_DISK;
+    } else if (media_type == LIMINE_MEDIA_TYPE_OPTICAL || media_type == LIMINE_MEDIA_TYPE_TFTP) {
+        g_bootfs_state.boot_flags |= BOOT_FLAG_LIVE;
+    } else {
+        g_bootfs_state.boot_flags |= BOOT_FLAG_DISK;
+    }
+}
+
+static bool usage_policy_prompt(void) {
+    kconsole_set_active(true);
+    serial_write("BoredOS - Please read the Usage Policy provided with this software before continuing.\n");
+    serial_write("Do you agree to the terms? [y/N]\n");
+
+    while (1) {
+        if ((inb(0x64) & 1) == 0) {
+            asm volatile("pause");
+            continue;
+        }
+
+        uint8_t scancode = inb(0x60);
+        keyboard_event_t ev;
+        if (!keyboard_handle_set1_scancode(scancode, &ev)) {
+            continue;
+        }
+
+        if (!ev.pressed) {
+            continue;
+        }
+
+        if (ev.keycode == KEY_ENTER || ev.keycode == KEY_KP_ENTER) {
+            serial_write("\n");
+            return false;
+        }
+
+        if (!ev.is_text) {
+            continue;
+        }
+
+        if (ev.codepoint == 'y' || ev.codepoint == 'Y') {
+            serial_write("\n");
+            return true;
+        }
+
+        if (ev.codepoint == 'n' || ev.codepoint == 'N') {
+            serial_write("\n");
+            return false;
+        }
+    }
+}
+
 void kmain(void) {
     init_serial();
     vfs_init();
@@ -308,21 +422,6 @@ void kmain(void) {
     
     fat32_init();
     log_ok("FAT32 ready");
-    fat32_mkdir("/bin");
-    fat32_mkdir("/Library");
-    fat32_mkdir("/Library/images");
-    fat32_mkdir("/Library/images/Wallpapers");
-    fat32_mkdir("/Library/images/gif");
-    fat32_mkdir("/Library/Fonts");
-    fat32_mkdir("/Library/DOOM");
-    fat32_mkdir("/Library/conf");
-    fat32_mkdir("/Library/bsh");
-    fat32_mkdir("/docs");
-    fat32_mkdir("/root");
-    fat32_mkdir("/root/Desktop");
-    fat32_mkdir("/root/Pictures");
-    fat32_mkdir("/root/Documents");
-    fat32_mkdir("/root/Downloads");
 
     sysfs_init_subsystems();
     vfs_mount("/sys", "sysfs", "sysfs", sysfs_get_ops(), NULL);
@@ -344,6 +443,14 @@ void kmain(void) {
         serial_write("[INIT] Kernel size from bootloader: ");
         serial_write_hex(g_bootfs_state.kernel_size);
         serial_write(" bytes\n");
+    }
+
+    if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
+        const char *cmdline = kernel_file_request.response->kernel_file->cmdline;
+        uint32_t media_type = kernel_file_request.response->kernel_file->media_type;
+        boot_parse_cmdline(cmdline, media_type);
+    } else {
+        boot_parse_cmdline(NULL, LIMINE_MEDIA_TYPE_GENERIC);
     }
     
     extern uint32_t wm_get_ticks(void);
@@ -372,6 +479,7 @@ void kmain(void) {
             if (path_len >= 5 && path[path_len-4] == '.' && path[path_len-3] == 't' && 
                 path[path_len-2] == 'a' && path[path_len-1] == 'r') {
                 g_bootfs_state.initrd_size = mod->size;
+                g_bootfs_state.initrd_ptr = mod->address;
                 serial_write("[INIT] -> Initrd detected\n");
             }
         }
@@ -445,6 +553,19 @@ void kmain(void) {
         smp_init(NULL);
     }
 
+    bool bypass_tos = false;
+    if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
+        const char *cmdline = kernel_file_request.response->kernel_file->cmdline;
+        if (cmdline != NULL && k_strstr(cmdline, "--accept-tos") != NULL) {
+            bypass_tos = true;
+        }
+    }
+
+    if (!bypass_tos && !usage_policy_prompt()) {
+        log_fail("Usage policy not accepted, halting");
+        hcf();
+    }
+
     wm_init();
 
     asm volatile("sti");
@@ -452,10 +573,5 @@ void kmain(void) {
     extern void bootfs_refresh_from_disk(void);
     bootfs_refresh_from_disk();
 
-    while (1) {
-        wm_process_input();
-        wm_process_deferred_thumbs();
-        wallpaper_process_pending();
-        asm("hlt");
-    }
+    wm_run_loop();
 }

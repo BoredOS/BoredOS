@@ -15,6 +15,7 @@ Use libc wrappers when possible instead of calling raw syscall numbers directly.
 | 3 | `SYS_GUI` | Window manager and drawing commands |
 | 4 | `SYS_FS` | Filesystem and fd commands |
 | 5 | `SYS_SYSTEM` | System-wide command multiplexer |
+| 8 | `SYS_DEBUG_SERIAL` | Debug serial output (kernel only) |
 | 9 | `SYS_SBRK` (userland header) | Heap break management |
 | 10 | `SYS_KILL` (userland header) | Kill process by PID |
 | 60 | `SYS_EXIT` (kernel header) | Internal kernel syscall number map |
@@ -46,6 +47,32 @@ Notes:
 | 17 | `FS_CMD_PIPE` | Create pipe |
 | 18 | `FS_CMD_FCNTL` | `fcntl` flags ops |
 
+## GUI Command IDs (`SYS_GUI`)
+
+| ID | Macro | Meaning |
+|---|---|---|
+| 1 | `GUI_CMD_WINDOW_CREATE` | Create a new window |
+| 2 | `GUI_CMD_DRAW_RECT` | Draw a rectangle |
+| 3 | `GUI_CMD_DRAW_STRING` | Draw a string (TTF) |
+| 4 | `GUI_CMD_MARK_DIRTY` | Mark region dirty / dual-buffer commit |
+| 5 | `GUI_CMD_GET_EVENT` | Retrieve next GUI event |
+| 6 | `GUI_CMD_DRAW_ROUNDED_RECT_FILLED` | Draw filled rounded rectangle |
+| 7 | `GUI_CMD_DRAW_IMAGE` | Draw raw image data |
+| 8 | `GUI_CMD_GET_STRING_WIDTH` | Get TTF string width |
+| 9 | `GUI_CMD_GET_FONT_HEIGHT` | Get TTF font height |
+| 10 | `GUI_CMD_DRAW_STRING_BITMAP` | Draw legacy bitmap string |
+| 11 | `GUI_CMD_DRAW_STRING_SCALED` | Draw scaled TTF string |
+| 12 | `GUI_CMD_GET_STRING_WIDTH_SCALED` | Get scaled TTF string width |
+| 13 | `GUI_CMD_GET_FONT_HEIGHT_SCALED` | Get scaled TTF font height |
+| 14 | `GUI_CMD_WINDOW_SET_RESIZABLE` | Toggle window resizability |
+| 15 | `GUI_CMD_WINDOW_SET_TITLE` | Update window title |
+| 16 | `GUI_CMD_SET_FONT` | Load/set window-specific font |
+| 18 | `GUI_CMD_DRAW_STRING_SCALED_SLOPED` | Draw sloped/scaled TTF string |
+| 50 | `GUI_CMD_GET_SCREEN_SIZE` | Get display resolution |
+| 51 | `GUI_CMD_GET_SCREENBUFFER` | Copy screen contents to buffer |
+| 52 | `GUI_CMD_SHOW_NOTIFICATION` | Show desktop notification |
+| 53 | `GUI_CMD_GET_DATETIME` | Get RTC datetime |
+
 ## SYSTEM Command IDs (`SYS_SYSTEM`)
 
 ### Desktop and display
@@ -65,6 +92,8 @@ Notes:
 | 31 | `SYSTEM_CMD_SET_WALLPAPER_PATH` | Set wallpaper from path |
 | 40 | `SYSTEM_CMD_SET_FONT` | Set active font |
 | 47 | `SYSTEM_CMD_SET_RESOLUTION` | Set display mode |
+| 49 | `SYSTEM_CMD_SET_KEYBOARD_LAYOUT` | Set active keyboard layout ID |
+| 51 | `SYSTEM_CMD_GET_KEYBOARD_LAYOUT` | Get current keyboard layout ID |
 
 ### Time, power, and system state
 
@@ -137,6 +166,21 @@ Notes:
 |---|---|---|
 | 76 | `SYSTEM_CMD_GET_ELF_METADATA` | Read full app metadata from an ELF |
 | 77 | `SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE` | Read primary icon path from an ELF |
+
+### Disk Management
+
+| ID | Macro | Meaning |
+|---|---|---|
+| 100 | `SYSTEM_CMD_DISK_GET_COUNT` | Get number of detected disks |
+| 101 | `SYSTEM_CMD_DISK_GET_INFO` | Get metadata for a specific disk/partition |
+| 102 | `SYSTEM_CMD_DISK_WRITE_GPT` | Write GPT partition table to disk |
+| 103 | `SYSTEM_CMD_DISK_WRITE_MBR` | Write MBR partition table to disk |
+| 104 | `SYSTEM_CMD_DISK_MKFS_FAT32` | Format a partition as FAT32 |
+| 105 | `SYSTEM_CMD_DISK_MOUNT` | Mount a filesystem |
+| 106 | `SYSTEM_CMD_DISK_UMOUNT` | Unmount a filesystem |
+| 107 | `SYSTEM_CMD_DISK_RESCAN` | Rescan disk for partition changes |
+| 108 | `SYSTEM_CMD_DISK_REPLACE_KERNEL` | Copy new kernel to ESP / boot partition |
+| 109 | `SYSTEM_CMD_DISK_SYNC` | Flush disk caches for a mountpoint |
 
 ## Common Wrapper API (`src/userland/libc/syscall.h`)
 

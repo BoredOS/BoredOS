@@ -230,9 +230,13 @@ bool file_index_load(void) {
     }
     
     
-    file_index_entry_t temp_entries[FILE_INDEX_MAX_ENTRIES];
+    uint64_t flags = spinlock_acquire_irqsave(&g_index_lock);
+    g_file_index.count = 0;
+    g_index_valid = false;
+    spinlock_release_irqrestore(&g_index_lock, flags);
+
     for (int i = 0; i < count; i++) {
-        file_index_entry_t *entry = &temp_entries[i];
+        file_index_entry_t *entry = &g_file_index.entries[i];
         
         int bytes_read = vfs_read(file, entry->path, FILE_INDEX_MAX_PATH);
         if (bytes_read != FILE_INDEX_MAX_PATH) {
@@ -262,14 +266,9 @@ bool file_index_load(void) {
     }
     
     vfs_close(file);
-    
-    
-    uint64_t flags = spinlock_acquire_irqsave(&g_index_lock);
-    g_file_index.count = 0;
-    for (int i = 0; i < count; i++) {
-        g_file_index.entries[i] = temp_entries[i];
-        g_file_index.count++;
-    }
+
+    flags = spinlock_acquire_irqsave(&g_index_lock);
+    g_file_index.count = count;
     g_index_valid = true;
     spinlock_release_irqrestore(&g_index_lock, flags);
     
@@ -290,10 +289,6 @@ bool file_index_save(void) {
     
     uint64_t flags = spinlock_acquire_irqsave(&g_index_lock);
     int count = g_file_index.count;
-    file_index_entry_t entries[FILE_INDEX_MAX_ENTRIES];
-    for (int i = 0; i < count; i++) {
-        entries[i] = g_file_index.entries[i];
-    }
     spinlock_release_irqrestore(&g_index_lock, flags);
     
     
@@ -309,29 +304,32 @@ bool file_index_save(void) {
     }
     
     for (int i = 0; i < count; i++) {
-        file_index_entry_t *entry = &entries[i];
+        file_index_entry_t entry;
+        flags = spinlock_acquire_irqsave(&g_index_lock);
+        entry = g_file_index.entries[i];
+        spinlock_release_irqrestore(&g_index_lock, flags);
         
-        if (vfs_write(file, entry->path, FILE_INDEX_MAX_PATH) != FILE_INDEX_MAX_PATH) {
+        if (vfs_write(file, entry.path, FILE_INDEX_MAX_PATH) != FILE_INDEX_MAX_PATH) {
             vfs_close(file);
             return false;
         }
         
-        if (vfs_write(file, &entry->size, sizeof(entry->size)) != sizeof(entry->size)) {
+        if (vfs_write(file, &entry.size, sizeof(entry.size)) != sizeof(entry.size)) {
             vfs_close(file);
             return false;
         }
         
-        if (vfs_write(file, &entry->mod_time_low, sizeof(entry->mod_time_low)) != sizeof(entry->mod_time_low)) {
+        if (vfs_write(file, &entry.mod_time_low, sizeof(entry.mod_time_low)) != sizeof(entry.mod_time_low)) {
             vfs_close(file);
             return false;
         }
         
-        if (vfs_write(file, &entry->mod_time_high, sizeof(entry->mod_time_high)) != sizeof(entry->mod_time_high)) {
+        if (vfs_write(file, &entry.mod_time_high, sizeof(entry.mod_time_high)) != sizeof(entry.mod_time_high)) {
             vfs_close(file);
             return false;
         }
         
-        if (vfs_write(file, &entry->is_directory, sizeof(entry->is_directory)) != sizeof(entry->is_directory)) {
+        if (vfs_write(file, &entry.is_directory, sizeof(entry.is_directory)) != sizeof(entry.is_directory)) {
             vfs_close(file);
             return false;
         }

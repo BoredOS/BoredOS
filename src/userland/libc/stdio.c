@@ -13,9 +13,9 @@
 static FILE boredos_stdin_obj = {0, 0, 0, 0, 0};
 static FILE boredos_stdout_obj = {1, 0, 0, 0, 0};
 static FILE boredos_stderr_obj = {2, 0, 0, 0, 0};
-__attribute__((weak)) FILE *stdin = &boredos_stdin_obj;
-__attribute__((weak)) FILE *stdout = &boredos_stdout_obj;
-__attribute__((weak)) FILE *stderr = &boredos_stderr_obj;
+FILE *stdin = &boredos_stdin_obj;
+FILE *stdout = &boredos_stdout_obj;
+FILE *stderr = &boredos_stderr_obj;
 
 static int _b_streq(const char *a, const char *b) {
     while (*a && *b) {
@@ -55,7 +55,7 @@ static char *_b_tmpname_generate(char *out, size_t out_cap) {
     return NULL;
 }
 
-__attribute__((weak)) FILE *fopen(const char *path, const char *mode) {
+FILE *fopen(const char *path, const char *mode) {
     int fd = sys_open(path, mode);
     FILE *f;
     if (fd < 0) {
@@ -76,7 +76,20 @@ __attribute__((weak)) FILE *fopen(const char *path, const char *mode) {
     return f;
 }
 
-__attribute__((weak)) FILE *freopen(const char *path, const char *mode, FILE *stream) {
+FILE *fdopen(int fd, const char *mode) {
+    (void)mode;
+    if (fd < 0) return NULL;
+    FILE *f = (FILE *)malloc(sizeof(FILE));
+    if (!f) return NULL;
+    f->fd = fd;
+    f->eof = 0;
+    f->err = 0;
+    f->has_ungetc = 0;
+    f->ungetc_char = 0;
+    return f;
+}
+
+FILE *freopen(const char *path, const char *mode, FILE *stream) {
     int fd;
     if (!stream) {
         return fopen(path, mode);
@@ -97,7 +110,7 @@ __attribute__((weak)) FILE *freopen(const char *path, const char *mode, FILE *st
     return stream;
 }
 
-__attribute__((weak)) int fclose(FILE *stream) {
+int fclose(FILE *stream) {
     if (!stream) {
         return EOF;
     }
@@ -110,7 +123,7 @@ __attribute__((weak)) int fclose(FILE *stream) {
     return 0;
 }
 
-__attribute__((weak)) size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
+size_t fread(void *ptr, size_t size, size_t nmemb, FILE *stream) {
     size_t total;
     int n;
     if (!stream || !ptr || size == 0 || nmemb == 0) {
@@ -132,7 +145,7 @@ __attribute__((weak)) size_t fread(void *ptr, size_t size, size_t nmemb, FILE *s
     return (size_t)n / size;
 }
 
-__attribute__((weak)) size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
+size_t fwrite(const void *ptr, size_t size, size_t nmemb, FILE *stream) {
     size_t total;
     int n;
     if (!stream || !ptr || size == 0 || nmemb == 0) {
@@ -151,7 +164,7 @@ __attribute__((weak)) size_t fwrite(const void *ptr, size_t size, size_t nmemb, 
     return (size_t)n / size;
 }
 
-__attribute__((weak)) int fseek(FILE *stream, long offset, int whence) {
+int fseek(FILE *stream, long offset, int whence) {
     if (!stream) {
         return -1;
     }
@@ -164,14 +177,14 @@ __attribute__((weak)) int fseek(FILE *stream, long offset, int whence) {
     return 0;
 }
 
-__attribute__((weak)) long ftell(FILE *stream) {
+long ftell(FILE *stream) {
     if (!stream) {
         return -1;
     }
     return (long)sys_tell(stream->fd);
 }
 
-__attribute__((weak)) int getc(FILE *stream) {
+int getc(FILE *stream) {
     unsigned char ch;
     int n;
     if (!stream) {
@@ -193,7 +206,11 @@ __attribute__((weak)) int getc(FILE *stream) {
     return (int)ch;
 }
 
-__attribute__((weak)) int ungetc(int c, FILE *stream) {
+int fgetc(FILE *stream) {
+    return getc(stream);
+}
+
+int ungetc(int c, FILE *stream) {
     if (!stream || c == EOF) {
         return EOF;
     }
@@ -203,7 +220,7 @@ __attribute__((weak)) int ungetc(int c, FILE *stream) {
     return c;
 }
 
-__attribute__((weak)) char *fgets(char *s, int n, FILE *stream) {
+char *fgets(char *s, int n, FILE *stream) {
     int i;
     if (!s || n <= 0 || !stream) {
         return NULL;
@@ -226,7 +243,7 @@ __attribute__((weak)) char *fgets(char *s, int n, FILE *stream) {
     return s;
 }
 
-__attribute__((weak)) int fputs(const char *s, FILE *stream) {
+int fputs(const char *s, FILE *stream) {
     size_t len;
     size_t written;
     if (!s || !stream) {
@@ -237,31 +254,31 @@ __attribute__((weak)) int fputs(const char *s, FILE *stream) {
     return (written == len) ? (int)len : EOF;
 }
 
-__attribute__((weak)) int feof(FILE *stream) {
+int feof(FILE *stream) {
     return stream ? stream->eof : 1;
 }
 
-__attribute__((weak)) int ferror(FILE *stream) {
+int ferror(FILE *stream) {
     return stream ? stream->err : 1;
 }
 
-__attribute__((weak)) void clearerr(FILE *stream) {
+void clearerr(FILE *stream) {
     if (stream) {
         stream->eof = 0;
         stream->err = 0;
     }
 }
 
-__attribute__((weak)) int fflush(FILE *stream) {
+int fflush(FILE *stream) {
     (void)stream;
     return 0;
 }
 
-__attribute__((weak)) int remove(const char *path) {
+int remove(const char *path) {
     return sys_delete(path);
 }
 
-__attribute__((weak)) int rename(const char *oldpath, const char *newpath) {
+int rename(const char *oldpath, const char *newpath) {
     FILE *src;
     FILE *dst;
     char buf[1024];
@@ -317,7 +334,7 @@ __attribute__((weak)) int rename(const char *oldpath, const char *newpath) {
     return 0;
 }
 
-__attribute__((weak)) FILE *tmpfile(void) {
+FILE *tmpfile(void) {
     char path[FILENAME_MAX];
     if (!_b_tmpname_generate(path, sizeof(path))) {
         return NULL;
@@ -325,7 +342,7 @@ __attribute__((weak)) FILE *tmpfile(void) {
     return fopen(path, "w+");
 }
 
-__attribute__((weak)) char *tmpnam(char *s) {
+char *tmpnam(char *s) {
     char *dst = s ? s : _b_tmpname_buf;
     return _b_tmpname_generate(dst, FILENAME_MAX);
 }
@@ -734,7 +751,7 @@ __attribute__((weak)) int sprintf(char *str, const char *fmt, ...) {
     return n;
 }
 
-__attribute__((weak)) int fprintf(FILE *stream, const char *fmt, ...) {
+int fprintf(FILE *stream, const char *fmt, ...) {
     char buf[1024];
     int len;
     va_list ap;
@@ -754,6 +771,7 @@ __attribute__((weak)) int fprintf(FILE *stream, const char *fmt, ...) {
 }
 
 __attribute__((weak)) int vfprintf(FILE *stream, const char *fmt, va_list ap) {
+    if (!stream) return 0;
     char buf[1024];
     int len = vsnprintf(buf, sizeof(buf), fmt, ap);
     if (len <= 0) {
@@ -768,7 +786,7 @@ __attribute__((weak)) int vfprintf(FILE *stream, const char *fmt, va_list ap) {
     return len;
 }
 
-__attribute__((weak)) int fputc(int c, FILE *stream) {
+int fputc(int c, FILE *stream) {
     unsigned char ch = (unsigned char)c;
     if (!stream) {
         return EOF;
@@ -783,7 +801,7 @@ __attribute__((weak)) int putchar(int c) {
     return fputc(c, stdout);
 }
 
-__attribute__((weak)) long filelength(FILE *f) {
+long filelength(FILE *f) {
     if (!f) {
         return -1;
     }
@@ -1032,7 +1050,7 @@ static int _b_vsscanf_core(const char *str, const char *fmt, va_list ap) {
     return assigned;
 }
 
-__attribute__((weak)) int sscanf(const char *str, const char *fmt, ...) {
+int sscanf(const char *str, const char *fmt, ...) {
     int n;
     va_list ap;
     if (!str || !fmt) {
@@ -1043,4 +1061,17 @@ __attribute__((weak)) int sscanf(const char *str, const char *fmt, ...) {
     n = _b_vsscanf_core(str, fmt, ap);
     va_end(ap);
     return n;
+}
+
+__attribute__((weak)) void puts(const char *s) {
+    if (!s) return;
+    fputs(s, stdout);
+    fputc('\n', stdout);
+}
+
+__attribute__((weak)) void printf(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    vfprintf(stdout, fmt, ap);
+    va_end(ap);
 }

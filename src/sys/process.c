@@ -161,13 +161,13 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
         return NULL;
     }
     
-    // 2. Allocate aligned stack
-    void* user_stack = kmalloc_aligned(4096, 4096);
+    void* user_stack = kmalloc_aligned(131072, 4096);
     void* kernel_stack = kmalloc_aligned(32768, 32768); // Needed for when user interrupts to Ring 0
     
     if (is_user) {
-        // Map user stack to 0x800000
-        paging_map_page(new_proc->pml4_phys, 0x800000, v2p((uint64_t)user_stack), PT_PRESENT | PT_RW | PT_USER);
+        for (int i = 0; i < 32; i++) {
+            paging_map_page(new_proc->pml4_phys, 0x800000 + i*4096, v2p((uint64_t)user_stack + i*4096), PT_PRESENT | PT_RW | PT_USER);
+        }
         
         // Allocate code page aligned and copy code
         void* code = kmalloc_aligned(4096, 4096);
@@ -180,7 +180,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
         uint64_t* stack_ptr = (uint64_t*)((uint64_t)kernel_stack + 32768);
         
         *(--stack_ptr) = 0x1B;          // SS (User Data)
-        *(--stack_ptr) = 0x800000 + 4096; // RSP
+        *(--stack_ptr) = 0x800000 + 131072; // RSP
         *(--stack_ptr) = 0x202;         // RFLAGS (IF=1)
         *(--stack_ptr) = 0x23;          // CS (User Code)
         *(--stack_ptr) = 0x400000;      // RIP

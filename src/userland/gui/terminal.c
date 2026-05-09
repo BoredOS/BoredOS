@@ -62,6 +62,8 @@ typedef struct {
     // for color
     char current_input[LINE_MAX];
     int input_len;
+    int input_start_col;
+    int input_start_row;
 } TerminalSession;
 
 static ui_window_t g_win;
@@ -774,9 +776,10 @@ static void draw_session(TerminalSession *s) {
             }
         }
         
-        int input_start = s->cursor_col - visible_len;
-        if (input_start < 0) input_start = 0;
-        if (input_start >= g_cols) input_start = g_cols - 1;
+        int input_start = -1;
+        if (s->input_len > 0 && row == s->input_start_row) {
+            input_start = s->input_start_col;
+        }
 
         char cmd[64];
         int i = 0;
@@ -800,7 +803,7 @@ static void draw_session(TerminalSession *s) {
                 color = line[col].color;
             }
 
-            if (s->scroll_offset == 0 && row == s->cursor_row) {
+            if (s->scroll_offset == 0 && row == s->input_start_row && input_start >= 0) {
                 if (col >= input_start && col < input_end) {
                     color = s->input_color;
                 }
@@ -839,6 +842,8 @@ static void tab_init(TerminalSession *s, int tty_id, int bsh_pid) {
     s->saved_col = 0;
 
     s->input_len = 0;
+    s->input_start_col = 0;
+    s->input_start_row = 0;
     s->current_input[0] = 0;
     s->utf8_codepoint = 0;
     s->utf8_expected = 0;
@@ -1095,6 +1100,7 @@ static void handle_key(gui_event_t *ev) {
             sys_tty_set_fg(s->tty_id, 0);
             return;
         }
+        s->input_len = 0;
         char ch = 3;
         sys_tty_write_in(s->tty_id, &ch, 1);
         return;
@@ -1149,6 +1155,10 @@ static void handle_key(gui_event_t *ev) {
             char utf8[4];
             int len = text_encode_utf8(codepoint, utf8);
             if (len > 0 && s->input_len + len < LINE_MAX - 1) {
+                if (s->input_len == 0) {
+                    s->input_start_col = s->cursor_col;
+                    s->input_start_row = s->cursor_row;
+                }
                 for (int i = 0; i < len; i++) {
                     s->current_input[s->input_len + i] = utf8[i];
                 }

@@ -7,7 +7,9 @@
 #include "vfs.h"
 
 void bootfs_init(void);
+void bootfs_mount_boot_partition(void);
 void bootfs_refresh_from_disk(void);
 vfs_fs_ops_t* bootfs_get_ops(void);
+void bootfs_register_file(const char *name, void *data, uint32_t size);
 
 #endif

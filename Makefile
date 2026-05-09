@@ -202,8 +202,29 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/colloid
 	mkdir -p $(BUILD_DIR)/initrd/Library/Fonts/Emoji
 	mkdir -p $(BUILD_DIR)/initrd/Library/DOOM
+	mkdir -p $(BUILD_DIR)/initrd/Library/conf
 	mkdir -p $(BUILD_DIR)/initrd/Library/bsh
+	mkdir -p $(BUILD_DIR)/initrd/Library/BWM/Wallpaper
 	mkdir -p $(BUILD_DIR)/initrd/docs
+	mkdir -p $(BUILD_DIR)/initrd/boot
+	mkdir -p $(BUILD_DIR)/initrd/mnt
+	mkdir -p $(BUILD_DIR)/initrd/dev
+	mkdir -p $(BUILD_DIR)/initrd/root/Desktop
+	mkdir -p $(BUILD_DIR)/initrd/root/Pictures
+	mkdir -p $(BUILD_DIR)/initrd/root/Documents
+	mkdir -p $(BUILD_DIR)/initrd/root/Downloads
+	mkdir -p $(BUILD_DIR)/initrd/etc
+	mkdir -p $(BUILD_DIR)/initrd/usr/lib/tcc/include
+	mkdir -p $(BUILD_DIR)/initrd/usr/local/include
+	mkdir -p $(BUILD_DIR)/initrd/usr/include/sys
+	mkdir -p $(BUILD_DIR)/initrd/usr/include/libc
+	mkdir -p $(BUILD_DIR)/initrd/usr/lib
+
+	@printf "$(YELLOW)[COPY]$(RESET) Limine binaries + kernel for installer..."
+	@if [ -f limine/BOOTX64.EFI ];     then cp limine/BOOTX64.EFI    $(BUILD_DIR)/initrd/boot/; fi
+	@if [ -f limine/BOOTIA32.EFI ];    then cp limine/BOOTIA32.EFI   $(BUILD_DIR)/initrd/boot/; fi
+	@if [ -f limine/limine-bios.sys ]; then cp limine/limine-bios.sys $(BUILD_DIR)/initrd/boot/; fi
+	@cp $(KERNEL_ELF) $(BUILD_DIR)/initrd/boot/boredos.elf
 
 	@printf "$(YELLOW)[COPY]$(RESET) Userland binaries..."
 	@for f in $(SRC_DIR)/userland/bin/*.elf; do \
@@ -212,6 +233,22 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 			cp "$$f" $(BUILD_DIR)/initrd/bin/; \
 		fi \
 	done
+
+	@printf "$(YELLOW)[COPY]$(RESET) TCC support files..."
+	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/tcc/
+	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/
+	@cp $(SRC_DIR)/userland/cli/third_party/tcc/include/*.h $(BUILD_DIR)/initrd/usr/lib/tcc/include/
+	@cp $(SRC_DIR)/userland/sdk/lib/libboredos.a $(BUILD_DIR)/initrd/usr/lib/
+	@cp $(SRC_DIR)/userland/sdk/lib/libc.a $(BUILD_DIR)/initrd/usr/lib/
+	@cp $(SRC_DIR)/userland/sdk/lib/libm.a $(BUILD_DIR)/initrd/usr/lib/
+	@cp $(SRC_DIR)/userland/bin/crt0.o $(BUILD_DIR)/initrd/usr/lib/crt0.o
+	@cp $(SRC_DIR)/userland/bin/crt0.o $(BUILD_DIR)/initrd/usr/lib/crt1.o
+	@cp $(SRC_DIR)/userland/bin/empty.o $(BUILD_DIR)/initrd/usr/lib/crti.o
+	@cp $(SRC_DIR)/userland/bin/empty.o $(BUILD_DIR)/initrd/usr/lib/crtn.o
+	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/include/
+	@cp $(SRC_DIR)/userland/libc/sys/*.h $(BUILD_DIR)/initrd/usr/include/sys/
+	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/include/libc/
+	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/local/include/
 
 	@printf "$(YELLOW)[COPY]$(RESET) Wallpapers..."
 	@for f in $(SRC_DIR)/images/wallpapers/*; do \
@@ -276,6 +313,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@if [ -f README.md ]; then printf "  -> README.md"; cp README.md $(BUILD_DIR)/initrd/; fi
 	@if [ -f LICENSE ]; then printf "  -> LICENSE"; cp LICENSE $(BUILD_DIR)/initrd/; fi
 	@if [ -f limine.conf ]; then printf "  -> limine.conf"; cp limine.conf $(BUILD_DIR)/initrd/; fi
+	@if [ -f $(SRC_DIR)/userland/gui/about.c ]; then printf "  -> about.c"; cp $(SRC_DIR)/userland/gui/about.c $(BUILD_DIR)/initrd/; fi
 	
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar..."
 	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
@@ -331,30 +369,63 @@ clean:
 	$(MAKE) -C $(SRC_DIR)/userland clean
 	@printf "$(GREEN)[OK]$(RESET) Clean complete."
 
-run-windows: $(ISO_IMAGE)
+disk.qcow2:
+	$(call PRINT_STEP,CREATING 10GB EXPANDABLE DISK IMAGE)
+	qemu-img create -f qcow2 disk.qcow2 10G
+
+run-windows: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON WINDOWS)
 	qemu-system-x86_64 -m 4G -serial stdio -cdrom $< -boot d \
 	    -smp 4 \
 		-audiodev dsound,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
-		-drive file=disk.img,format=raw,file.locking=off 
+		-drive file=disk.qcow2,format=qcow2,file.locking=off 
 
-run-mac: $(ISO_IMAGE)
+run-mac: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON MACOS)
 	qemu-system-x86_64 -m 4G -serial stdio -cdrom $< -boot d \
 	    -smp 4 \
 		-audiodev coreaudio,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
 		-display cocoa,show-cursor=off \
-		-drive file=disk.img,format=raw,file.locking=off \
+		-device ahci,id=ahci -drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max
 
-run-linux: $(ISO_IMAGE)
+OVMF_CODE := /opt/homebrew/share/qemu/edk2-x86_64-code.fd
+OVMF_VARS_TMPL := /opt/homebrew/share/qemu/edk2-i386-vars.fd
+OVMF_VARS := edk2-vars.fd
+
+ifeq ($(shell test -f $(OVMF_CODE) && echo 1),)
+    OVMF_CODE := /usr/local/share/qemu/edk2-x86_64-code.fd
+    OVMF_VARS_TMPL := /usr/local/share/qemu/edk2-i386-vars.fd
+endif
+
+$(OVMF_VARS):
+	@if [ -f $(OVMF_VARS_TMPL) ]; then \
+		printf "$(YELLOW)[UEFI]$(RESET) Creating local NVRAM vars..."; \
+		cp $(OVMF_VARS_TMPL) $(OVMF_VARS); \
+	fi
+
+run-hd: disk.qcow2 $(OVMF_VARS)
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE)
+	qemu-system-x86_64 -m 4G -serial stdio -boot c \
+	    -smp 4 \
+		-audiodev coreaudio,id=audio0 -machine pcspk-audiodev=audio0 \
+		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
+		-display cocoa,show-cursor=off \
+		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
+		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-device ahci,id=ahci \
+		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
+		-drive file=disk.img,format=raw,if=none,id=disk1 -device ide-hd,bus=ahci.1,drive=disk1 \
+		-cpu max
+
+run-linux: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON LINUX)
 	qemu-system-x86_64 -m 4G -serial stdio -cdrom $< -boot d \
 	    -smp 4 \
 		-audiodev pa,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
 		-display gtk,show-cursor=off \
-		-drive file=disk.img,format=raw,file.locking=off \
+		-device ahci,id=ahci -drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max

@@ -346,3 +346,42 @@ int sys_get_elf_primary_image(const char *path, char *out_path, size_t out_path_
                          (uint64_t)path, (uint64_t)out_path, (uint64_t)out_path_size, 0);
 }
 
+int sys_disk_get_count(void) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_DISK_GET_COUNT, 0);
+}
+
+int sys_disk_get_info(int index, disk_info_t *out) {
+    return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DISK_GET_INFO, (uint64_t)index, (uint64_t)out);
+}
+
+int sys_disk_write_gpt(const char *devname, partition_spec_t *parts, int count) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_DISK_WRITE_GPT, (uint64_t)devname, (uint64_t)parts, (uint64_t)count);
+}
+
+int sys_disk_write_mbr(const char *devname, partition_spec_t *parts, int count) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_DISK_WRITE_MBR, (uint64_t)devname, (uint64_t)parts, (uint64_t)count);
+}
+
+int sys_disk_mkfs_fat32(const char *devname, const char *label) {
+    return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DISK_MKFS_FAT32, (uint64_t)devname, (uint64_t)label);
+}
+
+int sys_disk_mount(const char *devname, const char *mountpoint) {
+    return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DISK_MOUNT, (uint64_t)devname, (uint64_t)mountpoint);
+}
+
+int sys_disk_umount(const char *mountpoint) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_DISK_UMOUNT, (uint64_t)mountpoint);
+}
+
+int sys_disk_sync(const char *mountpoint) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_DISK_SYNC, (uint64_t)mountpoint);
+}
+
+int sys_disk_rescan(const char *devname) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_DISK_RESCAN, (uint64_t)devname);
+}
+
+int sys_disk_replace_kernel(const char *src_path, const char *esp_mountpoint) {
+    return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DISK_REPLACE_KERNEL, (uint64_t)src_path, (uint64_t)esp_mountpoint);
+}

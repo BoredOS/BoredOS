@@ -30,7 +30,7 @@ int main(int argc, char **argv) {
     printf("reboot         - Reboot the system\n");
     printf("shutdown       - Shutdown the system\n");
     printf("sysfetch       - Show system information\n");
-    printf("cc <file.c>    - C Compiler\n");
+    printf("tcc <file.c>   - Tiny C Compiler\n");
     printf("man <cmd>      - Show manual page\n");
     printf("clear          - Clear the screen\n");
     printf("exit           - Exit the terminal\n");

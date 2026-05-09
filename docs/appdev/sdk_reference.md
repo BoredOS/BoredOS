@@ -24,6 +24,7 @@ Primary headers are in `src/userland/libc/` and UI helpers are in `src/wm/`.
 - [`Syscalls`](syscalls.md): syscall numbers, FS/SYSTEM command IDs, and wrappers
 - [`UI API`](ui_api.md): drawing and event APIs
 - [`Widget API`](widget_api.md): common widgets and interaction helpers
+- [`Native TCC`](tcc.md): Native C compilation directly on BoredOS
 
 ## Typical Include Set
 

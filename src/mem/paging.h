@@ -38,5 +38,6 @@ void paging_switch_directory(uint64_t pml4_phys);
 void paging_destroy_user_pml4_phys(uint64_t pml4_phys);
 
 void paging_init(void);
+uint64_t paging_virt2phys(uint64_t pml4_phys, uint64_t virtual_addr);
 
 #endif // PAGING_H

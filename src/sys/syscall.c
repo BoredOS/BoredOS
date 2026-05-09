@@ -25,6 +25,19 @@
 #include "input/keycodes.h"
 #include "input/keymap.h"
 #include "app_metadata.h"
+#include "disk.h"
+#include "mkfs_fat32.h"
+
+#define SYSTEM_CMD_DISK_GET_COUNT  100
+#define SYSTEM_CMD_DISK_GET_INFO   101
+#define SYSTEM_CMD_DISK_WRITE_GPT  102
+#define SYSTEM_CMD_DISK_WRITE_MBR  103
+#define SYSTEM_CMD_DISK_MKFS_FAT32 104
+#define SYSTEM_CMD_DISK_MOUNT      105
+#define SYSTEM_CMD_DISK_UMOUNT     106
+#define SYSTEM_CMD_DISK_RESCAN     107
+#define SYSTEM_CMD_DISK_REPLACE_KERNEL 108
+#define SYSTEM_CMD_DISK_SYNC       109
 
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
@@ -2135,7 +2148,235 @@ static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
     return (uint64_t)keymap_get_current();
 }
 
-#define SYS_CMD_TABLE_SIZE 78
+typedef struct {
+    char     devname[16];
+    char     label[32];
+    uint32_t type;
+    uint32_t total_sectors;
+    bool     is_partition;
+    bool     is_fat32;
+    bool     is_esp;
+    uint32_t lba_offset;
+} k_disk_info_t;
+
+typedef struct {
+    uint32_t lba_start;
+    uint32_t sector_count;
+    uint8_t  part_type;
+    uint8_t  flags;
+    char     label[36];
+} k_partition_spec_t;
+
+static void disk_k_strcpy(char *dst, const char *src, int max) {
+    int i = 0;
+    while (i < max - 1 && src[i]) { dst[i] = src[i]; i++; }
+    dst[i] = 0;
+}
+
+static int disk_k_strcmp(const char *a, const char *b) {
+    while (*a && *a == *b) { a++; b++; }
+    return (unsigned char)*a - (unsigned char)*b;
+}
+
+static uint64_t sys_cmd_disk_get_count(const syscall_args_t *args) {
+    (void)args;
+    return (uint64_t)disk_get_count();
+}
+
+static uint64_t sys_cmd_disk_get_info(const syscall_args_t *args) {
+    int index = (int)args->arg2;
+    k_disk_info_t *out = (k_disk_info_t *)args->arg3;
+    if (!out) return (uint64_t)-1;
+    Disk *d = disk_get_by_index(index);
+    if (!d) return (uint64_t)-1;
+    disk_k_strcpy(out->devname, d->devname, 16);
+    disk_k_strcpy(out->label, d->label, 32);
+    out->type = (uint32_t)d->type;
+    out->total_sectors = d->total_sectors;
+    out->is_partition = d->is_partition;
+    out->is_fat32 = d->is_fat32;
+    out->is_esp = d->is_esp;
+    out->lba_offset = d->partition_lba_offset;
+    return 0;
+}
+
+static uint64_t sys_cmd_disk_write_gpt(const syscall_args_t *args) {
+    const char *devname = (const char *)args->arg2;
+    k_partition_spec_t *parts = (k_partition_spec_t *)args->arg3;
+    int count = (int)args->arg4;
+    if (!devname || !parts) return (uint64_t)-1;
+    Disk *d = disk_get_by_name(devname);
+    if (!d) return (uint64_t)-1;
+    return (uint64_t)disk_write_gpt(d, (disk_partition_spec_t *)parts, count);
+}
+
+static uint64_t sys_cmd_disk_write_mbr(const syscall_args_t *args) {
+    const char *devname = (const char *)args->arg2;
+    k_partition_spec_t *parts = (k_partition_spec_t *)args->arg3;
+    int count = (int)args->arg4;
+    if (!devname || !parts) return (uint64_t)-1;
+    Disk *d = disk_get_by_name(devname);
+    if (!d) return (uint64_t)-1;
+    return (uint64_t)disk_write_mbr(d, (disk_partition_spec_t *)parts, count);
+}
+
+static uint64_t sys_cmd_disk_mkfs_fat32(const syscall_args_t *args) {
+    extern int mkfs_fat32_format(Disk *disk, uint32_t sector_count, const char *label);
+    const char *devname = (const char *)args->arg2;
+    const char *label   = (const char *)args->arg3;
+    if (!devname) return (uint64_t)-1;
+    Disk *d = disk_get_by_name(devname);
+    if (!d) return (uint64_t)-1;
+    int ret = mkfs_fat32_format(d, d->total_sectors, label);
+    if (ret == 0) d->is_fat32 = true;
+    return (uint64_t)ret;
+}
+
+static uint64_t sys_cmd_disk_mount(const syscall_args_t *args) {
+    const char *devname    = (const char *)args->arg2;
+    const char *mountpoint = (const char *)args->arg3;
+    if (!devname || !mountpoint) return (uint64_t)-1;
+    Disk *d = disk_get_by_name(devname);
+    if (!d || !d->is_fat32) return (uint64_t)-1;
+    void *vol = fat32_mount_volume(d);
+    if (!vol) return (uint64_t)-1;
+    if (!vfs_mount(mountpoint, devname, "fat32", fat32_get_realfs_ops(), vol)) return (uint64_t)-1;
+    wm_notify_fs_change();
+    return 0;
+}
+
+static uint64_t sys_cmd_disk_umount(const syscall_args_t *args) {
+    const char *mountpoint = (const char *)args->arg2;
+    if (!mountpoint) return (uint64_t)-1;
+    return vfs_umount(mountpoint) ? 0 : (uint64_t)-1;
+}
+
+static uint64_t sys_cmd_disk_rescan(const syscall_args_t *args) {
+    const char *devname = (const char *)args->arg2;
+    if (!devname) return (uint64_t)-1;
+    Disk *d = disk_get_by_name(devname);
+    if (!d) return (uint64_t)-1;
+    return (uint64_t)disk_rescan(d);
+}
+
+static uint64_t sys_cmd_disk_sync(const syscall_args_t *args) {
+    const char *mountpoint = (const char *)args->arg2;
+    if (!mountpoint) return (uint64_t)-1;
+    int mc = vfs_get_mount_count();
+    for (int i = 0; i < mc; i++) {
+        vfs_mount_t *m = vfs_get_mount(i);
+        if (m && m->active && disk_k_strcmp(m->path, mountpoint) == 0) {
+            Disk *d = disk_get_by_name(m->device);
+            if (d) return (uint64_t)disk_sync(d);
+        }
+    }
+    return (uint64_t)-1;
+}
+
+static uint64_t sys_cmd_disk_replace_kernel(const syscall_args_t *args) {
+    extern void serial_write(const char *str);
+    const char *src_path       = (const char *)args->arg2;
+    const char *esp_mountpoint = (const char *)args->arg3;
+    if (!src_path || !esp_mountpoint) return (uint64_t)-1;
+
+    char dest_path[256];
+    int mi = 0;
+    while (mi < 255 && esp_mountpoint[mi]) { dest_path[mi] = esp_mountpoint[mi]; mi++; }
+    const char *suffix = "/boredos.elf";
+    for (int i = 0; suffix[i] && mi < 255; i++) dest_path[mi++] = suffix[i];
+    dest_path[mi] = 0;
+
+    if (disk_k_strcmp(src_path, dest_path) == 0) {
+        serial_write("[KUP] Error: source and destination are the same file\n");
+        return (uint64_t)-1;
+    }
+
+    vfs_file_t *src = vfs_open(src_path, "r");
+    if (!src) { serial_write("[KUP] Error: source not found\n"); return (uint64_t)-1; }
+
+    uint32_t src_size = vfs_file_size(src);
+    if (src_size > 100 * 1024 * 1024) {
+        serial_write("[KUP] Error: source > 100 MB\n");
+        vfs_close(src); return (uint64_t)-1;
+    }
+
+    uint8_t magic[4];
+    vfs_read(src, magic, 4);
+    if (magic[0] != 0x7F || magic[1] != 'E' || magic[2] != 'L' || magic[3] != 'F') {
+        serial_write("[KUP] Error: not an ELF file\n");
+        vfs_close(src); return (uint64_t)-1;
+    }
+    vfs_seek(src, 0, 0);
+
+    char bak_path[256];
+    mi = 0;
+    while (mi < 255 && esp_mountpoint[mi]) { bak_path[mi] = esp_mountpoint[mi]; mi++; }
+    const char *bak_suffix = "/boredos.elf.bak";
+    for (int i = 0; bak_suffix[i] && mi < 255; i++) bak_path[mi++] = bak_suffix[i];
+    bak_path[mi] = 0;
+
+    vfs_file_t *existing = vfs_open(dest_path, "r");
+    if (existing) {
+        vfs_file_t *bakf = vfs_open(bak_path, "w");
+        if (bakf) {
+            uint8_t *cbuf = (uint8_t *)kmalloc(4096);
+            if (cbuf) {
+                int n;
+                while ((n = vfs_read(existing, cbuf, 4096)) > 0)
+                    vfs_write(bakf, cbuf, n);
+                kfree(cbuf);
+            }
+            vfs_close(bakf);
+        } else {
+            serial_write("[KUP] Warning: could not create backup\n");
+        }
+        vfs_close(existing);
+    }
+
+    vfs_file_t *dst = vfs_open(dest_path, "w");
+    if (!dst) {
+        serial_write("[KUP] Error: could not open destination for write\n");
+        vfs_close(src); return (uint64_t)-1;
+    }
+
+    uint8_t *buf = (uint8_t *)kmalloc(4096);
+    if (!buf) { vfs_close(src); vfs_close(dst); return (uint64_t)-1; }
+
+    uint32_t bytes_written = 0;
+    int n;
+    while ((n = vfs_read(src, buf, 4096)) > 0) {
+        int written = vfs_write(dst, buf, n);
+        if (written != n) {
+            serial_write("[KUP] Error: write failed mid-copy\n");
+            kfree(buf); vfs_close(src); vfs_close(dst); return (uint64_t)-1;
+        }
+        bytes_written += (uint32_t)written;
+    }
+
+    kfree(buf);
+    vfs_close(src);
+    vfs_close(dst);
+
+    if (bytes_written != src_size) {
+        serial_write("[KUP] Error: incomplete write (size mismatch)\n");
+        return (uint64_t)-1;
+    }
+
+    serial_write("[KUP] Kernel replaced (");
+    {
+        char numstr[16]; int ni = 15;
+        numstr[ni] = 0;
+        uint32_t v = bytes_written;
+        if (v == 0) { numstr[--ni] = '0'; } else {
+            while (v > 0) { numstr[--ni] = '0' + (v % 10); v /= 10; }
+        }
+        serial_write(numstr + ni);
+    }
+    serial_write(" bytes). Backup at boredos.elf.bak. Reboot required.\n");
+    return 0;
+}
+
+#define SYS_CMD_TABLE_SIZE 110
 static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SET_BG_COLOR]        = sys_cmd_set_bg_color,
     [SYSTEM_CMD_SET_BG_PATTERN]      = sys_cmd_set_bg_pattern,
@@ -2204,6 +2445,16 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SIGPENDING]          = sys_cmd_sigpending,
     [SYSTEM_CMD_GET_ELF_METADATA]    = sys_cmd_get_elf_metadata,
     [SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE] = sys_cmd_get_elf_primary_image,
+    [SYSTEM_CMD_DISK_GET_COUNT]      = sys_cmd_disk_get_count,
+    [SYSTEM_CMD_DISK_GET_INFO]       = sys_cmd_disk_get_info,
+    [SYSTEM_CMD_DISK_WRITE_GPT]      = sys_cmd_disk_write_gpt,
+    [SYSTEM_CMD_DISK_WRITE_MBR]      = sys_cmd_disk_write_mbr,
+    [SYSTEM_CMD_DISK_MKFS_FAT32]     = sys_cmd_disk_mkfs_fat32,
+    [SYSTEM_CMD_DISK_MOUNT]          = sys_cmd_disk_mount,
+    [SYSTEM_CMD_DISK_UMOUNT]         = sys_cmd_disk_umount,
+    [SYSTEM_CMD_DISK_RESCAN]         = sys_cmd_disk_rescan,
+    [SYSTEM_CMD_DISK_REPLACE_KERNEL] = sys_cmd_disk_replace_kernel,
+    [SYSTEM_CMD_DISK_SYNC]           = sys_cmd_disk_sync,
 };
 
 static uint64_t handle_sys_write(const syscall_args_t *args) {

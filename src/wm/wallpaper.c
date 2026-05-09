@@ -6,6 +6,7 @@
 #include "memory_manager.h"
 #include "wm.h"
 #include "io.h"
+#include "core/kutils.h"
 #include <stddef.h>
 
 // Static buffer for the current wallpaper (max 1920x1080)
@@ -15,9 +16,10 @@ static uint32_t* wp_pixels = NULL;
 static int wp_width = 0;
 static int wp_height = 0;
 
-// Deferred wallpaper action (set from interrupt context, processed in main loop)
 static volatile const char *pending_wallpaper_path = NULL;
 static char pending_path_buf[256];
+
+#define WALLPAPER_CONF_PATH "/Library/BWM/Wallpaper/wallpaper"
 
 // Simple nearest-neighbor scale from decoded RGBA to ARGB pixel buffer
 static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h,
@@ -101,7 +103,45 @@ void wallpaper_request_set_from_file(const char *path) {
     pending_wallpaper_path = pending_path_buf;
 }
 
-// Process deferred wallpaper actions (called from main loop, NOT interrupt context)
+void wallpaper_save_setting(const char *path) {
+    if (!path) return;
+    fat32_mkdir("/Library/BWM");
+    fat32_mkdir("/Library/BWM/Wallpaper");
+    FAT32_FileHandle *fh = fat32_open(WALLPAPER_CONF_PATH, "w");
+    if (!fh || !fh->valid) {
+        serial_str("[WALLPAPER] Failed to save setting\n");
+        return;
+    }
+    fat32_write(fh, path, (uint32_t)k_strlen(path));
+    fat32_close(fh);
+    serial_str("[WALLPAPER] Setting saved: ");
+    serial_str(path);
+    serial_str("\n");
+}
+
+void wallpaper_load_setting(void) {
+    if (!fat32_exists(WALLPAPER_CONF_PATH)) {
+        serial_str("[WALLPAPER] No saved setting found\n");
+        return;
+    }
+    FAT32_FileHandle *fh = fat32_open(WALLPAPER_CONF_PATH, "r");
+    if (!fh || !fh->valid) return;
+    
+    char path_buf[256];
+    int bytes_read = fat32_read(fh, path_buf, 255);
+    fat32_close(fh);
+    
+    if (bytes_read > 0) {
+        path_buf[bytes_read] = '\0';
+        serial_str("[WALLPAPER] Loaded setting: ");
+        serial_str(path_buf);
+        serial_str("\n");
+        if (fat32_exists(path_buf)) {
+            wallpaper_request_set_from_file(path_buf);
+        }
+    }
+}
+
 void wallpaper_process_pending(void) {
     if (pending_wallpaper_path) {
         const char *path = (const char *)pending_wallpaper_path;
@@ -131,6 +171,7 @@ void wallpaper_process_pending(void) {
 
                     if (total_read > 0) {
                         decode_and_set_wallpaper(buf, (unsigned int)total_read);
+                        wallpaper_save_setting(path);
                         wm_refresh();
                     }
                     kfree(buf);
@@ -149,11 +190,13 @@ int wallpaper_get_width(void) { return wp_width; }
 int wallpaper_get_height(void) { return wp_height; }
 
 void wallpaper_init(void) {
-    // We expect Limine modules to have been copied to /Library/images/Wallpapers/ by main.c
-    // Set a default wallpaper if one exists
-    if (fat32_exists("/Library/images/Wallpapers/bored.jpg")) {
-        wallpaper_request_set_from_file("/Library/images/Wallpapers/bored.jpg");
-    } else if (fat32_exists("/Library/images/Wallpapers/moon.jpg")) {
-        wallpaper_request_set_from_file("/Library/images/Wallpapers/moon.jpg");
+    wallpaper_load_setting();
+    
+    if (pending_wallpaper_path == NULL) {
+        if (fat32_exists("/Library/images/Wallpapers/bored.jpg")) {
+            wallpaper_request_set_from_file("/Library/images/Wallpapers/bored.jpg");
+        } else if (fat32_exists("/Library/images/Wallpapers/moon.jpg")) {
+            wallpaper_request_set_from_file("/Library/images/Wallpapers/moon.jpg");
+        }
     }
 }

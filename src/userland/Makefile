@@ -16,7 +16,7 @@ APP_METADATA_SOURCE_LUA = cli/third_party/lua/boredos_onelua.c
 APP_SOURCE_DIRS = . cli gui sys games net cli/third_party
 
 define app_source_for
-$(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_METADATA_SOURCE_LUA),$(firstword $(foreach d,$(APP_SOURCE_DIRS),$(wildcard $(d)/$1.c)))))
+$(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_METADATA_SOURCE_LUA),$(if $(filter tcc,$1),cli/third_party/tcc/tcc.c,$(firstword $(foreach d,$(APP_SOURCE_DIRS),$(wildcard $(d)/$1.c))))))
 endef
 
 LIBC_SOURCES = $(wildcard libc/*.c)
@@ -38,7 +38,7 @@ DOOM_OBJS = $(patsubst games/doom/%.c, $(BIN_DIR)/%.o, $(DOOM_SOURCES))
 LUA_DIR = cli/third_party/lua
 LUA_CFLAGS = -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -isystem $(LUA_DIR)/sysinclude -I. -Ilibc -I$(LUA_DIR) -DLUA_USE_C89 -Wno-conversion -Wno-sign-conversion -Wno-double-promotion -Wno-unused-parameter -Wno-missing-declarations -Wno-shadow -Wno-undef -Wno-redundant-decls -Wno-old-style-definition -Wno-missing-prototypes -Wno-implicit-fallthrough -Wno-type-limits
 
-all: $(BIN_DIR) $(APP_ELFS) $(BIN_DIR)/doom.elf $(BIN_DIR)/lua.elf
+all: $(BIN_DIR) $(APP_ELFS) $(BIN_DIR)/doom.elf $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -54,6 +54,11 @@ $(BIN_DIR)/libwidget.o: ../wm/libwidget.c | $(BIN_DIR)
 
 $(BIN_DIR)/stb_image.o: stb_image.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/empty.o: | $(BIN_DIR)
+	echo "section .text" > $(BIN_DIR)/empty.asm
+	$(AS) -f elf64 $(BIN_DIR)/empty.asm -o $@
+	rm $(BIN_DIR)/empty.asm
 
 $(BIN_DIR)/%.note.c: $(APP_METADATA_TOOL) | $(BIN_DIR)
 	src="$(call app_source_for,$*)"; \
@@ -97,5 +102,23 @@ $(BIN_DIR)/lua_onelua.o: $(LUA_DIR)/boredos_onelua.c | $(BIN_DIR)
 $(BIN_DIR)/lua.elf: $(LIBC_OBJS) $(BIN_DIR)/lua_onelua.o $(BIN_DIR)/lua.note.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
+# TCC - Tiny C Compiler
+TCC_DIR = cli/third_party/tcc
+$(BIN_DIR)/tcc.elf: $(LIBC_OBJS) $(BIN_DIR)/tcc.note.o sdk $(TCC_DIR)/tcc.c $(TCC_DIR)/config.h $(TCC_DIR)/tcc.h
+	cd $(TCC_DIR) && x86_64-elf-gcc -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie -DONE_SOURCE=1 -DTARGETOS_BoredOS=1 -I. -I../../../sdk/include -Ttext=0x40000000 tcc.c -o tcc.elf ../../../sdk/lib/libboredos.a
+	cp $(TCC_DIR)/tcc.elf $(BIN_DIR)/tcc.elf
+	cd $(TCC_DIR) && sh build_libtcc1.sh
+
+# SDK target
+SDK_DIR = sdk
+sdk: $(LIBC_OBJS) $(BIN_DIR)/libui.o
+	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include/sys
+	cp libc/*.h $(SDK_DIR)/include/
+	cp libc/sys/*.h $(SDK_DIR)/include/sys/
+	x86_64-elf-ar rcs $(SDK_DIR)/lib/libboredos.a $(LIBC_OBJS)
+	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libc.a
+	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libm.a
+	x86_64-elf-ar rcs $(SDK_DIR)/lib/libui.a $(BIN_DIR)/libui.o
+
 clean:
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) $(SDK_DIR)

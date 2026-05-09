@@ -234,6 +234,70 @@ int atoi(const char *nptr) {
     return sign * res;
 }
 
+long strtol(const char *nptr, char **endptr, int base) {
+    long res = 0;
+    int sign = 1;
+    while (*nptr == ' ' || *nptr == '\t' || *nptr == '\n' || *nptr == '\r') nptr++;
+    if (*nptr == '-') { sign = -1; nptr++; }
+    else if (*nptr == '+') nptr++;
+
+    if (base == 0) {
+        if (*nptr == '0') {
+            if (*(nptr+1) == 'x' || *(nptr+1) == 'X') { base = 16; nptr += 2; }
+            else base = 8;
+        } else base = 10;
+    } else if (base == 16) {
+        if (*nptr == '0' && (*(nptr+1) == 'x' || *(nptr+1) == 'X')) nptr += 2;
+    }
+
+    while (1) {
+        int val = -1;
+        if (*nptr >= '0' && *nptr <= '9') val = *nptr - '0';
+        else if (*nptr >= 'a' && *nptr <= 'f') val = *nptr - 'a' + 10;
+        else if (*nptr >= 'A' && *nptr <= 'F') val = *nptr - 'A' + 10;
+        
+        if (val == -1 || val >= base) break;
+        res = res * base + val;
+        nptr++;
+    }
+    if (endptr) *endptr = (char *)nptr;
+    return sign * res;
+}
+
+unsigned long strtoul(const char *nptr, char **endptr, int base) {
+    return (unsigned long)strtol(nptr, endptr, base);
+}
+
+unsigned long long strtoull(const char *nptr, char **endptr, int base) {
+    return (unsigned long long)strtol(nptr, endptr, base);
+}
+
+static void swap(void *a, void *b, size_t size) {
+    char *ca = a, *cb = b;
+    while (size--) { char t = *ca; *ca++ = *cb; *cb++ = t; }
+}
+
+void qsort(void *base, size_t nmemb, size_t size, int (*compar)(const void *, const void *)) {
+    if (nmemb < 2) return;
+    char *pivot = (char *)base + (nmemb / 2) * size;
+    char *left = base;
+    char *right = (char *)base + (nmemb - 1) * size;
+
+    while (left <= right) {
+        while (compar(left, pivot) < 0) left += size;
+        while (compar(right, pivot) > 0) right -= size;
+        if (left <= right) {
+            swap(left, right, size);
+            if (pivot == left) pivot = right;
+            else if (pivot == right) pivot = left;
+            left += size;
+            right -= size;
+        }
+    }
+    if (base < (void*)right) qsort(base, (right - (char *)base) / size + 1, size, compar);
+    if ((void*)left < (char *)base + nmemb * size) qsort(left, ((char *)base + nmemb * size - left) / size, size, compar);
+}
+
 void itoa(int n, char *buf) {
     if (n == 0) {
         buf[0] = '0'; buf[1] = 0; return;
@@ -255,74 +319,6 @@ void itoa(int n, char *buf) {
     }
 }
 
-// IO functions
-void puts(const char *s) {
-    sys_write(1, s, strlen(s));
-    sys_write(1, "\n", 1);
-}
-
-void printf(const char *fmt, ...) {
-    __builtin_va_list args;
-    __builtin_va_start(args, fmt);
-    char buf[1024];
-    int buf_idx = 0;
-
-    while (*fmt) {
-        if (*fmt == '%') {
-            fmt++;
-            // Flush current buffer
-            if (buf_idx > 0) {
-                sys_write(1, buf, buf_idx);
-                buf_idx = 0;
-            }
-
-            if (*fmt == 's') {
-                char *s = __builtin_va_arg(args, char *);
-                if (s) sys_write(1, s, strlen(s));
-                else sys_write(1, "(null)", 6);
-            } else if (*fmt == 'd') {
-                int d = __builtin_va_arg(args, int);
-                char ibuf[32];
-                itoa(d, ibuf);
-                sys_write(1, ibuf, strlen(ibuf));
-            } else if (*fmt == 'X' || *fmt == 'x') {
-                uint32_t val = __builtin_va_arg(args, uint32_t);
-                char xbuf[16];
-                int xi = 0;
-                if (val == 0) xbuf[xi++] = '0';
-                else {
-                    while (val > 0) {
-                        uint32_t rem = val % 16;
-                        xbuf[xi++] = (rem < 10) ? (rem + '0') : (rem - 10 + 'A');
-                        val /= 16;
-                    }
-                }
-                while (xi > 0) {
-                    char c = xbuf[--xi];
-                    sys_write(1, &c, 1);
-                }
-            } else if (*fmt == 'c') {
-                char c = (char)__builtin_va_arg(args, int);
-                sys_write(1, &c, 1);
-            } else if (*fmt == '%') {
-                char c = '%';
-                sys_write(1, &c, 1);
-            }
-        } else {
-            buf[buf_idx++] = *fmt;
-            if (buf_idx >= 1024) {
-                sys_write(1, buf, buf_idx);
-                buf_idx = 0;
-            }
-        }
-        fmt++;
-    }
-    if (buf_idx > 0) {
-        sys_write(1, buf, buf_idx);
-    }
-    __builtin_va_end(args);
-}
-
 // System/Process functions
 int chdir(const char *path) {
     return sys_chdir(path);
@@ -331,6 +327,13 @@ int chdir(const char *path) {
 char* getcwd(char *buf, int size) {
     if (sys_getcwd(buf, size) >= 0) return buf;
     return NULL;
+}
+
+char *realpath(const char *path, char *resolved_path) {
+    if (!resolved_path) resolved_path = malloc(1024);
+    if (!resolved_path) return NULL;
+    strcpy(resolved_path, path);
+    return resolved_path;
 }
 
 void sleep(int ms) {

@@ -12,6 +12,8 @@
 #include <stddef.h>
 #include "wallpaper.h"
 #include "fat32.h"
+#include "tar.h"
+#include "vfs.h"
 #include "file_index.h"
 #include "../dev/ps2.h"
 #define STBI_NO_STDIO
@@ -21,6 +23,7 @@
 #include "app_metadata.h"
 #include "../sys/work_queue.h"
 #include "../sys/smp.h"
+#include "../sys/bootfs_state.h"
 #include "../core/kconsole.h"
 #include "../input/keycodes.h"
 #include "../input/keymap.h"
@@ -57,6 +60,155 @@ static bool str_eq(const char *s1, const char *s2) {
         s1++; s2++;
     }
     return (*s1 == *s2);
+}
+
+#define ROOT_MARKER_SUFFIX "/Library/.boredos_root"
+#define ROOT_MARKER_PATH "/Library/.boredos_root"
+
+static void rootfs_append(char *buf, int max, const char *suffix) {
+    if (!buf || max <= 0 || !suffix) return;
+    int i = 0;
+    while (buf[i] && i < max - 1) i++;
+    int j = 0;
+    while (suffix[j] && i < max - 1) {
+        buf[i++] = suffix[j++];
+    }
+    buf[i] = 0;
+}
+
+static void rootfs_build_dev_mount(const char *devname, char *out, int max) {
+    if (!out || max <= 0) return;
+    const char *prefix = "/dev/";
+    int i = 0;
+    while (prefix[i] && i < max - 1) {
+        out[i] = prefix[i];
+        i++;
+    }
+    int j = 0;
+    while (devname && devname[j] && i < max - 1) {
+        out[i++] = devname[j++];
+    }
+    out[i] = 0;
+}
+
+static void rootfs_build_marker_path(const char *devname, char *out, int max) {
+    rootfs_build_dev_mount(devname, out, max);
+    rootfs_append(out, max, ROOT_MARKER_SUFFIX);
+}
+
+static void* rootfs_get_mount_private(const char *mount_path) {
+    int mc = vfs_get_mount_count();
+    for (int i = 0; i < mc; i++) {
+        vfs_mount_t *m = vfs_get_mount(i);
+        if (m && m->active && k_strcmp(m->path, mount_path) == 0) {
+            return m->fs_private;
+        }
+    }
+    return NULL;
+}
+
+static bool rootfs_has_marker(Disk *disk) {
+    if (!disk) return false;
+    char marker_path[96];
+    rootfs_build_marker_path(disk->devname, marker_path, (int)sizeof(marker_path));
+    return vfs_exists(marker_path);
+}
+
+static Disk* rootfs_select_disk(void) {
+    if (g_bootfs_state.boot_flags & BOOT_FLAG_LIVE) return NULL;
+
+    if (g_bootfs_state.root_device[0]) {
+        Disk *d = disk_get_by_name(g_bootfs_state.root_device);
+        if (d && d->is_partition && d->is_fat32 && !d->is_esp) return d;
+    }
+
+    Disk *fallback = NULL;
+    int candidate_count = 0;
+    int count = disk_get_count();
+    for (int i = 0; i < count; i++) {
+        Disk *d = disk_get_by_index(i);
+        if (!d || !d->is_partition || !d->is_fat32 || d->is_esp) continue;
+        if (!fallback) fallback = d;
+        candidate_count++;
+        if (rootfs_has_marker(d)) return d;
+    }
+
+    if (candidate_count == 1 && (g_bootfs_state.boot_flags & BOOT_FLAG_DISK)) {
+        return fallback;
+    }
+
+    if (g_bootfs_state.boot_flags & BOOT_FLAG_FORCED) {
+        return fallback;
+    }
+
+    return NULL;
+}
+
+static bool rootfs_is_provisioned(void) {
+    return vfs_exists(ROOT_MARKER_PATH);
+}
+
+static void rootfs_write_marker(void) {
+    FAT32_FileHandle *fh = fat32_open(ROOT_MARKER_PATH, "w");
+    if (!fh || !fh->valid) return;
+    const char *msg = "boredos root\n";
+    fat32_write(fh, msg, (uint32_t)k_strlen(msg));
+    fat32_close(fh);
+}
+
+static void rootfs_provision_from_initrd(void) {
+    if (rootfs_is_provisioned()) return;
+    if (!g_bootfs_state.initrd_ptr || g_bootfs_state.initrd_size == 0) {
+        serial_write("[ROOT] No initrd available for provisioning\n");
+        return;
+    }
+    serial_write("[ROOT] Provisioning rootfs from initrd\n");
+    tar_parse(g_bootfs_state.initrd_ptr, g_bootfs_state.initrd_size);
+    rootfs_write_marker();
+}
+
+static bool rootfs_try_pivot(void) {
+    Disk *root_disk = rootfs_select_disk();
+    if (!root_disk) {
+        serial_write("[ROOT] No suitable root partition found, keeping RAMFS\n");
+        return false;
+    }
+
+    char dev_mount[32];
+    rootfs_build_dev_mount(root_disk->devname, dev_mount, (int)sizeof(dev_mount));
+    void *fs_private = rootfs_get_mount_private(dev_mount);
+    if (!fs_private) {
+        fs_private = fat32_mount_volume(root_disk);
+        if (!fs_private) {
+            serial_write("[ROOT] Failed to mount root volume\n");
+            return false;
+        }
+    }
+
+    vfs_umount("/");
+    if (!vfs_mount("/", root_disk->devname, "fat32", fat32_get_realfs_ops(), fs_private)) {
+        serial_write("[ROOT] Failed to pivot root, restoring RAMFS\n");
+        vfs_mount("/", "ramfs", "ramfs", fat32_get_ramfs_ops(), NULL);
+        return false;
+    }
+
+    if (!g_bootfs_state.root_device[0]) {
+        int i = 0;
+        while (root_disk->devname[i] && i < (int)sizeof(g_bootfs_state.root_device) - 1) {
+            g_bootfs_state.root_device[i] = root_disk->devname[i];
+            i++;
+        }
+        g_bootfs_state.root_device[i] = '\0';
+    }
+
+    g_bootfs_state.boot_flags |= (BOOT_FLAG_DISK | BOOT_FLAG_ROOT_PIVOTED);
+    fat32_set_root_volume(fs_private);
+    rootfs_provision_from_initrd();
+
+    serial_write("[ROOT] Pivoted root to /dev/");
+    serial_write(root_disk->devname);
+    serial_write("\n");
+    return true;
 }
 
 
@@ -1122,7 +1274,7 @@ static int dock_insertion_index_from_x(int x, int y, int sw, int sh) {
 
 static void dock_save_config(void) {
     fat32_mkdir("/root");
-    fat32_mkdir("/Library/Dock/dock.cfg");
+    fat32_mkdir("/Library/Dock");
 
     FAT32_FileHandle *fh = fat32_open(DOCK_CONFIG_PATH, "w");
     if (!fh) return;
@@ -3933,6 +4085,11 @@ void wm_init(void) {
     disk_manager_scan();
     log_ok("Disk scanning complete");
 
+    extern void bootfs_mount_boot_partition(void);
+    bootfs_mount_boot_partition();
+
+    rootfs_try_pivot();
+
     explorer_init();
     log_ok("Explorer ready");
     
@@ -3971,6 +4128,15 @@ void wm_init(void) {
     serial_write("[WM] Initialization complete, transitioning to GUI\n");
     kconsole_set_active(false);
     graphics_flip_buffer();
+}
+
+void wm_run_loop(void) {
+    while (1) {
+        wm_process_input();
+        wm_process_deferred_thumbs();
+        wallpaper_process_pending();
+        asm("hlt");
+    }
 }
 
 uint32_t wm_get_ticks(void) {
@@ -4028,9 +4194,6 @@ void wm_notify_fs_change(void) {
     file_index_invalidate_cache();
     lumos_index_built = false;
 
-    // Kick off a background index rebuild so Lumos reflects changes immediately.
-    // The flag prevents flooding the work queue when many files change at once
-    // (e.g. during a bulk folder move that triggers one notification per file).
     if (!index_rebuild_queued) {
         index_rebuild_queued = true;
         work_queue_submit(index_rebuild_wrapper, NULL);

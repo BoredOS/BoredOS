@@ -1,4 +1,5 @@
 #include "stdlib.h"
+char **environ = 0;
 #include "string.h"
 #include "errno.h"
 #include "syscall.h"
@@ -175,4 +176,12 @@ __attribute__((weak)) double strtod(const char *nptr, char **endptr) {
         value = ldexp(value, exp_sign * exp_val);
     }
     return sign * value;
+}
+
+__attribute__((weak)) float strtof(const char *nptr, char **endptr) {
+    return (float)strtod(nptr, endptr);
+}
+
+__attribute__((weak)) long double strtold(const char *nptr, char **endptr) {
+    return (long double)strtod(nptr, endptr);
 }

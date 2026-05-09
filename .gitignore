@@ -1,33 +1,20 @@
-.git 2/FETCH_HEAD
-limine 2/BOOTAA64.EFI
-limine 2/BOOTIA32.EFI
-limine 2/BOOTRISCV64.EFI
-limine 2/BOOTX64.EFI
-limine 2/install-sh
-limine 2/LICENSE
-limine 2/limine-bios-cd.bin
-limine 2/limine-bios-hdd.h
-limine 2/limine-bios-pxe.bin
-limine 2/limine-bios.sys
-limine 2/limine-uefi-cd.bin
-limine 2/limine.c
-limine 2/limine.dSYM/Contents/Info.plist
-limine 2/limine.dSYM/Contents/Resources/Relocations/aarch64/limine.yml
-limine 2/limine.h
-limine 2/Makefile
-limine 2/limine
-limine 2/limine.dSYM/Contents/Resources/DWARF/limine
-limine 2/limine.exe
-boredos.dump
-qemu-debug.log
+# Build artifacts
+/build/
 iso_root/
-limine/
-src/userland/bin/
 boredos.iso
 disk.img
-limine
+disk.qcow2
+edk2-vars.fd
+qemu-debug.log
+boredos.dump
+
+# Userland
+src/userland/bin/
+
+# Temporary files
 **/.DS_Store
 .DS_Store
-/build/
 *.o
-disk.img
+
+# Others
+.gitignore

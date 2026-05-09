@@ -15,7 +15,7 @@
 static spinlock_t ramfs_lock = SPINLOCK_INIT; // Protects the RAM-based filesystem (/)
 
 
-#define MAX_CLUSTERS 8192
+#define MAX_CLUSTERS 32768
 #define MAX_OPEN_HANDLES 32
 
 // In-memory FAT table
@@ -49,6 +49,7 @@ typedef struct {
     uint32_t sectors_per_cluster;
     uint32_t root_cluster;
     uint32_t fat_size; // sectors
+    uint32_t num_fats;
     uint32_t total_sectors;
     uint32_t partition_offset; // LBA offset of partition start
     bool mounted;
@@ -60,11 +61,16 @@ typedef struct {
 
 // Dynamically allocated volumes (no longer A-Z indexed)
 static bool realfs_mkdir_vol(FAT32_Volume *vol, const char *path);
+extern void serial_write(const char *str);
+extern void serial_write_hex(uint32_t val);
 #define MAX_REAL_VOLUMES 8
 static FAT32_Volume *real_volumes[MAX_REAL_VOLUMES];
 static int real_volume_count = 0;
+static FAT32_Volume *root_volume = NULL;
 
 // Forward declarations for volume-aware functions
+static uint32_t realfs_allocate_cluster(FAT32_Volume *vol);
+static void handle_fat32_truncate(FAT32_FileHandle *handle);
 static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *path, const char *mode);
 static int realfs_list_directory_vol(FAT32_Volume *vol, const char *path, FAT32_FileInfo *entries, int max_entries);
 static bool realfs_delete_from_vol(FAT32_Volume *vol, const char *path);
@@ -78,6 +84,16 @@ static bool realfs_find_contiguous_free(FAT32_Volume *vol, uint32_t dir_start_cl
 static uint8_t fat_lfn_checksum(const uint8_t *short_name);
 static void extract_lfn_chars(FAT32_LFNEntry *lfn, char *buffer);
 static void to_dos_filename(const char *filename, char *dos_name);
+static bool realfs_create_entry(FAT32_Volume *vol, uint32_t parent_cluster, const char *name, uint8_t attributes, uint32_t start_cluster, uint32_t file_size, uint32_t *out_sector, uint32_t *out_offset);
+
+void fat32_set_root_volume(void *fs_private) {
+    root_volume = (FAT32_Volume*)fs_private;
+}
+
+static void fat32_sync_if_root(FAT32_Volume *vol) {
+    if (!vol || vol != root_volume) return;
+    disk_sync(vol->disk);
+}
 
 // === Helper Functions (Shared) ===
 
@@ -145,7 +161,7 @@ static void extract_parent_path(const char *path, char *parent) {
     int i = len - 1;
     while (i > 0 && path[i] == '/') i--;
     while (i > 0 && path[i] != '/') i--;
-    if (i == 0) {
+    if (i <= 0) {
         parent[0] = '/';
         parent[1] = 0;
     } else {
@@ -165,8 +181,11 @@ static char parse_drive_from_path(const char **path_ptr) {
         *path_ptr = path + 2;
         return drive;
     }
+
+    if (root_volume != NULL) return 0; // Pseudo-drive 0 means "use root volume"
     return 'A'; // Default to RAMFS
 }
+
 
 // Normalize path (remove .., ., etc)
 void fat32_normalize_path(const char *path, char *normalized) {
@@ -467,6 +486,7 @@ static bool realfs_mount_volume(FAT32_Volume *vol, Disk *disk) {
     vol->sectors_per_cluster = bpb->sectors_per_cluster;
     vol->root_cluster = bpb->root_cluster;
     vol->fat_size = bpb->sectors_per_fat_32;
+    vol->num_fats = bpb->num_fats;
     vol->total_sectors = bpb->total_sectors_32;
     vol->mounted = true;
     vol->cached_fat_sector = 0xFFFFFFFF;
@@ -531,8 +551,32 @@ static uint32_t realfs_next_cluster(FAT32_Volume *vol, uint32_t cluster) {
     return next;
 }
 
+static void realfs_set_fat_entry(FAT32_Volume *vol, uint32_t cluster, uint32_t value) {
+    uint32_t offset = cluster * 4;
+    uint32_t sector_offset = offset / 512;
+    uint32_t byte_offset = offset % 512;
+
+    uint8_t *buf = (uint8_t*)kmalloc(512);
+    if (!buf) return;
+
+    for (uint32_t i = 0; i < vol->num_fats; i++) {
+        uint32_t sector = vol->fat_begin_lba + (i * vol->fat_size) + sector_offset;
+        if (vol->disk->read_sector(vol->disk, sector, buf) == 0) {
+            uint32_t *entry = (uint32_t*)(buf + byte_offset);
+            *entry = (*entry & 0xF0000000) | (value & 0x0FFFFFFF);
+            vol->disk->write_sector(vol->disk, sector, buf);
+            if (vol->cached_fat_sector == sector) vol->cached_fat_sector = 0xFFFFFFFF;
+        }
+    }
+    kfree(buf);
+}
+
 static int realfs_read_cluster(FAT32_Volume *vol, uint32_t cluster, uint8_t *buffer) {
+    if (!vol || cluster < 2) return -1;
     uint32_t lba = vol->cluster_begin_lba + (cluster - 2) * vol->sectors_per_cluster;
+    if (vol->disk->read_sectors) {
+        return vol->disk->read_sectors(vol->disk, lba, vol->sectors_per_cluster, buffer);
+    }
     for (uint32_t i = 0; i < vol->sectors_per_cluster; i++) {
         if (vol->disk->read_sector(vol->disk, lba + i, buffer + (i * 512)) != 0) return -1;
     }
@@ -550,7 +594,7 @@ static void to_dos_filename(const char *filename, char *out) {
     if (name_len > 8) name_len = 8;
     for (int i = 0; i < name_len; i++) {
         char c = filename[i];
-        // Preserve case - don't convert to uppercase
+        if (c >= 'a' && c <= 'z') c -= 32;
         out[i] = c;
     }
     if (dot != -1) {
@@ -558,18 +602,102 @@ static void to_dos_filename(const char *filename, char *out) {
         if (ext_len > 3) ext_len = 3;
         for (int i = 0; i < ext_len; i++) {
             char c = filename[dot + 1 + i];
-            // Preserve case - don't convert to uppercase
+            if (c >= 'a' && c <= 'z') c -= 32;
             out[8 + i] = c;
         }
     }
 }
-
 static uint8_t fat_lfn_checksum(const uint8_t *short_name) {
     uint8_t sum = 0;
     for (int i = 11; i > 0; i--) {
         sum = ((sum & 1) ? 0x80 : 0) + (sum >> 1) + *short_name++;
     }
     return sum;
+}
+
+static bool realfs_create_entry(FAT32_Volume *vol, uint32_t parent_cluster, const char *name, uint8_t attributes, uint32_t start_cluster, uint32_t file_size, uint32_t *out_sector, uint32_t *out_offset) {
+    char dos_name[11];
+    to_dos_filename(name, dos_name);
+    
+    int name_len = fs_strlen(name);
+    bool needs_lfn = false;
+    
+    int dot_pos = -1;
+    for (int i = 0; i < name_len; i++) {
+        if (name[i] == '.') { dot_pos = i; break; }
+        if (name[i] >= 'a' && name[i] <= 'z') needs_lfn = true;
+    }
+    if (!needs_lfn) {
+        if (dot_pos == -1) needs_lfn = (name_len > 8);
+        else needs_lfn = (dot_pos > 8) || (name_len - dot_pos - 1 > 3);
+    }
+    if (!needs_lfn && dot_pos != -1) {
+        for (int i = dot_pos + 1; i < name_len; i++) {
+            if (name[i] >= 'a' && name[i] <= 'z') { needs_lfn = true; break; }
+        }
+    }
+
+    int lfn_entries = needs_lfn ? ((name_len + 12) / 13) : 0;
+    int total_entries = lfn_entries + 1;
+    
+    uint32_t free_cluster = 0;
+    int start_idx = -1;
+    
+    if (!realfs_find_contiguous_free(vol, parent_cluster, total_entries, &free_cluster, &start_idx)) {
+        return false;
+    }
+    
+    uint8_t *buf = (uint8_t*)kmalloc(vol->sectors_per_cluster * 512);
+    if (!buf) return false;
+    
+    if (realfs_read_cluster(vol, free_cluster, buf) != 0) {
+        kfree(buf);
+        return false;
+    }
+    
+    FAT32_DirEntry *entries = (FAT32_DirEntry*)buf;
+    uint8_t checksum = fat_lfn_checksum((uint8_t*)dos_name);
+    
+    for (int i = 0; i < lfn_entries; i++) {
+        FAT32_LFNEntry *lfn = (FAT32_LFNEntry*)&entries[start_idx + i];
+        lfn->order = (lfn_entries - i);
+        if (i == 0) lfn->order |= 0x40;
+        lfn->attr = ATTR_LFN;
+        lfn->type = 0;
+        lfn->checksum = checksum;
+        lfn->first_cluster = 0;
+        
+        int char_offset = (lfn_entries - i - 1) * 13;
+        for (int k = 0; k < 13; k++) {
+            uint16_t c = 0xFFFF;
+            if (char_offset + k < name_len) c = name[char_offset + k];
+            else if (char_offset + k == name_len) c = 0x0000;
+            
+            if (k < 5) lfn->name1[k] = c;
+            else if (k < 11) lfn->name2[k-5] = c;
+            else lfn->name3[k-11] = c;
+        }
+    }
+    
+    FAT32_DirEntry *d = &entries[start_idx + lfn_entries];
+    for (int k = 0; k < 8; k++) d->filename[k] = dos_name[k];
+    for (int k = 0; k < 3; k++) d->extension[k] = dos_name[8+k];
+    d->attributes = attributes;
+    d->start_cluster_high = (start_cluster >> 16);
+    d->start_cluster_low = (start_cluster & 0xFFFF);
+    d->file_size = file_size;
+    
+    if (realfs_write_cluster(vol, free_cluster, buf) != 0) {
+        kfree(buf);
+        return false;
+    }
+    
+    uint32_t lba = vol->cluster_begin_lba + (free_cluster - 2) * vol->sectors_per_cluster;
+    *out_sector = lba + ((start_idx + lfn_entries) * 32) / 512;
+    *out_offset = ((start_idx + lfn_entries) * 32) % 512;
+    
+    kfree(buf);
+    return true;
 }
 
 static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *path, const char *mode) {
@@ -612,6 +740,10 @@ static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *pat
     uint32_t entry_sector = 0;
     uint32_t entry_offset = 0;
     
+    uint8_t *cluster_buf = (uint8_t*)kmalloc(vol->sectors_per_cluster * 512);
+    if (!cluster_buf) return NULL;
+    uint8_t *lfn_cl_buf = NULL;
+
     while (*p) {
         // Extract component
         int i = 0;
@@ -624,8 +756,6 @@ static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *pat
         // Search in current_cluster
         found = false;
         uint32_t search_cluster = current_cluster;
-        uint8_t *cluster_buf = (uint8_t*)kmalloc(vol->sectors_per_cluster * 512);
-        if (!cluster_buf) return NULL;
         
         char lfn_buffer[256];
         bool has_lfn = false;
@@ -721,112 +851,33 @@ static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *pat
         
         if (!found) {
             if ((mode[0] == 'w' || mode[0] == 'a') && *p == 0) {
-                  // Create file logic with LFN support
-                  char dos_name[11];
-                  to_dos_filename(component, dos_name);
-                  
-                  int name_len = fs_strlen(component);
-                  
-                  // Determine if LFN is needed:
-                  // LFN is needed if the name contains characters that don't fit in 8.3 format
-                  // or if the extension is longer than 3 chars or name part is longer than 8 chars
-                  bool needs_lfn = false;
-                  int dot_pos = -1;
-                  for (int i = 0; i < name_len; i++) {
-                      if (component[i] == '.') { dot_pos = i; break; }
-                  }
-                  
-                  if (dot_pos == -1) {
-                      // No extension - need LFN if name > 8 chars
-                      needs_lfn = (name_len > 8);
-                  } else {
-                      // Has extension
-                      int name_part = dot_pos;
-                      int ext_part = name_len - dot_pos - 1;
-                      // Need LFN if name > 8 chars or extension > 3 chars
-                      needs_lfn = (name_part > 8) || (ext_part > 3);
-                  }
-                  
-                  int lfn_entries = needs_lfn ? ((name_len + 12) / 13) : 0;
-                  int total_entries = lfn_entries + 1;
-                  
-                  uint32_t free_cluster = 0;
-                  int start_entry_idx = -1;
-                  
-                  uint8_t *lfn_cl_buf = (uint8_t*)kmalloc(vol->sectors_per_cluster * 512);
-                  if (lfn_cl_buf && realfs_find_contiguous_free(vol, current_cluster, total_entries, &free_cluster, &start_entry_idx)) {
-                      if (realfs_read_cluster(vol, free_cluster, lfn_cl_buf) == 0) {
-                          FAT32_DirEntry *entries = (FAT32_DirEntry*)lfn_cl_buf;
-                          uint8_t checksum = fat_lfn_checksum((uint8_t*)dos_name);
-                          
-                          // Write LFN entries in reverse order
-                          for (int i = 0; i < lfn_entries; i++) {
-                              FAT32_LFNEntry *lfn = (FAT32_LFNEntry*)&entries[start_entry_idx + i];
-                              lfn->order = (lfn_entries - i);
-                              if (i == 0) lfn->order |= 0x40; // Last logical LFN entry
-                              
-                              lfn->attr = ATTR_LFN;
-                              lfn->type = 0;
-                              lfn->checksum = checksum;
-                              lfn->first_cluster = 0;
-                              
-                              // Fill name chars (13 chars per entry)
-                              int char_offset = (lfn_entries - i - 1) * 13;
-                              for (int k = 0; k < 13; k++) {
-                                  uint16_t c = 0xFFFF;
-                                  if (char_offset + k < name_len) c = component[char_offset + k];
-                                  else if (char_offset + k == name_len) c = 0x0000;
-                                  
-                                  if (k < 5) lfn->name1[k] = c;
-                                  else if (k < 11) lfn->name2[k-5] = c;
-                                  else lfn->name3[k-11] = c;
-                              }
-                          }
-                          
-                          // Write 8.3 entry
-                          FAT32_DirEntry *d = &entries[start_entry_idx + lfn_entries];
-                          for(int k=0; k<8; k++) d->filename[k] = dos_name[k];
-                          for(int k=0; k<3; k++) d->extension[k] = dos_name[8+k];
-                          d->attributes = ATTR_ARCHIVE;
-                          d->start_cluster_high = 0;
-                          d->start_cluster_low = 0;
-                          d->file_size = 0;
-                          
-                          if (realfs_write_cluster(vol, free_cluster, lfn_cl_buf) == 0) {
-                              uint32_t lba = vol->cluster_begin_lba + (free_cluster - 2) * vol->sectors_per_cluster;
-                              entry_sector = lba + ((start_entry_idx + lfn_entries) * 32) / 512;
-                              entry_offset = ((start_entry_idx + lfn_entries) * 32) % 512;
-                              
-                              kfree(lfn_cl_buf);
-                              if (cluster_buf) kfree(cluster_buf);
-                              
-                              FAT32_FileHandle *fh = ramfs_find_free_handle();
-                              if (fh) {
-                                  fh->valid = true;
-                                  fh->volume = vol;
-                                  fh->start_cluster = 0;
-                                  fh->cluster = 0;
-                                  fh->position = 0;
-                                  fh->size = 0;
-                                  fh->mode = (mode[0] == 'a' ? 2 : 1);
-                                  fh->is_directory = false;
-                                  fh->attributes = ATTR_ARCHIVE;
-                                  fh->dir_sector = entry_sector;
-                                  fh->dir_offset = entry_offset;
-                                  return fh;
-                              }
-                          }
-                      }
-                  }
-                  if (lfn_cl_buf) kfree(lfn_cl_buf);
-                  if (cluster_buf) kfree(cluster_buf);
-                  return NULL; 
+                   if (realfs_create_entry(vol, current_cluster, component, ATTR_ARCHIVE, 0, 0, &entry_sector, &entry_offset)) {
+                       FAT32_FileHandle *fh = ramfs_find_free_handle();
+                       if (fh) {
+                           fh->valid = true;
+                           fh->volume = vol;
+                           fh->start_cluster = 0;
+                           fh->cluster = 0;
+                           fh->position = 0;
+                           fh->size = 0;
+                           fh->mode = (mode[0] == 'a' ? 2 : 1);
+                           fh->is_directory = false;
+                           fh->attributes = ATTR_ARCHIVE;
+                           fh->dir_sector = entry_sector;
+                           fh->dir_offset = entry_offset;
+                           if (cluster_buf) kfree(cluster_buf);
+                           return fh;
+                       }
+                   }
+                   if (cluster_buf) kfree(cluster_buf);
+                   return NULL; 
             }
-            kfree(cluster_buf);
+            if (cluster_buf) { kfree(cluster_buf); cluster_buf = NULL; }
             return NULL;
+
         }
-        kfree(cluster_buf);
     }
+
     
     // Found file/dir
     FAT32_FileHandle *fh = ramfs_find_free_handle();
@@ -843,6 +894,10 @@ static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *pat
         fh->dir_sector = entry_sector;
         fh->dir_offset = entry_offset;
         
+        if (mode[0] == 'w' && !is_directory) {
+            handle_fat32_truncate(fh);
+        }
+        
         if (mode[0] == 'a') {
             fh->position = fh->size;
             // Seek to EOF cluster
@@ -855,10 +910,10 @@ static FAT32_FileHandle* realfs_open_from_vol(FAT32_Volume *vol, const char *pat
                 pos += cluster_size;
             }
         }
-        return fh;
     }
-    
-    return NULL;
+    if (cluster_buf) kfree(cluster_buf);
+    if (lfn_cl_buf) kfree(lfn_cl_buf);
+    return fh;
 }
 
 static int realfs_read_file(FAT32_FileHandle *handle, void *buffer, int size, uint8_t *ext_cluster_buf) {
@@ -905,8 +960,11 @@ static int realfs_read_file(FAT32_FileHandle *handle, void *buffer, int size, ui
 }
 
 static int realfs_write_cluster(FAT32_Volume *vol, uint32_t cluster, const uint8_t *buffer) {
-    if (cluster < 2 || cluster >= 0x0FFFFFF8) return -1;
+    if (!vol || cluster < 2 || cluster >= 0x0FFFFFF8) return -1;
     uint32_t lba = vol->cluster_begin_lba + (cluster - 2) * vol->sectors_per_cluster;
+    if (vol->disk->write_sectors) {
+        return vol->disk->write_sectors(vol->disk, lba, vol->sectors_per_cluster, buffer);
+    }
     for (uint32_t i = 0; i < vol->sectors_per_cluster; i++) {
         if (vol->disk->write_sector(vol->disk, lba + i, buffer + (i * 512)) != 0) return -1;
     }
@@ -988,12 +1046,10 @@ static bool realfs_find_contiguous_free(FAT32_Volume *vol, uint32_t dir_start_cl
 
 static uint32_t realfs_allocate_cluster(FAT32_Volume *vol) {
     uint32_t current = vol->last_allocated_cluster;
-    if (current < 2) current = 2;
+    if (current < 3) current = 3;
+    
     uint32_t fat_entries = (vol->fat_size * 512) / 4;
     uint32_t first_search = current;
-    
-    // Skip cluster 2 as it's reserved for the root directory in FAT32
-    if (current == vol->root_cluster) current++;
     
     uint8_t *fat_buf = (uint8_t*)kmalloc(512);
     if (!fat_buf) return 0;
@@ -1011,13 +1067,9 @@ static uint32_t realfs_allocate_cluster(FAT32_Volume *vol) {
         
         uint32_t val = *(uint32_t*)&fat_buf[offset];
         if ((val & 0x0FFFFFFF) == 0) {
-            *(uint32_t*)&fat_buf[offset] = 0x0FFFFFFF; // EOC
-            vol->disk->write_sector(vol->disk, sector, fat_buf);
-            if (vol->cached_fat_sector == sector) {
-                vol->cached_fat_sector = 0xFFFFFFFF;
-            }
-            vol->last_allocated_cluster = current;
             kfree(fat_buf);
+            realfs_set_fat_entry(vol, current, 0x0FFFFFFF); // EOC
+            vol->last_allocated_cluster = current;
             return current;
         }
         current++;
@@ -1026,6 +1078,32 @@ static uint32_t realfs_allocate_cluster(FAT32_Volume *vol) {
     }
     kfree(fat_buf);
     return 0; // Full
+}
+
+static void realfs_free_cluster_chain(FAT32_Volume *vol, uint32_t start_cluster) {
+    if (start_cluster == 0 || start_cluster >= 0x0FFFFFF8) return;
+    
+    uint32_t current = start_cluster;
+    while (current < 0x0FFFFFF8 && current >= 2) {
+        uint32_t next = realfs_next_cluster(vol, current);
+        realfs_set_fat_entry(vol, current, 0);
+        if (next == current) break; 
+        current = next;
+    }
+}
+
+static void handle_fat32_truncate(FAT32_FileHandle *handle) {
+    FAT32_Volume *vol = (FAT32_Volume*)handle->volume;
+    if (!vol || handle->start_cluster == 0) return;
+    
+    uint32_t start = handle->start_cluster;
+    handle->start_cluster = 0;
+    handle->cluster = 0;
+    handle->size = 0;
+    handle->position = 0;
+    
+    realfs_free_cluster_chain(vol, start);
+    realfs_update_dir_entry_size(vol, handle);
 }
 
 static int realfs_write_file(FAT32_FileHandle *handle, const void *buffer, int size, uint8_t *ext_cluster_buf) {
@@ -1070,31 +1148,24 @@ static int realfs_write_file(FAT32_FileHandle *handle, const void *buffer, int s
                 uint32_t new_cluster = realfs_allocate_cluster(vol);
                 if (new_cluster == 0) break;
 
-                uint32_t fs = vol->fat_begin_lba + (handle->cluster * 4) / 512;
-                uint32_t fo = (handle->cluster * 4) % 512;
-                uint8_t fbuf[512];
-                if (vol->disk->read_sector(vol->disk, fs, fbuf) == 0) {
-                    uint32_t old = *(uint32_t*)&fbuf[fo];
-                    *(uint32_t*)&fbuf[fo] = (old & 0xF0000000) | (new_cluster & 0x0FFFFFFF);
-                    vol->disk->write_sector(vol->disk, fs, fbuf);
-                    if (vol->cached_fat_sector == fs) vol->cached_fat_sector = 0xFFFFFFFF;
-                }
+                realfs_set_fat_entry(vol, handle->cluster, new_cluster);
                 next = new_cluster;
             }
             handle->cluster = next;
         }
 
-        // Always zero the buffer first to ensure clean state
-        for (int i = 0; i < (int)cluster_size; i++) cluster_buf[i] = 0;
-        
-        // If we're in the middle of a cluster, read the existing data first
-        if (offset > 0 || (handle->position < handle->size)) {
-            if (realfs_read_cluster(vol, handle->cluster, cluster_buf) != 0) break;
-        }
-        
         int to_copy = size - bytes_written;
         int available = cluster_size - offset; 
         if (to_copy > available) to_copy = available;
+
+
+        if (offset > 0 || (handle->position < handle->size && (handle->position + to_copy) < handle->size)) {
+            if (realfs_read_cluster(vol, handle->cluster, cluster_buf) != 0) break;
+        } else {
+            if (to_copy < (int)cluster_size) {
+                for (int i = 0; i < (int)cluster_size; i++) cluster_buf[i] = 0;
+            }
+        }
         
         // Copy new data into the cluster buffer
         for (int i = 0; i < to_copy; i++) {
@@ -1244,17 +1315,10 @@ static bool realfs_delete_from_vol(FAT32_Volume *vol, const char *path) {
                         }
                         // Mark the main entry as deleted
                         entry[e].filename[0] = 0xE5;
-                        
-                        // Persist the changes to disk
-                        // CRITICAL FIX: Write ALL sectors that contain modified entries
-                        // LFN entries and main entry may span multiple sectors in the cluster
                         uint32_t lba = vol->cluster_begin_lba + (search_cluster - 2) * vol->sectors_per_cluster;
                         
-                        // Find all sectors touched by LFN and main entries
-                        uint8_t sectors_to_write[8] = {0};  // Max 8 sectors per cluster
+                        uint8_t sectors_to_write[8] = {0};  
                         int num_sectors = 0;
-                        
-                        // Mark sectors containing LFN entries
                         if (lfn_start_entry != -1) {
                             for (int k = lfn_start_entry; k < e; k++) {
                                 int sect_idx = (k * 32) / 512;
@@ -1312,30 +1376,8 @@ static bool realfs_delete_from_vol(FAT32_Volume *vol, const char *path) {
         
         if (*p == 0) break; // End of path
     }
-        // 2. Free all clusters used by the file
-    if (file_start_cluster != 0 && file_start_cluster < 0x0FFFFFF8) {
-        uint32_t current = file_start_cluster;
-        
-        while (current < 0x0FFFFFF8) {
-            uint32_t next = realfs_next_cluster(vol, current);
-            
-            // Mark this cluster as free in FAT
-            uint32_t fat_sector = vol->fat_begin_lba + (current * 4) / 512;
-            uint32_t fat_offset = (current * 4) % 512;
-            
-            uint8_t *fat_buf = (uint8_t*)kmalloc(512);
-            if (!fat_buf) break;
-            
-            if (vol->disk->read_sector(vol->disk, fat_sector, fat_buf) == 0) {
-                *(uint32_t*)&fat_buf[fat_offset] = 0; // Free
-                vol->disk->write_sector(vol->disk, fat_sector, fat_buf);
-                if (vol->cached_fat_sector == fat_sector) vol->cached_fat_sector = 0xFFFFFFFF;
-            }
-            kfree(fat_buf);
-            
-            current = next;
-        }
-    }
+    realfs_free_cluster_chain(vol, file_start_cluster);
+
     kfree(cluster_buf);
     return true;
 }
@@ -1389,6 +1431,7 @@ static int realfs_list_directory_vol(FAT32_Volume *vol, const char *path, FAT32_
         for (int e = 0; e < (int)((vol->sectors_per_cluster*512)/32) && count < max_entries; e++) {
             if (de[e].filename[0] == 0) { current_cluster = 0xFFFFFFFF; break; }
             if (de[e].filename[0] == 0xE5) { has_lfn = false; continue; }
+            if (de[e].filename[0] == 0x2E) { has_lfn = false; continue; } // Skip . and ..
             if (de[e].attributes == ATTR_LFN) {
                 FAT32_LFNEntry *l = (FAT32_LFNEntry*)&de[e];
                 if (l->order & 0x40) for(int k=0; k<256; k++) lfn_buffer[k] = 0;
@@ -1707,6 +1750,9 @@ static int vfs_realfs_write(void *fs_private, void *file_handle, const void *buf
         if (ret < to_write) break; 
     }
 
+    if (total_written > 0) {
+        fat32_sync_if_root(vol);
+    }
     kfree(cluster_buf);
     return total_written;
 }
@@ -1741,6 +1787,7 @@ static bool vfs_realfs_mkdir(void *fs_private, const char *rel_path) {
     uint64_t rflags = spinlock_acquire_irqsave(&vol->lock);
     bool ret = realfs_mkdir_vol((FAT32_Volume*)fs_private, rel_path);
     spinlock_release_irqrestore(&vol->lock, rflags);
+    if (ret) fat32_sync_if_root(vol);
     return ret;
 }
 
@@ -1754,6 +1801,7 @@ static bool vfs_realfs_unlink(void *fs_private, const char *rel_path) {
     uint64_t rflags = spinlock_acquire_irqsave(&vol->lock);
     bool ret = realfs_delete_from_vol((FAT32_Volume*)fs_private, rel_path);
     spinlock_release_irqrestore(&vol->lock, rflags);
+    if (ret) fat32_sync_if_root(vol);
     return ret;
 }
 
@@ -1806,7 +1854,7 @@ static int vfs_realfs_get_info(void *fs_private, const char *rel_path, vfs_diren
         spinlock_release_irqrestore(&vol->lock, rflags);
         return 0;
     }
-    spinlock_release_irqrestore(&ramfs_lock, rflags);
+    spinlock_release_irqrestore(&vol->lock, rflags);
     return -1;
 }
 
@@ -1915,8 +1963,9 @@ FAT32_FileHandle* fat32_open_nolock(const char *path, const char *mode) {
         fat32_normalize_path(p, normalized);
         handle = ramfs_open(normalized, mode);
         kfree(normalized);
+    } else if (drive == 0) {
+        handle = realfs_open_from_vol(root_volume, p, mode);
     } else if (drive != 0) {
-        // Find volume by drive letter (B=0, C=1...)
         Disk *d = disk_get_by_letter(drive);
         if (d) {
             for (int i = 0; i < real_volume_count; i++) {
@@ -1962,6 +2011,7 @@ void fat32_close_nolock(FAT32_FileHandle *handle) {
                      kfree(buf);
                  }
             }
+            fat32_sync_if_root(vol);
         }
         handle->valid = false;
     }
@@ -2005,6 +2055,10 @@ int fat32_write(FAT32_FileHandle *handle, const void *buffer, int size) {
         ret = ramfs_write(handle, buffer, size);
     } else {
         ret = realfs_write_file(handle, buffer, size, NULL);
+        if (ret > 0) {
+            FAT32_Volume *vol = (FAT32_Volume*)handle->volume;
+            fat32_sync_if_root(vol);
+        }
     }
     
     spinlock_release_irqrestore(&ramfs_lock, rflags);
@@ -2070,8 +2124,12 @@ static bool realfs_mkdir_vol(FAT32_Volume *vol, const char *path) {
     // Open parent directory
     FAT32_FileHandle *parent_fh = realfs_open_from_vol(vol, parent_path, "r");
     kfree(parent_path);
-    if (!parent_fh) return false;
+    if (!parent_fh) {
+        serial_write("[FAT32] mkdir ERROR: parent not found\n");
+        return false;
+    }
     uint32_t parent_cluster = parent_fh->start_cluster;
+
     extern void fat32_close_nolock(FAT32_FileHandle *handle);
     fat32_close_nolock(parent_fh);
 
@@ -2117,73 +2175,14 @@ static bool realfs_mkdir_vol(FAT32_Volume *vol, const char *path) {
     }
     kfree(cluster_buf);
 
-    // Find free entry in parent directory
-    uint32_t search_cluster = parent_cluster;
-    uint8_t *sect_buf = (uint8_t*)kmalloc(512);
-    bool found_free = false;
     uint32_t free_sector = 0;
     uint32_t free_offset = 0;
 
-    uint8_t *dir_cluster_buf = (uint8_t*)kmalloc(cluster_size);
-    if (!dir_cluster_buf) {
-        kfree(sect_buf);
+    if (!realfs_create_entry(vol, parent_cluster, dirname, ATTR_DIRECTORY, new_cluster, 0, &free_sector, &free_offset)) {
         return false;
     }
 
-    while (search_cluster < 0x0FFFFFF8 && !found_free) {
-        if (realfs_read_cluster(vol, search_cluster, dir_cluster_buf) != 0) break;
-        FAT32_DirEntry *entries = (FAT32_DirEntry*)dir_cluster_buf;
-        int count = cluster_size / 32;
-        for (int e = 0; e < count; e++) {
-            if (entries[e].filename[0] == 0 || entries[e].filename[0] == 0xE5) {
-                uint32_t lba = vol->cluster_begin_lba + (search_cluster - 2) * vol->sectors_per_cluster;
-                free_sector = lba + (e * 32) / 512;
-                free_offset = (e * 32) % 512;
-                found_free = true;
-                break;
-            }
-        }
-        if (!found_free) {
-            uint32_t next = realfs_next_cluster(vol, search_cluster);
-            if (next >= 0x0FFFFFF8) {
-                // Need to expand directory? 
-                uint32_t expanded = realfs_allocate_cluster(vol);
-                if (expanded == 0) break;
-                // Link, preserve high bits
-                uint32_t fat_sector = vol->fat_begin_lba + (search_cluster * 4) / 512;
-                uint32_t fat_offset = (search_cluster * 4) % 512;
-                if (vol->disk->read_sector(vol->disk, fat_sector, sect_buf) == 0) {
-                    uint32_t old_val = *(uint32_t*)&sect_buf[fat_offset];
-                    *(uint32_t*)&sect_buf[fat_offset] = (old_val & 0xF0000000) | (expanded & 0x0FFFFFFF);
-                    vol->disk->write_sector(vol->disk, fat_sector, sect_buf);
-                    if (vol->cached_fat_sector == fat_sector) vol->cached_fat_sector = 0xFFFFFFFF;
-                }
-                // Zero out new cluster
-                for(uint32_t k=0; k<cluster_size; k++) dir_cluster_buf[k] = 0;
-                realfs_write_cluster(vol, expanded, dir_cluster_buf);
-                next = expanded;
-            }
-            search_cluster = next;
-        }
-    }
-    kfree(dir_cluster_buf);
-
-    if (found_free) {
-        vol->disk->read_sector(vol->disk, free_sector, sect_buf);
-        FAT32_DirEntry *d = (FAT32_DirEntry*)(sect_buf + free_offset);
-        char dos_name[11];
-        to_dos_filename(dirname, dos_name);
-        for (int k = 0; k < 8; k++) d->filename[k] = dos_name[k];
-        for (int k = 0; k < 3; k++) d->extension[k] = dos_name[8+k];
-        d->attributes = ATTR_DIRECTORY;
-        d->start_cluster_high = (new_cluster >> 16);
-        d->start_cluster_low = (new_cluster & 0xFFFF);
-        d->file_size = 0;
-        vol->disk->write_sector(vol->disk, free_sector, sect_buf);
-    }
-
-    kfree(sect_buf);
-    return found_free;
+    return true;
 }
 
 bool fat32_mkdir(const char *path) {
@@ -2193,7 +2192,12 @@ bool fat32_mkdir(const char *path) {
     // SMP: Use FAT32 spinlock
     uint64_t rflags = spinlock_acquire_irqsave(&ramfs_lock);
 
-    if (drive != 'A') {
+    if (drive == 0) {
+        bool res = realfs_mkdir_vol(root_volume, p);
+        wm_notify_fs_change();
+        spinlock_release_irqrestore(&ramfs_lock, rflags);
+        return res;
+    } else if (drive != 'A') {
         Disk *d = disk_get_by_letter(drive);
         if (d) {
             for (int i = 0; i < real_volume_count; i++) {
@@ -2298,8 +2302,20 @@ bool fat32_delete(const char *path) {
             kfree(normalized);
             if (result) wm_notify_fs_change();
         }
+    } else if (drive == 0) {
+        result = realfs_delete_from_vol(root_volume, p);
+        if (result) wm_notify_fs_change();
     } else {
-        // Obsolete RealFS realfs_delete
+        Disk *d = disk_get_by_letter(drive);
+        if (d) {
+            for (int i = 0; i < real_volume_count; i++) {
+                if (real_volumes[i]->disk == d) {
+                    result = realfs_delete_from_vol(real_volumes[i], p);
+                    if (result) wm_notify_fs_change();
+                    break;
+                }
+            }
+        }
     }
     
     spinlock_release_irqrestore(&ramfs_lock, rflags);
@@ -2391,6 +2407,12 @@ bool fat32_exists(const char *path) {
             exists = (ramfs_find_file(normalized) != NULL);
             kfree(normalized);
         }
+    } else if (drive == 0) {
+        FAT32_FileHandle *fh = realfs_open_from_vol(root_volume, p, "r");
+        if (fh) {
+            exists = true;
+            fat32_close_nolock(fh);
+        }
     } else {
         // RealFS check
         Disk *d = disk_get_by_letter(drive);
@@ -2471,6 +2493,12 @@ bool fat32_is_directory_nolock(const char *path) {
             FileEntry *entry = ramfs_find_file(normalized);
             is_dir = (entry && (entry->attributes & ATTR_DIRECTORY));
             kfree(normalized);
+        }
+    } else if (drive == 0) {
+        FAT32_FileHandle *fh = realfs_open_from_vol(root_volume, p, "r");
+        if (fh) {
+            is_dir = fh->is_directory;
+            fat32_close_nolock(fh);
         }
     } else {
         Disk *d = disk_get_by_letter(drive);

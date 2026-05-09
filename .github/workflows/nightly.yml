@@ -1,13 +1,10 @@
 name: Nightly Build
-
 on:
   schedule:
     - cron: "0 0 * * *"
   workflow_dispatch:
-
 permissions:
   contents: write
-
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -25,7 +22,8 @@ jobs:
             nasm \
             xorriso
           sudo ln -sf /usr/bin/x86_64-linux-gnu-gcc /usr/local/bin/x86_64-elf-gcc
-          sudo ln -sf /usr/bin/x86_64-linux-gnu-ld /usr/local/bin/x86_64-elf-ld
+          sudo ln -sf /usr/bin/x86_64-linux-gnu-ld  /usr/local/bin/x86_64-elf-ld
+          sudo ln -sf /usr/bin/x86_64-linux-gnu-ar  /usr/local/bin/x86_64-elf-ar
 
       - name: Build ISO
         run: make -j4
@@ -49,7 +47,6 @@ jobs:
           name: Nightly Build (${{ steps.metadata.outputs.short_sha }})
           body: |
             This is an automated nightly build of BoredOS, this is not a final release and may be unstable.
-            
             Built from commit:
             - Full hash: `${{ github.sha }}`
             - Short hash: `${{ steps.metadata.outputs.short_sha }}`
