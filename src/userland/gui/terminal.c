@@ -1224,7 +1224,8 @@ int main(void) {
         while (ui_get_event(g_win, &ev)) {
             if (ev.type == GUI_EVENT_CLOSE) {
                 for (int i = 0; i < g_tab_count; i++) {
-                    if (g_tabs[i].bsh_pid > 0) sys_kill(g_tabs[i].bsh_pid);
+                    sys_tty_kill_all(g_tabs[i].tty_id);
+                    sys_tty_destroy(g_tabs[i].tty_id);
                 }
                 sys_exit(0);
             } else if (ev.type == GUI_EVENT_KEY) {
