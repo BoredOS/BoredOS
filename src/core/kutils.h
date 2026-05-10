@@ -11,6 +11,7 @@
 // Kernel string utilities
 void k_memset(void *dest, int val, size_t len);
 void k_memcpy(void *dest, const void *src, size_t len);
+int k_memcmp (const void *str1, const void *str2, size_t count);
 size_t k_strlen(const char *str);
 int k_strcmp(const char *s1, const char *s2);
 int k_strncmp(const char *s1, const char *s2, size_t n);

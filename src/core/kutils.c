@@ -5,6 +5,8 @@
 #include "wm.h"
 #include "io.h"
 
+#include "../drivers/acpi.h"
+
 void k_memset(void *dest, int val, size_t len) {
     unsigned char *ptr = (unsigned char *)dest;
     while (len-- > 0) *ptr++ = (unsigned char)val;
@@ -14,6 +16,17 @@ void k_memcpy(void *dest, const void *src, size_t len) {
     unsigned char *d = (unsigned char *)dest;
     const unsigned char *s = (const unsigned char *)src;
     while (len-- > 0) *d++ = *s++;
+}
+
+int k_memcmp (const void *str1, const void *str2, size_t count) {
+    register const unsigned char *s1 = (const unsigned char*)str1;
+    register const unsigned char *s2 = (const unsigned char*)str2;
+
+    while (count-- > 0) {
+        if (*s1++ != *s2++)
+        return s1[-1] < s2[-1] ? -1 : 1;
+    }
+    return 0;
 }
 
 size_t k_strlen(const char *str) {
@@ -118,9 +131,7 @@ void k_reboot(void) {
 }
 
 void k_shutdown(void) {
-    outw(0xB004, 0x2000); // QEMU older / some pc machines
-    outw(0x604, 0x2000);  // QEMU newer (i440fx/q35)
-    outw(0x4004, 0x3400); // VirtualBox fallback
+    acpi_shutdown();
 }
 
 volatile uint64_t beep_end_tick = 0;
