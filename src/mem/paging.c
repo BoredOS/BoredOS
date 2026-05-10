@@ -39,11 +39,6 @@ static uint64_t alloc_page_table_phys(void) {
 }
 
 void paging_init(void) {
-    uint32_t pat_low, pat_high;
-    asm volatile("rdmsr" : "=a"(pat_low), "=d"(pat_high) : "c"(MSR_WC));
-    pat_low = (pat_low & 0xFFFF00FF) | 0x00000100;
-    asm volatile("wrmsr" :: "a"(pat_low), "d"(pat_high), "c"(MSR_WC));
-
     current_pml4_phys = read_cr3() & PT_ADDR_MASK;
 }
 
