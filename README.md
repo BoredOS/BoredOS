@@ -59,7 +59,7 @@
 | Guide | Description |
 |-------|-------------|
 | [Documentation Index](docs/README.md) | Start here! |
-| [Architecture Overview](docs/architecture/core.md) | Deep dive into the kernel |
+| [Architecture Overview](docs/architecture/README.md) | Deep dive into the kernel |
 | [Building and Running](docs/build/usage.md) | Set up your build environment |
 | [AppDev SDK](docs/appdev/custom_apps.md) | Build your own apps for BoredOS |
 
