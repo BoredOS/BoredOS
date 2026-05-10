@@ -42,6 +42,12 @@ With the introduction of Symmetric Multi-Processing (SMP), the Window Manager (W
 2.  **Per-CPU Rendering State**: To facilitate simultaneous GUI system calls across all CPU cores, the low-level rendering context (`g_render_target` array) is isolated per-CPU using the core ID. This allows completely lockless multi-core pixel rasterization, drastically reducing rendering bottlenecks.
 3.  **Deferred Compositing**: Final screen composition (`wm_paint`) is scheduled to the main kernel idle loop on the Bootstrap Processor (BSP). This enables application cores to continue processing logic seamlessly while the GUI asynchronously handles flipping the physical framebuffer.
 
+## Cursor Rendering
+
+The cursor is drawn by BoredWM rather than by userland. Its shape is a small bitmap mask where transparent cells are skipped, white cells draw the outline, and black cells draw the filled body. The WM expands each source cell by the active cursor scale before writing pixels into the back buffer.
+
+The current scale is exposed to userland through `SYSTEM_GET_CURSOR_SCALE` and can be changed with `SYSTEM_SET_CURSOR_SCALE`. Settings uses those commands for the mouse panel, while the WM clamps the requested scale and forces a redraw so the new cursor size appears immediately.
+
 > [!IMPORTANT]
 > Because application rendering (rasterizing geometry into a window's backbuffer) is SMP-safe and lock-free across cores, GUI performance scales linearly with the number of CPUs active.
 
