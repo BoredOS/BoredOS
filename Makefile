@@ -83,6 +83,21 @@ LIMINE_VERSION = 10.8.2
 LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERSION)
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
+ifeq ($(HOST_OS),Darwin)
+    COPYFILE_DISABLE=1
+    export COPYFILE_DISABLE
+endif
+ifeq ($(HOST_OS),Linux)
+    LD = ld
+endif
+
+# Fix shell script line endings for Unix systems
+ifeq ($(HOST_OS),Linux)
+    $(shell dos2unix tools/gen_userland_note.sh 2>/dev/null || sed -i 's/\r$$//' tools/gen_userland_note.sh)
+endif
+ifeq ($(HOST_OS),Darwin)
+    $(shell dos2unix tools/gen_userland_note.sh 2>/dev/null || sed -i '' 's/\r$$//' tools/gen_userland_note.sh)
+endif
 
 .PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
 
@@ -344,7 +359,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@if [ -f limine.conf ]; then printf "  -> limine.conf"; cp limine.conf $(BUILD_DIR)/initrd/; fi
 	
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar..."
-	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
+	cd $(BUILD_DIR)/initrd && tar --exclude="._*" -cf ../initrd.tar *
 	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar"
 
 $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar limine.conf limine-setup
@@ -445,19 +460,28 @@ run-mac: $(ISO_IMAGE) disk.qcow2
 		-device ahci,id=ahci -drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max
 
-OVMF_CODE := /opt/homebrew/share/qemu/edk2-x86_64-code.fd
-OVMF_VARS_TMPL := /opt/homebrew/share/qemu/edk2-i386-vars.fd
+OVMF_CODE_LINUX := /usr/share/OVMF/OVMF_CODE.fd
+OVMF_CODE_MAC := /opt/homebrew/share/qemu/edk2-x86_64-code.fd
+OVMF_VARS_TMPL_LINUX := /usr/share/OVMF/OVMF_VARS.fd
+OVMF_VARS_TMPL_MAC := /opt/homebrew/share/qemu/edk2-i386-vars.fd
 OVMF_VARS := edk2-vars.fd
 
-ifeq ($(shell test -f $(OVMF_CODE) && echo 1),)
-    OVMF_CODE := /usr/local/share/qemu/edk2-x86_64-code.fd
-    OVMF_VARS_TMPL := /usr/local/share/qemu/edk2-i386-vars.fd
+ifeq ($(HOST_OS),Darwin)
+    ifeq ($(shell test -f $(OVMF_CODE_MAC) && echo 1),)
+        OVMF_CODE_MAC := /usr/local/share/qemu/edk2-x86_64-code.fd
+        OVMF_VARS_TMPL_MAC := /usr/local/share/qemu/edk2-i386-vars.fd
+    endif
+    OVMF_CODE := $(OVMF_CODE_MAC)
+    OVMF_VARS_TMPL := $(OVMF_VARS_TMPL_MAC)
+else
+    OVMF_CODE := $(OVMF_CODE_LINUX)
+    OVMF_VARS_TMPL := $(OVMF_VARS_TMPL_LINUX)
 endif
 
 $(OVMF_VARS):
-	@if [ -f $(OVMF_VARS_TMPL) ]; then \
-		printf "$(YELLOW)[UEFI]$(RESET) Creating local NVRAM vars..."; \
-		cp $(OVMF_VARS_TMPL) $(OVMF_VARS); \
+	@printf "$(YELLOW)[UEFI]$(RESET) Creating local NVRAM vars..."
+	@if [ -f "$(OVMF_VARS_TMPL)" ]; then \
+		cp "$(OVMF_VARS_TMPL)" "$(OVMF_VARS)"; \
 	fi
 
 run-hd-mac: disk.qcow2 $(OVMF_VARS)
@@ -467,8 +491,8 @@ run-hd-mac: disk.qcow2 $(OVMF_VARS)
 		-audiodev coreaudio,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
 		-display cocoa,show-cursor=off \
-		-drive if=pflash,format=raw,readonly=on,file=$(OVMF_CODE) \
-		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-drive if=pflash,format=raw,readonly=on,file="$(OVMF_CODE)" \
+		-drive if=pflash,format=raw,file="$(OVMF_VARS)" \
 		-device ahci,id=ahci \
 		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-drive file=disk.img,format=raw,if=none,id=disk1 -device ide-hd,bus=ahci.1,drive=disk1 \
@@ -502,7 +526,7 @@ run-hd-linux: disk.qcow2 $(OVMF_VARS)
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
 		-display gtk,show-cursor=off \
 		-drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE.fd \
-		-drive if=pflash,format=raw,file=$(OVMF_VARS) \
+		-drive if=pflash,format=raw,file="$(OVMF_VARS)" \
 		-device ahci,id=ahci \
 		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max

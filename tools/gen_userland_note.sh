@@ -1,5 +1,5 @@
 #!/usr/bin/env sh
-set -eu
+set -e
 
 if [ "$#" -ne 4 ]; then
     echo "usage: gen_userland_note.sh <app-name> <source-file> <icon-source-dir> <output-c>" >&2
