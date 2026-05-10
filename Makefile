@@ -76,7 +76,9 @@ NASMFLAGS = -f elf64
 LIMINE_VERSION = 10.8.2
 LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERSION)
 
-.PHONY: all clean run limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
+HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
+
+.PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
 
 all:
 	$(call PRINT_STEP,STARTING BOREDOS BUILD)
@@ -387,6 +389,32 @@ clean:
 disk.qcow2:
 	$(call PRINT_STEP,CREATING 10GB EXPANDABLE DISK IMAGE)
 	qemu-img create -f qcow2 disk.qcow2 10G
+
+run: $(ISO_IMAGE) disk.qcow2
+	$(call PRINT_STEP,DETECTING PLATFORM AND RUNNING BOREDOS)
+	@if [ "$(HOST_OS)" = "Darwin" ]; then \
+		printf "$(GREEN)[RUN]$(RESET) Detected macOS\n"; \
+		$(MAKE) run-mac; \
+	elif [ "$(HOST_OS)" = "Linux" ]; then \
+		printf "$(GREEN)[RUN]$(RESET) Detected Linux\n"; \
+		$(MAKE) run-linux; \
+	else \
+		printf "$(GREEN)[RUN]$(RESET) Detected Windows\n"; \
+		$(MAKE) run-windows; \
+	fi
+
+run-hd: disk.qcow2 $(OVMF_VARS)
+	$(call PRINT_STEP,DETECTING PLATFORM AND BOOTING FROM HARD DRIVE)
+	@if [ "$(HOST_OS)" = "Darwin" ]; then \
+		printf "$(GREEN)[RUN-HD]$(RESET) Detected macOS\n"; \
+		$(MAKE) run-hd-mac; \
+	elif [ "$(HOST_OS)" = "Linux" ]; then \
+		printf "$(GREEN)[RUN-HD]$(RESET) Detected Linux\n"; \
+		$(MAKE) run-hd-linux; \
+	else \
+		printf "$(GREEN)[RUN-HD]$(RESET) Detected Windows\n"; \
+		$(MAKE) run-hd-windows; \
+	fi
 
 run-windows: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON WINDOWS)
