@@ -6,6 +6,8 @@
 #include "platform.h"
 #include <stddef.h>
 
+#define MSR_WC  0x277
+
 static uint64_t current_pml4_phys = 0;
 
 // Get current CR3 value
@@ -37,6 +39,10 @@ static uint64_t alloc_page_table_phys(void) {
 }
 
 void paging_init(void) {
+    uint32_t pat_low, pat_high;
+    asm volatile("rdmsr" : "=a"(pat_low), "=d"(pat_high) : "c"(MSR_WC));
+    pat_low = (pat_low & 0xFFFF00FF) | 0x00000100;
+    asm volatile("wrmsr" :: "a"(pat_low), "d"(pat_high), "c"(MSR_WC));
 
     current_pml4_phys = read_cr3() & PT_ADDR_MASK;
 }

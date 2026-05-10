@@ -1,5 +1,7 @@
 #include "keyboard.h"
 #include "keymap.h"
+#include "../core/io.h"
+#include "../dev/ps2.h"
 
 typedef struct {
     bool e0_prefix;
@@ -88,6 +90,17 @@ static const uint16_t set1_ext[128] = {
 };
 
 void keyboard_init(void) {
+    /*
+        Flush all data in the controller output buffer
+        this can cause the PS/2 Keyboard device to not work
+        on real hardware specifically
+        (even when Legacy USB keyboard Emulation is emulating the PS/2 keyboard)
+        Myles
+    */
+    int limit = 128;
+    while (limit-- > 0 && (inb(PS2_STATUS_PORT) & PS2_STATUS_OUT_FULL))
+        (void)inb(KBD_DATA_PORT);
+
     g_kb.e0_prefix = false;
     g_kb.left_shift = false;
     g_kb.right_shift = false;

@@ -109,6 +109,9 @@ uint8_t mouse_read(void) {
 
 void mouse_init(void) {
     uint8_t status;
+    int limit = 128;
+    while (limit-- > 0 && (inb(PS2_STATUS_PORT) & PS2_STATUS_OUT_FULL))
+        (void)inb(PS2_DATA_PORT);
 
     // Enable Aux Device
     mouse_wait(0);

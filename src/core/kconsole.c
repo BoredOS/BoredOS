@@ -49,7 +49,6 @@ static void kconsole_putc_nolock(char c) {
         cursor_x = 10;
         cursor_y += CHAR_HEIGHT;
         kconsole_scroll();
-        graphics_flip_buffer();
         return;
     }
 
@@ -89,12 +88,9 @@ void kconsole_write(const char *s) {
         spinlock_release_irqrestore(&console_lock, flags);
         return;
     }
-
+    
     while (*s) {
         kconsole_putc_nolock(*s++);
     }
-    
-    // Flip once after a write batch to keep console updates coherent.
-    graphics_flip_buffer();
     spinlock_release_irqrestore(&console_lock, flags);
 }

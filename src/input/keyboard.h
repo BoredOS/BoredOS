@@ -1,6 +1,9 @@
 #ifndef KEYBOARD_H
 #define KEYBOARD_H
 
+#define KBD_DATA_PORT       0x60
+#define KBD_CMD_PORT        0x64
+
 #include <stdint.h>
 #include <stdbool.h>
 #include "keycodes.h"
