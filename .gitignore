@@ -19,3 +19,6 @@ src/userland/bin/
 
 # Others
 .gitignore
+src/userland/cli/third_party/tcc/tcc.elf
+src/userland/sdk/include/*
+limine
