@@ -4,14 +4,12 @@
 #include "idt.h"
 #include "io.h"
 #include "kutils.h"
+#include "../core/panic.h"
 
 extern void serial_write(const char *str);
 
 #include "process.h"
 #include "cmd.h"
-
-
-void kernel_panic(registers_t *regs, const char *error_name);
 
 static const char *exception_messages[] = {
     "Division By Zero",

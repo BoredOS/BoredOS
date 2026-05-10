@@ -40,6 +40,7 @@ C_SOURCES = $(wildcard $(SRC_DIR)/core/*.c) \
             $(wildcard $(SRC_DIR)/sys/*.c) \
             $(wildcard $(SRC_DIR)/mem/*.c) \
             $(wildcard $(SRC_DIR)/dev/*.c) \
+			$(wildcard $(SRC_DIR)/drivers/*.c) \
             $(wildcard $(SRC_DIR)/input/*.c) \
             $(wildcard $(SRC_DIR)/net/*.c) \
             $(wildcard $(SRC_DIR)/net/nic/*.c) \
@@ -55,6 +56,7 @@ OBJ_FILES = $(patsubst $(SRC_DIR)/core/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_D
             $(patsubst $(SRC_DIR)/sys/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/sys/*.c)) \
             $(patsubst $(SRC_DIR)/mem/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/mem/*.c)) \
             $(patsubst $(SRC_DIR)/dev/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/dev/*.c)) \
+			$(patsubst $(SRC_DIR)/drivers/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/drivers/*.c)) \
             $(patsubst $(SRC_DIR)/input/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/input/*.c)) \
             $(patsubst $(SRC_DIR)/net/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/net/*.c)) \
             $(patsubst $(SRC_DIR)/net/nic/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/net/nic/*.c)) \
@@ -66,7 +68,11 @@ OBJ_FILES = $(patsubst $(SRC_DIR)/core/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_D
 CFLAGS = -g -O2 -pipe -Wall -Wextra -std=gnu11 -ffreestanding \
          -fno-stack-protector -fno-stack-check -fno-lto -fPIE \
          -m64 -march=x86-64 -msse -msse2 -mstackrealign -mno-red-zone \
-		 -I$(SRC_DIR) -I$(SRC_DIR)/net/third_party/lwip -I$(SRC_DIR)/core -I$(SRC_DIR)/sys -I$(SRC_DIR)/mem -I$(SRC_DIR)/dev -I$(SRC_DIR)/net -I$(SRC_DIR)/net/nic -I$(SRC_DIR)/fs -I$(SRC_DIR)/wm  -I$(SRC_DIR)/input
+         -I$(SRC_DIR) -I$(SRC_DIR)/net/third_party/lwip -I$(SRC_DIR)/core \
+         -I$(SRC_DIR)/sys -I$(SRC_DIR)/mem -I$(SRC_DIR)/dev \
+         -I$(SRC_DIR)/drivers \
+         -I$(SRC_DIR)/net -I$(SRC_DIR)/net/nic -I$(SRC_DIR)/fs \
+         -I$(SRC_DIR)/wm -I$(SRC_DIR)/input
 
 LDFLAGS = -m elf_x86_64 -nostdlib -static -pie --no-dynamic-linker \
           -z text -z max-page-size=0x1000 -T linker.ld
@@ -131,6 +137,11 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/mem/%.c | $(BUILD_DIR) limine-setup
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/dev/%.c | $(BUILD_DIR) limine-setup
 	@printf "$(YELLOW)[CC]$(RESET)[dev] $< -> $@"
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/drivers/%.c | $(BUILD_DIR) limine-setup
+	@printf "$(YELLOW)[CC]$(RESET)[drivers] $< -> $@"
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 	

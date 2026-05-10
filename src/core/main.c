@@ -26,6 +26,7 @@
 #include "smp.h"
 #include "work_queue.h"
 #include "lapic.h"
+#include "panic.h"
 #include "fs/sysfs.h"
 #include "fs/procfs.h"
 #include "fs/bootfs.h"
@@ -34,6 +35,7 @@
 #include "sys/bootfs_state.h"
 #include "input/keymap.h"
 #include "input/keyboard.h"
+#include "../drivers/acpi.h"
 
 extern void sysfs_init_subsystems(void);
 
@@ -78,6 +80,12 @@ static volatile struct limine_kernel_file_request kernel_file_request = {
     .revision = 0
 };
 
+__attribute__((used, section(".requests")))
+volatile struct limine_rsdp_request acpi_rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST,
+    .revision = 0
+};
+
 __attribute__((used, section(".requests_start")))
 static volatile struct limine_request *const requests_start_marker[] = {
     (struct limine_request *)&framebuffer_request,
@@ -86,6 +94,7 @@ static volatile struct limine_request *const requests_start_marker[] = {
     (struct limine_request *)&smp_request,
     (struct limine_request *)&bootloader_info_request,
     (struct limine_request *)&kernel_file_request,
+    (struct limine_request *)&acpi_rsdp_request,
     NULL
 };
 
@@ -407,9 +416,9 @@ void kmain(void) {
     kconsole_set_color(0xFFFFFF55);
     serial_write("Welcome to BoredOS!\n");
     kconsole_set_color(0xFFFFFFFF);
-
+    acpi_init();
+    
     process_init();
-
     
     fat32_init();
     log_ok("FAT32 ready");
