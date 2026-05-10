@@ -236,6 +236,13 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
     return new_proc;
 }
 
+void process_add_elf_segment(process_t *proc, void *ptr) {
+    if (!proc || !ptr) return;
+    if (proc->elf_segment_count < 4) {
+        proc->elf_segments[proc->elf_segment_count++] = ptr;
+    }
+}
+
 process_t* process_create_elf(const char* filepath, const char* args_str, bool terminal_proc, int tty_id) {
     uint64_t rflags = spinlock_acquire_irqsave(&runqueue_lock);
     process_t *new_proc = NULL;
@@ -255,6 +262,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     
     new_proc->pid = next_pid++;
     new_proc->is_user = true;
+    new_proc->elf_segment_count = 0;
     spinlock_release_irqrestore(&runqueue_lock, rflags);
     
     // 1. Setup Page Table
@@ -294,7 +302,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
 
     // 2. Load ELF executable
     size_t elf_load_size = 0;
-    uint64_t entry_point = elf_load(filepath, new_proc->pml4_phys, &elf_load_size);
+    uint64_t entry_point = elf_load(filepath, new_proc->pml4_phys, &elf_load_size, new_proc);
     if (entry_point == 0) {
         serial_write("[PROC] Failed to load ELF: ");
         serial_write(filepath);
@@ -742,13 +750,21 @@ void process_terminate_with_status(process_t *to_delete, int status) {
     to_delete->exited = true;
     to_delete->exit_status = status;
 
+    // Reclaim all process resources
     if (to_delete->user_stack_alloc) kfree(to_delete->user_stack_alloc);
     if (to_delete->kernel_stack_alloc) kfree(to_delete->kernel_stack_alloc);
     
-    extern void paging_destroy_user_pml4_phys(uint64_t pml4_phys);
+    // Free the process's page table structure
     if (to_delete->pml4_phys && to_delete->is_user) {
         paging_destroy_user_pml4_phys(to_delete->pml4_phys);
     }
+    
+    // Free the physical memory occupied by the executable binary
+    for (uint32_t i = 0; i < to_delete->elf_segment_count; i++) {
+        if (to_delete->elf_segments[i]) kfree(to_delete->elf_segments[i]);
+        to_delete->elf_segments[i] = NULL;
+    }
+    to_delete->elf_segment_count = 0;
     
     to_delete->user_stack_alloc = NULL;
     to_delete->kernel_stack_alloc = NULL;
@@ -926,8 +942,15 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     uint64_t new_pml4 = paging_create_user_pml4_phys();
     if (!new_pml4) return -1;
 
+    // Free old segments
+    for (uint32_t i = 0; i < proc->elf_segment_count; i++) {
+        if (proc->elf_segments[i]) kfree(proc->elf_segments[i]);
+        proc->elf_segments[i] = NULL;
+    }
+    proc->elf_segment_count = 0;
+
     size_t elf_load_size = 0;
-    uint64_t entry_point = elf_load(filepath, new_pml4, &elf_load_size);
+    uint64_t entry_point = elf_load(filepath, new_pml4, &elf_load_size, proc);
     if (entry_point == 0) {
         extern void paging_destroy_user_pml4_phys(uint64_t pml4_phys);
         paging_destroy_user_pml4_phys(new_pml4);

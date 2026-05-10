@@ -90,7 +90,17 @@ typedef struct process {
     uint64_t signal_handlers[MAX_SIGNALS];
     uint64_t signal_action_mask[MAX_SIGNALS];
     int signal_action_flags[MAX_SIGNALS];
+    
+    // Tracking for ELF executable segments to allow full memory reclamation on exit.
+    void *elf_segments[4];
+    uint32_t elf_segment_count;
 } __attribute__((aligned(16))) process_t;
+
+// Loads the ELF executable at 'path' using fat32 into the pagemap given by user_pml4.
+// If 'proc' is provided, the physical segments are tracked for later reclamation.
+// Returns entry point address on success, or 0 on failure.
+struct process;
+uint64_t elf_load(const char *path, uint64_t user_pml4, size_t *out_load_size, struct process *proc);
 
 typedef struct {
     uint32_t pid;
@@ -110,6 +120,9 @@ void process_set_current_for_cpu(uint32_t cpu_id, process_t* p);
 process_t* process_get_current_for_cpu(uint32_t cpu_id);
 uint64_t process_schedule(uint64_t current_rsp);
 uint64_t process_terminate_current(void);
+// Records an allocated ELF segment pointer so it can be freed when the process exits.
+void process_add_elf_segment(struct process *proc, void *ptr);
+
 void process_terminate(process_t *proc);
 void process_terminate_with_status(process_t *proc, int status);
 process_t* process_get_by_pid(uint32_t pid);

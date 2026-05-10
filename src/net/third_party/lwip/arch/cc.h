@@ -7,7 +7,9 @@
 
 #define malloc  kmalloc
 #define free    kfree
-#define calloc(n, s) kmalloc((n) * (s))
+// Correctly map calloc to kcalloc to ensure memory is zero-initialized.
+// Previously this was kmalloc(n*s), which left garbage in lwIP structures.
+#define calloc  kcalloc
 #define realloc krealloc
 
 /* Define generic types used in lwIP */

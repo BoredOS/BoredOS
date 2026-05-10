@@ -10,7 +10,7 @@
 extern void serial_print(const char *s);
 extern void serial_write(const char *str);
 
-uint64_t elf_load(const char *path, uint64_t user_pml4, size_t *out_load_size) {
+uint64_t elf_load(const char *path, uint64_t user_pml4, size_t *out_load_size, struct process *proc) {
     if (out_load_size) *out_load_size = 0;
     FAT32_FileHandle *file = fat32_open(path, "r");
     if (!file || !file->valid) {
@@ -76,15 +76,11 @@ uint64_t elf_load(const char *path, uint64_t user_pml4, size_t *out_load_size) {
 
             // Calculate boundaries for bulk allocation
             uintptr_t align_offset = p_vaddr & 0xFFF;
-            uintptr_t start_page = p_vaddr & ~0xFFFFFFFFFFFFF000ULL; // Wait, mask should be ~0xFFF
+            uintptr_t start_page = p_vaddr & ~0xFFFFFFFFFFFFF000ULL;
             start_page = p_vaddr & ~0xFFFULL;
             size_t total_needed = (p_memsz + align_offset + 4095) & ~4095ULL;
             size_t num_pages = total_needed / 4096;
 
-            // Bulk allocate physical memory for the entire segment
-            // Note: We allocate page by page but map them sequentially.
-            // A better way is to allocate a large contiguous block if possible, 
-            // but our kmalloc_aligned handles arbitrary sizes.
             void* bulk_phys = kmalloc_aligned(total_needed, 4096);
             if (!bulk_phys) {
                 serial_write("[ELF] Error: Out of memory bulk allocating segment\n");
@@ -107,6 +103,14 @@ uint64_t elf_load(const char *path, uint64_t user_pml4, size_t *out_load_size) {
                 uint64_t phys_addr = v2p((uint64_t)bulk_phys + (p * 4096));
                 paging_map_page(user_pml4, vaddr, phys_addr, 0x07);
             }
+            
+            if (proc) {
+                // Track physical segments so they can be freed on process exit.
+                // This resolves the memory leak where process binaries remained in RAM forever.
+                extern void process_add_elf_segment(struct process *proc, void *ptr);
+                process_add_elf_segment(proc, bulk_phys);
+            }
+
             if (out_load_size) *out_load_size += total_needed;
         }
     }
