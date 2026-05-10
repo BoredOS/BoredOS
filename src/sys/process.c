@@ -29,6 +29,34 @@ static spinlock_t runqueue_lock = SPINLOCK_INIT;
 static uint32_t next_cpu_assign = 1; 
 
 static void process_cleanup_inner(process_t *proc);
+static void process_init_signal_state(process_t *proc);
+
+static void process_release_slot(process_t *p) {
+    p->pid = 0xFFFFFFFF;
+    p->parent_pid = 0;
+    p->pgid = 0;
+    p->cpu_affinity = 0xFFFFFFFF;
+    p->exited = false;
+    p->exit_status = 0;
+    p->sleep_until = 0;
+    p->ui_window = NULL;
+    p->is_terminal_proc = false;
+    p->tty_id = -1;
+    p->kill_pending = false;
+    p->used_memory = 0;
+    p->ticks = 0;
+    p->next = NULL;
+    p->kernel_stack = 0;
+    p->kernel_stack_alloc = NULL;
+    p->user_stack_alloc = NULL;
+    p->pml4_phys = 0;
+    for (int i = 0; i < MAX_PROCESS_FDS; i++) {
+        p->fds[i] = NULL;
+        p->fd_kind[i] = PROC_FD_KIND_NONE;
+        p->fd_flags[i] = 0;
+    }
+    process_init_signal_state(p);
+}
 
 static void process_close_fd_inner(process_t *proc, int fd) {
     if (!proc || fd < 0 || fd >= MAX_PROCESS_FDS || !proc->fds[fd]) {
@@ -558,8 +586,11 @@ uint64_t process_schedule(uint64_t current_rsp) {
 
             free_kernel_stack_later[my_cpu] = cur->kernel_stack_alloc;
             cur->kernel_stack_alloc = NULL;
+            if (cur->user_stack_alloc) kfree(cur->user_stack_alloc);
+            cur->user_stack_alloc = NULL;
             free_pml4_later[my_cpu] = cur->pml4_phys;
             cur->pml4_phys = 0;
+            if (cur->parent_pid == 0) process_release_slot(cur);
 
             if (current_process[my_cpu]->is_user && current_process[my_cpu]->kernel_stack) {
                 tss_set_stack_cpu(my_cpu, current_process[my_cpu]->kernel_stack);
@@ -677,6 +708,15 @@ static void process_cleanup_inner(process_t *proc) {
     for (int i = 0; i < MAX_PROCESS_FDS; i++) {
         process_close_fd_inner(proc, i);
     }
+
+    for (int i = 0; i < MAX_PROCESSES; i++) {
+        if (processes[i].parent_pid == proc->pid) {
+            processes[i].parent_pid = 0;
+            if (processes[i].exited && !processes[i].kill_pending) {
+                process_release_slot(&processes[i]);
+            }
+        }
+    }
     
     extern void cmd_process_finished(void);
     cmd_process_finished();
@@ -769,6 +809,7 @@ void process_terminate_with_status(process_t *to_delete, int status) {
     to_delete->user_stack_alloc = NULL;
     to_delete->kernel_stack_alloc = NULL;
     to_delete->pml4_phys = 0;
+    if (to_delete->parent_pid == 0) process_release_slot(to_delete);
 
     spinlock_release_irqrestore(&runqueue_lock, rflags);
 }
@@ -840,8 +881,11 @@ uint64_t process_terminate_current(void) {
 
     free_kernel_stack_later[my_cpu] = to_delete->kernel_stack_alloc;
     to_delete->kernel_stack_alloc = NULL;
+    if (to_delete->user_stack_alloc) kfree(to_delete->user_stack_alloc);
+    to_delete->user_stack_alloc = NULL;
     free_pml4_later[my_cpu] = to_delete->pml4_phys;
     to_delete->pml4_phys = 0;
+    if (to_delete->parent_pid == 0) process_release_slot(to_delete);
     
     uint64_t next_rsp = current_process[my_cpu]->rsp;
     spinlock_release_irqrestore(&runqueue_lock, rflags);
@@ -857,33 +901,14 @@ int process_reap(uint32_t caller_pid, uint32_t pid, int *status_out) {
         }
     }
     if (!p) return -1;
-    if (!p->exited) return -2;
+    if (!p->exited || p->kill_pending) return -2;
     if (p->parent_pid != caller_pid && caller_pid != 0) return -1;
 
     if (status_out) {
         *status_out = p->exit_status;
     }
 
-    p->pid = 0xFFFFFFFF;
-    p->parent_pid = 0;
-    p->pgid = 0;
-    p->cpu_affinity = 0xFFFFFFFF;
-    p->exited = false;
-    p->exit_status = 0;
-    p->sleep_until = 0;
-    p->ui_window = NULL;
-    p->is_terminal_proc = false;
-    p->tty_id = -1;
-    p->kill_pending = false;
-    p->used_memory = 0;
-    p->ticks = 0;
-    p->next = NULL;
-    for (int i = 0; i < MAX_PROCESS_FDS; i++) {
-        p->fds[i] = NULL;
-        p->fd_kind[i] = PROC_FD_KIND_NONE;
-        p->fd_flags[i] = 0;
-    }
-    process_init_signal_state(p);
+    process_release_slot(p);
     return 0;
 }
 
@@ -916,14 +941,15 @@ int process_waitpid(uint32_t caller_pid, int target_pid, int options, int *statu
         }
 
         found_waitable = 1;
-        if (!p->exited) {
+        if (!p->exited || p->kill_pending) {
             continue;
         }
 
+        uint32_t reaped_pid = p->pid;
         if (process_reap(caller_pid, p->pid, status_out) != 0) {
             return -1;
         }
-        return (int)p->pid;
+        return (int)reaped_pid;
     }
 
     if (!found_child || !found_waitable) {

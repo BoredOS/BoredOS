@@ -897,24 +897,10 @@ static void show_matches(const char *prompt_tmpl, const char *line, int len, cha
     redraw_input(prompt_tmpl, line, len, len);
 }
 
-static int pid_exists(int pid) {
-    char path[64];
-    path[0] = 0;
-    strcat(path, "/proc/");
-    char pid_buf[16];
-    itoa(pid, pid_buf);
-    strcat(path, pid_buf);
-    strcat(path, "/status");
-    int fd = sys_open(path, "r");
-    if (fd < 0) return 0;
-    char buf[8];
-    int bytes = sys_read(fd, buf, sizeof(buf));
-    sys_close(fd);
-    return bytes > 0;
-}
-
 static void wait_for_pid(int pid) {
-    while (pid_exists(pid)) {
+    while (1) {
+        int rc = sys_waitpid(pid, NULL, 1);
+        if (rc == pid || rc < 0) break;
         if (g_tty_id >= 0) {
             int fg = sys_tty_get_fg(g_tty_id);
             if (fg != pid) break;
