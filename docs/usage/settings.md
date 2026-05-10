@@ -32,6 +32,11 @@ The Wallpaper panel provides built-in pattern options:
 
 Patterns are rendered procedurally (128×128 pixels) and can be applied as alternatives to image wallpapers.
 
+### Color Settings
+
+Six color presets are available for quick selection, with RGB textbox inputs for custom color values.
+
+
 ## Network
 
 ### Configuration
@@ -81,9 +86,6 @@ Desktop grid settings are stored as `desktop_max_rows_per_col` and `desktop_max_
 - Custom resolution entry via textbox (width and height)
 - Apply button commits the selected resolution change
 
-### Color Settings
-
-Six color presets are available for quick selection, with RGB textbox inputs for custom color values.
 
 ## Keyboard
 
