@@ -94,6 +94,8 @@ Notes:
 | 47 | `SYSTEM_CMD_SET_RESOLUTION` | Set display mode |
 | 49 | `SYSTEM_CMD_SET_KEYBOARD_LAYOUT` | Set active keyboard layout ID |
 | 51 | `SYSTEM_CMD_GET_KEYBOARD_LAYOUT` | Get current keyboard layout ID |
+| 78 | `SYSTEM_GET_CURSOR_SCALE` | Get the current BoredWM cursor scale |
+| 79 | `SYSTEM_SET_CURSOR_SCALE` | Set the BoredWM cursor scale |
 
 ### Time, power, and system state
 
