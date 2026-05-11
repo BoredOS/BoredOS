@@ -22,6 +22,14 @@ static int starts_with(const char *s, const char *prefix) {
     return 1;
 }
 
+static const char *display_label(const disk_info_t *d) {
+    if (!d->label[0]) return "";
+    if (streq(d->label, "Unknown Partition")) return "";
+    if (streq(d->label, "FAT32 Partition")) return "";
+    if (streq(d->label, "EFI System Partition")) return "EFI";
+    return d->label;
+}
+
 static const char *device_name_arg(const char *arg) {
     if (starts_with(arg, "/dev/")) return arg + 5;
     return arg;
@@ -96,10 +104,11 @@ static void print_tree_device(const disk_info_t *d, const char *branch) {
     format_size(disk_size_bytes(d), size, sizeof(size), 0);
 
     if (d->is_partition) {
+        const char *label = display_label(d);
         if (branch[0]) printf("%s %-8s %8s  %s", branch, d->devname, size, type);
         else printf("/dev/%-8s %8s  %s", d->devname, size, type);
         if (d->is_fat32) printf("  FAT32");
-        if (d->label[0]) printf("  %s", d->label);
+        if (label[0]) printf("  %s", label);
         if (d->is_esp) printf("  [ESP]");
         printf("\n");
     } else {
@@ -127,8 +136,9 @@ static void print_raw_device(const disk_info_t *d) {
     printf("/dev/%s %s %s", d->devname, size, d->is_partition ? "part" : "disk");
 
     if (d->is_partition) {
+        const char *label = display_label(d);
         if (d->is_fat32) printf(" FAT32");
-        if (d->label[0]) printf(" %s", d->label);
+        if (label[0]) printf(" %s", label);
         if (d->is_esp) printf(" ESP");
     }
 
@@ -177,7 +187,7 @@ static void json_device_fields(const disk_info_t *d) {
     printf(",\"fstype\":");
     json_string(d->is_fat32 ? "FAT32" : "");
     printf(",\"label\":");
-    json_string(d->label);
+    json_string(display_label(d));
     printf(",\"flags\":[");
     if (d->is_esp) json_string("ESP");
     printf("]");
