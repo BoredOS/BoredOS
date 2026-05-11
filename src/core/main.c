@@ -36,9 +36,6 @@
 #include "input/keymap.h"
 #include "input/keyboard.h"
 #include "../drivers/acpi.h"
-#include "../usb/usb.h"
-#include "../usb/hid.h"
-#include "../usb/logitech_b110.h"
 
 extern void sysfs_init_subsystems(void);
 
@@ -501,10 +498,6 @@ void kmain(void) {
     asm("cli");
     ps2_init();
     asm("sti");
-
-    usb_init();
-    usb_enumerate_devices();
-    usb_hid_init();
 
     keymap_init();
     serial_write("[INIT] Keymap initialized");

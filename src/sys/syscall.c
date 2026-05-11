@@ -2388,6 +2388,85 @@ static uint64_t sys_cmd_disk_replace_kernel(const syscall_args_t *args) {
     return 0;
 }
 
+static uint64_t sys_cmd_pci_read_config(const syscall_args_t *args) {
+    uint8_t bus = (uint8_t)args->arg2;
+    uint8_t device = (uint8_t)args->arg3;
+    uint8_t function = (uint8_t)args->arg4;
+    uint8_t offset = (uint8_t)args->arg5;
+    extern uint32_t pci_read_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset);
+    return pci_read_config(bus, device, function, offset);
+}
+
+static uint64_t sys_cmd_pci_write_config(const syscall_args_t *args) {
+    uint8_t bus = (uint8_t)args->arg2;
+    uint8_t device = (uint8_t)args->arg3;
+    uint8_t function = (uint8_t)args->arg4;
+    uint8_t offset = (uint8_t)args->arg5;
+    uint32_t value = 0;
+    extern void pci_write_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset, uint32_t value);
+    pci_write_config(bus, device, function, offset, value);
+    return 0;
+}
+
+static uint64_t sys_cmd_io_inb(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    return inb(port);
+}
+
+static uint64_t sys_cmd_io_outb(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    uint8_t value = (uint8_t)args->arg3;
+    outb(port, value);
+    return 0;
+}
+
+static uint64_t sys_cmd_io_inw(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    return inw(port);
+}
+
+static uint64_t sys_cmd_io_outw(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    uint16_t value = (uint16_t)args->arg3;
+    outw(port, value);
+    return 0;
+}
+
+static uint64_t sys_cmd_io_inl(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    return inl(port);
+}
+
+static uint64_t sys_cmd_io_outl(const syscall_args_t *args) {
+    uint16_t port = (uint16_t)args->arg2;
+    uint32_t value = (uint32_t)args->arg3;
+    outl(port, value);
+    return 0;
+}
+
+static uint64_t sys_cmd_mem_map_phys(const syscall_args_t *args) {
+    uint64_t phys_addr = args->arg2;
+    uint64_t size = args->arg3;
+    extern uint64_t p2v(uint64_t phys);
+    (void)size;
+    return p2v(phys_addr);
+}
+
+static uint64_t sys_cmd_mem_unmap(const syscall_args_t *args) {
+    (void)args;
+    return 0;
+}
+
+static uint64_t sys_cmd_wm_handle_mouse(const syscall_args_t *args) {
+    int dx = (int)args->arg2;
+    int dy = (int)args->arg3;
+    uint8_t buttons = (uint8_t)args->arg4;
+    int wheel = (int)args->arg5;
+    extern void wm_handle_mouse(int dx, int dy, uint8_t buttons, int wheel);
+    wm_handle_mouse(dx, dy, buttons, wheel);
+    return 0;
+}
+
 #define SYS_CMD_TABLE_SIZE 110
 static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_SET_BG_COLOR]        = sys_cmd_set_bg_color,
@@ -2467,6 +2546,17 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_DISK_RESCAN]         = sys_cmd_disk_rescan,
     [SYSTEM_CMD_DISK_REPLACE_KERNEL] = sys_cmd_disk_replace_kernel,
     [SYSTEM_CMD_DISK_SYNC]           = sys_cmd_disk_sync,
+    [SYSTEM_CMD_PCI_READ_CONFIG]     = sys_cmd_pci_read_config,
+    [SYSTEM_CMD_PCI_WRITE_CONFIG]    = sys_cmd_pci_write_config,
+    [SYSTEM_CMD_IO_INB]              = sys_cmd_io_inb,
+    [SYSTEM_CMD_IO_OUTB]             = sys_cmd_io_outb,
+    [SYSTEM_CMD_IO_INW]              = sys_cmd_io_inw,
+    [SYSTEM_CMD_IO_OUTW]             = sys_cmd_io_outw,
+    [SYSTEM_CMD_IO_INL]              = sys_cmd_io_inl,
+    [SYSTEM_CMD_IO_OUTL]             = sys_cmd_io_outl,
+    [SYSTEM_CMD_MEM_MAP_PHYS]       = sys_cmd_mem_map_phys,
+    [SYSTEM_CMD_MEM_UNMAP]          = sys_cmd_mem_unmap,
+    [SYSTEM_CMD_WM_HANDLE_MOUSE]     = sys_cmd_wm_handle_mouse,
 };
 
 static uint64_t handle_sys_write(const syscall_args_t *args) {

@@ -3,23 +3,16 @@
 // This header needs to maintain in any file it has in it, as per the GPL license terms.
 #include "usb.h"
 #include "uhci.h"
-#include "../dev/pci.h"
-#include "../core/io.h"
-#include "../mem/memory_manager.h"
+#include "syscall.h"
 #include <string.h>
-
-extern void serial_write(const char *str);
-extern void serial_write_hex(uint64_t n);
+#include <stdio.h>
+#include <stdlib.h>
 
 static usb_hc_t usb_controllers[8];
 static int usb_controller_count = 0;
 static usb_device_t usb_devices[USB_MAX_DEVICES];
 static int usb_device_count = 0;
 static uint8_t device_address_counter = 1;
-
-extern uint32_t pci_read_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset);
-extern void pci_write_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset, uint32_t value);
-extern int pci_find_device_by_class(uint8_t class_code, uint8_t subclass, pci_device_t *dev);
 
 usb_hc_type_t usb_detect_controller(usb_hc_t *hc) {
     uint32_t class_code = pci_read_config(hc->bus, hc->device, hc->function, 0x08) >> 24;
@@ -36,7 +29,7 @@ usb_hc_type_t usb_detect_controller(usb_hc_t *hc) {
 }
 
 void usb_init(void) {
-    serial_write("[USB] Initializing USB stack...\n");
+    printf("[USB] Initializing USB stack...\n");
     
     int idx = 0;
     
@@ -65,13 +58,11 @@ void usb_init(void) {
                     else if (type == USB_HC_EHCI) type_str = "EHCI";
                     else if (type == USB_HC_XHCI) type_str = "XHCI";
                     
-                    serial_write("[USB] Found controller: ");
-                    serial_write(type_str);
-                    serial_write("\n");
+                    printf("[USB] Found controller: %s\n", type_str);
                     
                     if (type == USB_HC_UHCI) {
                         if (uhci_init(&usb_controllers[idx])) {
-                            serial_write("[USB] UHCI initialized\n");
+                            printf("[USB] UHCI initialized\n");
                         }
                     }
                     
@@ -82,9 +73,7 @@ void usb_init(void) {
     }
     
     usb_controller_count = idx;
-    serial_write("[USB] Total controllers found: ");
-    serial_write_hex(usb_controller_count);
-    serial_write("\n");
+    printf("[USB] Total controllers found: %d\n", usb_controller_count);
 }
 
 bool usb_enumerate_device(usb_device_t *dev) {
@@ -151,10 +140,10 @@ int usb_interrupt_in(usb_device_t *dev, uint8_t endpoint, void *data, uint16_t l
 }
 
 void usb_enumerate_devices(void) {
-    serial_write("[USB] Starting device enumeration\n");
+    printf("[USB] Starting device enumeration\n");
     
     if (usb_controller_count == 0) {
-        serial_write("[USB] No controllers available\n");
+        printf("[USB] No controllers available\n");
         return;
     }
     
@@ -163,11 +152,7 @@ void usb_enumerate_devices(void) {
         memset(&dev, 0, sizeof(usb_device_t));
         
         if (usb_enumerate_device(&dev)) {
-            serial_write("[USB] Device enumerated: VID=");
-            serial_write_hex(dev.vendor_id);
-            serial_write(" PID=");
-            serial_write_hex(dev.product_id);
-            serial_write("\n");
+            printf("[USB] Device enumerated: VID=%04X PID=%04X\n", dev.vendor_id, dev.product_id);
         }
     }
 }

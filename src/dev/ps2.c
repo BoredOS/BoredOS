@@ -10,7 +10,6 @@
 #include <stdbool.h>
 #include "input/keyboard.h"
 #include "input/keymap.h"
-#include "../usb/logitech_b110.h"
 
 extern void serial_print(const char *s);
 extern void serial_print_hex(uint64_t n);
@@ -152,7 +151,6 @@ uint64_t mouse_handler(registers_t *regs) {
     if (!(status & 0x20)) {
         outb(0x20, 0x20);
         outb(0xA0, 0x20);
-        logitech_b110_poll();
         return (uint64_t)regs;
     }
 
@@ -188,7 +186,6 @@ uint64_t mouse_handler(registers_t *regs) {
 
     outb(0x20, 0x20);
     outb(0xA0, 0x20);
-    logitech_b110_poll();
     return (uint64_t)regs;
 }
 

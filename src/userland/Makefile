@@ -13,7 +13,7 @@ APP_METADATA_TOOL = ../../tools/gen_userland_note.sh
 APP_ICON_SOURCE_DIR = ../images/icons/colloid
 APP_METADATA_SOURCE_DOOM = games/doom/doomgeneric_boredos.c
 APP_METADATA_SOURCE_LUA = cli/third_party/lua/boredos_onelua.c
-APP_SOURCE_DIRS = . cli gui sys games net cli/third_party
+APP_SOURCE_DIRS = . cli gui sys games net cli/third_party usb
 
 define app_source_for
 $(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_METADATA_SOURCE_LUA),$(if $(filter tcc,$1),cli/third_party/tcc/tcc.c,$(firstword $(foreach d,$(APP_SOURCE_DIRS),$(wildcard $(d)/$1.c))))))
@@ -22,11 +22,11 @@ endef
 LIBC_SOURCES = $(wildcard libc/*.c)
 LIBC_OBJS = $(patsubst libc/%.c, $(BIN_DIR)/%.o, $(LIBC_SOURCES)) $(BIN_DIR)/crt0.o $(BIN_DIR)/libwidget.o $(BIN_DIR)/stb_image.o
 
-VPATH = cli gui sys games libc net cli/third_party
-vpath %.c cli gui sys games libc net cli/third_party
+VPATH = cli gui sys games libc net cli/third_party usb
+vpath %.c cli gui sys games libc net cli/third_party usb
 
-APP_SOURCES_FULL = $(wildcard cli/*.c gui/*.c sys/*.c games/*.c *.c net/*.c cli/third_party/*.c)
-APP_SOURCES = $(filter-out stb_image.c, $(APP_SOURCES_FULL))
+APP_SOURCES_FULL = $(wildcard cli/*.c gui/*.c sys/*.c games/*.c *.c net/*.c cli/third_party/*.c usb/*.c)
+APP_SOURCES = $(filter-out stb_image.c usb_driver_main.c usb.c uhci.c hid.c logitech_b110.c driver.c syscall.h, $(APP_SOURCES_FULL))
 APP_ELFS = $(patsubst %.c, $(BIN_DIR)/%.elf, $(notdir $(APP_SOURCES)))
 APP_NAMES = $(sort $(basename $(notdir $(APP_SOURCES))) doom lua)
 APP_NOTE_CSOURCES = $(patsubst %, $(BIN_DIR)/%.note.c, $(APP_NAMES))
@@ -35,10 +35,13 @@ APP_NOTE_OBJS = $(patsubst %, $(BIN_DIR)/%.note.o, $(APP_NAMES))
 DOOM_SOURCES = $(wildcard games/doom/*.c)
 DOOM_OBJS = $(patsubst games/doom/%.c, $(BIN_DIR)/%.o, $(DOOM_SOURCES))
 
+USB_SOURCES = $(wildcard usb/*.c)
+USB_OBJS = $(patsubst usb/%.c, $(BIN_DIR)/%.o, $(USB_SOURCES))
+
 LUA_DIR = cli/third_party/lua
 LUA_CFLAGS = -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -isystem $(LUA_DIR)/sysinclude -I. -Ilibc -I$(LUA_DIR) -DLUA_USE_C89 -Wno-conversion -Wno-sign-conversion -Wno-double-promotion -Wno-unused-parameter -Wno-missing-declarations -Wno-shadow -Wno-undef -Wno-redundant-decls -Wno-old-style-definition -Wno-missing-prototypes -Wno-implicit-fallthrough -Wno-type-limits
 
-all: $(BIN_DIR) $(APP_ELFS) $(BIN_DIR)/doom.elf $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o
+all: $(BIN_DIR) $(APP_ELFS) $(BIN_DIR)/doom.elf $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/usb_driver_main.elf $(BIN_DIR)/empty.o
 
 $(BIN_DIR):
 	mkdir -p $(BIN_DIR)
@@ -92,7 +95,13 @@ $(BIN_DIR)/screenshot.elf: $(LIBC_OBJS) $(BIN_DIR)/screenshot.o $(BIN_DIR)/scree
 $(BIN_DIR)/%.o: games/doom/%.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -Wno-error -DBOREDOS -Igames/doom -c $< -o $@
 
+$(BIN_DIR)/%.o: usb/%.c | $(BIN_DIR)
+	$(CC) $(CFLAGS) -Iusb -c $< -o $@
+
 $(BIN_DIR)/doom.elf: $(LIBC_OBJS) $(DOOM_OBJS) $(BIN_DIR)/doom.note.o
+	$(LD) $(LDFLAGS) $^ -o $@
+
+$(BIN_DIR)/usb_driver_main.elf: $(LIBC_OBJS) $(USB_OBJS)
 	$(LD) $(LDFLAGS) $^ -o $@
 
 $(BIN_DIR)/%.elf: $(LIBC_OBJS) $(BIN_DIR)/%.o $(BIN_DIR)/%.note.o

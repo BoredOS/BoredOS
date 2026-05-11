@@ -3,10 +3,8 @@
 // This header needs to maintain in this file it has in it, as per the GPL license terms.
 #include "hid.h"
 #include "logitech_b110.h"
-#include "../core/io.h"
 #include <string.h>
-
-extern void serial_write(const char *str);
+#include <stdio.h>
 
 static usb_device_t hid_mouse_devices[8];
 static int hid_mouse_count = 0;
@@ -85,7 +83,7 @@ bool hid_init_mouse(usb_device_t *dev) {
     hid_mouse_devices[hid_mouse_count++] = *dev;
     dev->initialized = true;
     
-    serial_write("[HID] Mouse initialized\n");
+    printf("[HID] Mouse initialized\n");
     return true;
 }
 
@@ -106,7 +104,7 @@ int hid_mouse_get_report(usb_device_t *dev, hid_mouse_report_t *report) {
 }
 
 void usb_hid_init(void) {
-    serial_write("[HID] Initializing HID subsystem\n");
+    printf("[HID] Initializing HID subsystem\n");
     
     int device_count = usb_get_device_count();
     
@@ -114,10 +112,10 @@ void usb_hid_init(void) {
         usb_device_t *dev = usb_get_device(i);
         
         if (dev && dev->device_class == USB_CLASS_HID) {
-            serial_write("[HID] Found HID device\n");
+            printf("[HID] Found HID device\n");
             
             if (logitech_b110_probe(dev)) {
-                serial_write("[HID] Initializing LT-B110\n");
+                printf("[HID] Initializing Logitech B110\n");
                 logitech_b110_init(dev);
             }
         }

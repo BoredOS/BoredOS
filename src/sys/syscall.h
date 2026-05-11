@@ -123,6 +123,17 @@ typedef struct {
 #define SYSTEM_CMD_SIGPENDING 75
 #define SYSTEM_CMD_GET_ELF_METADATA 76
 #define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
+#define SYSTEM_CMD_PCI_READ_CONFIG 78
+#define SYSTEM_CMD_PCI_WRITE_CONFIG 79
+#define SYSTEM_CMD_IO_INB 80
+#define SYSTEM_CMD_IO_OUTB 81
+#define SYSTEM_CMD_IO_INW 82
+#define SYSTEM_CMD_IO_OUTW 83
+#define SYSTEM_CMD_IO_INL 84
+#define SYSTEM_CMD_IO_OUTL 85
+#define SYSTEM_CMD_MEM_MAP_PHYS 86
+#define SYSTEM_CMD_MEM_UNMAP 87
+#define SYSTEM_CMD_WM_HANDLE_MOUSE 88
 
 void syscall_init(void);
 uint64_t syscall_handler_c(registers_t *regs);
