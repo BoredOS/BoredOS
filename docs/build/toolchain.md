@@ -20,6 +20,11 @@ To build BoredOS, you need the following tools:
 4.  **QEMU** (Optional but highly recommended for testing):
     -   `qemu-system-x86_64` is used to virtualize the OS for testing or to mess around.
 
+## WSL2 Unconfigured support
+BoredOS supports WSL2 but unconfigured for x86-64-elf-ld, to use it you can run "make unsafe" but you need to install the following packages:
+sudo apt install build-essential nasm xorriso qemu-system-x86 gcc-x86-64-linux-gnu
+This is implemented as because downloading that package isn't as easy as doing "sudo apt install x86_64_elf or sum"" 
+It should also properly build TCC files
 ## Building the Cross-Compiler on Linux
 
 ### Availability Issue

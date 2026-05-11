@@ -15,20 +15,26 @@ static void vga_write_register(uint16_t index, uint16_t data) {
 }
 
 bool vga_set_mode(uint16_t width, uint16_t height, uint16_t bpp, void **out_framebuffer) {
-    // 1. Locate the BGA PCI device to get the physical framebuffer address
+    if (width < 320 || height < 200 || width > 4096 || height > 4096) {
+        serial_write("[VGA] Error: Invalid resolution requested.\n");
+        return false;
+    }
+    
+    if (bpp != 8 && bpp != 16 && bpp != 24 && bpp != 32) {
+        serial_write("[VGA] Error: Invalid bpp requested.\n");
+        return false;
+    }
+
     pci_device_t bga_dev;
-    // Standard VGA compatible controller is Class 0x03, Subclass 0x00
     if (!pci_find_device_by_class(0x03, 0x00, &bga_dev)) {
         serial_write("[VGA] Error: VGA compatible controller not found via PCI!\n");
         return false;
     }
 
-    // Read BAR0 (offset 0x10)
     uint32_t bar0 = pci_read_config(bga_dev.bus, bga_dev.device, bga_dev.function, 0x10);
-    // physical address is bar0 with the lower 4 bits masked out
     uint32_t phys_base = bar0 & 0xFFFFFFF0;
     
-    if (phys_base == 0) {
+    if (phys_base == 0 || phys_base == 0xFFFFFFF0) {
         serial_write("[VGA] Error: Invalid BAR0 physical base.\n");
         return false;
     }
@@ -37,19 +43,39 @@ bool vga_set_mode(uint16_t width, uint16_t height, uint16_t bpp, void **out_fram
     serial_write_num(phys_base);
     serial_write("\n");
 
-    // Map physical to virtual using p2v
     void *vram_ptr = (void *)p2v(phys_base);
 
-    // 2. Disable BGA extensions first
-    vga_write_register(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    uint16_t bga_id = inw(VBE_DISPI_IOPORT_INDEX);
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ID);
+    uint16_t id = inw(VBE_DISPI_IOPORT_DATA);
+    outw(VBE_DISPI_IOPORT_INDEX, bga_id);
+    
+    if (id < 0xB0C0) {
+        serial_write("[VGA] Warning: BGA not supported or old version detected.\n");
+    }
 
-    // 3. Set resolution and BPP
+    vga_write_register(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_DISABLED);
+    
+    for (volatile int i = 0; i < 10000; i++);
+
     vga_write_register(VBE_DISPI_INDEX_XRES, width);
     vga_write_register(VBE_DISPI_INDEX_YRES, height);
     vga_write_register(VBE_DISPI_INDEX_BPP, bpp);
 
-    // 4. Re-enable BGA and Linear Framebuffer
+    for (volatile int i = 0; i < 10000; i++);
+
     vga_write_register(VBE_DISPI_INDEX_ENABLE, VBE_DISPI_ENABLED | VBE_DISPI_LFB_ENABLED);
+
+    for (volatile int i = 0; i < 10000; i++);
+
+    uint16_t enable_reg = 0;
+    outw(VBE_DISPI_IOPORT_INDEX, VBE_DISPI_INDEX_ENABLE);
+    enable_reg = inw(VBE_DISPI_IOPORT_DATA);
+    
+    if (!(enable_reg & VBE_DISPI_ENABLED)) {
+        serial_write("[VGA] Error: Failed to enable BGA mode.\n");
+        return false;
+    }
 
     if (out_framebuffer) {
         *out_framebuffer = vram_ptr;

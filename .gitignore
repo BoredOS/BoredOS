@@ -4,6 +4,7 @@ iso_root/
 boredos.iso
 disk.img
 disk.qcow2
+run.ps1
 edk2-vars.fd
 qemu-debug.log
 boredos.dump

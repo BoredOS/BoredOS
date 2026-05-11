@@ -108,9 +108,9 @@ $(BIN_DIR)/lua.elf: $(LIBC_OBJS) $(BIN_DIR)/lua_onelua.o $(BIN_DIR)/lua.note.o
 # TCC - Tiny C Compiler
 TCC_DIR = cli/third_party/tcc
 $(BIN_DIR)/tcc.elf: $(LIBC_OBJS) $(BIN_DIR)/tcc.note.o sdk $(TCC_DIR)/tcc.c $(TCC_DIR)/config.h $(TCC_DIR)/tcc.h
-	cd $(TCC_DIR) && x86_64-elf-gcc -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie -DONE_SOURCE=1 -DTARGETOS_BoredOS=1 -I. -I../../../sdk/include -Ttext=0x40000000 tcc.c -o tcc.elf ../../../sdk/lib/libboredos.a
+	cd $(TCC_DIR) && $(TCC_CC) -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie -DONE_SOURCE=1 -DTARGETOS_BoredOS=1 -I. -I../../../sdk/include -Ttext=0x40000000 tcc.c -o tcc.elf ../../../sdk/lib/libboredos.a
 	cp $(TCC_DIR)/tcc.elf $(BIN_DIR)/tcc.elf
-	cd $(TCC_DIR) && sh build_libtcc1.sh
+	cd $(TCC_DIR) && CC=$(TCC_CC) AR=$(TCC_AR) sh build_libtcc1.sh && ls -la libtcc1.a
 
 # SDK target
 SDK_DIR = sdk
@@ -118,10 +118,10 @@ sdk: $(LIBC_OBJS) $(BIN_DIR)/libui.o
 	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include/sys
 	cp libc/*.h $(SDK_DIR)/include/
 	cp libc/sys/*.h $(SDK_DIR)/include/sys/
-	x86_64-elf-ar rcs $(SDK_DIR)/lib/libboredos.a $(LIBC_OBJS)
+	$(AR) rcs $(SDK_DIR)/lib/libboredos.a $(LIBC_OBJS)
 	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libc.a
 	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libm.a
-	x86_64-elf-ar rcs $(SDK_DIR)/lib/libui.a $(BIN_DIR)/libui.o
+	$(AR) rcs $(SDK_DIR)/lib/libui.a $(BIN_DIR)/libui.o
 
 clean:
 	rm -rf $(BIN_DIR) $(SDK_DIR)

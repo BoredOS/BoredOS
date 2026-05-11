@@ -46,6 +46,7 @@ C_SOURCES = $(wildcard $(SRC_DIR)/core/*.c) \
             $(wildcard $(SRC_DIR)/net/nic/*.c) \
             $(wildcard $(SRC_DIR)/fs/*.c) \
             $(wildcard $(SRC_DIR)/wm/*.c) \
+            $(wildcard $(SRC_DIR)/usb/*.c) \
 			$(wildcard $(SRC_DIR)/net/third_party/lwip/core/*.c) \
 			$(wildcard $(SRC_DIR)/net/third_party/lwip/core/ipv4/*.c) \
 			$(SRC_DIR)/net/third_party/lwip/netif/ethernet.c \
@@ -62,6 +63,7 @@ OBJ_FILES = $(patsubst $(SRC_DIR)/core/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_D
             $(patsubst $(SRC_DIR)/net/nic/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/net/nic/*.c)) \
             $(patsubst $(SRC_DIR)/fs/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/fs/*.c)) \
             $(patsubst $(SRC_DIR)/wm/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/wm/*.c)) \
+            $(patsubst $(SRC_DIR)/usb/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/usb/*.c)) \
 			$(patsubst $(SRC_DIR)/net/third_party/lwip/%.c, $(BUILD_DIR)/lwip/%.o, $(filter $(SRC_DIR)/net/third_party/lwip/%.c, $(C_SOURCES))) \
             $(patsubst $(SRC_DIR)/arch/%.asm, $(BUILD_DIR)/%.o, $(ASM_SOURCES))
 
@@ -72,7 +74,7 @@ CFLAGS = -g -O2 -pipe -Wall -Wextra -std=gnu11 -ffreestanding \
          -I$(SRC_DIR)/sys -I$(SRC_DIR)/mem -I$(SRC_DIR)/dev \
          -I$(SRC_DIR)/drivers \
          -I$(SRC_DIR)/net -I$(SRC_DIR)/net/nic -I$(SRC_DIR)/fs \
-         -I$(SRC_DIR)/wm -I$(SRC_DIR)/input
+         -I$(SRC_DIR)/wm -I$(SRC_DIR)/input -I$(SRC_DIR)/usb
 
 LDFLAGS = -m elf_x86_64 -nostdlib -static -pie --no-dynamic-linker \
           -z text -z max-page-size=0x1000 -T linker.ld
@@ -84,11 +86,20 @@ LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERS
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
 
+<<<<<<< HEAD
 .PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
+=======
+.PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux unsafe
+>>>>>>> 335d1c8 (Add new VGA fix and USB system)
 
 all:
 	$(call PRINT_STEP,STARTING BOREDOS BUILD)
 	$(MAKE) $(ISO_IMAGE)
+	$(call PRINT_STEP,BUILD COMPLETE)
+
+unsafe:
+	$(call PRINT_STEP,STARTING BOREDOS BUILD (UNSAFE MODE))
+	$(MAKE) $(ISO_IMAGE) LD=ld AR=ar CC=gcc TCC_CC=gcc TCC_AR=ar
 	$(call PRINT_STEP,BUILD COMPLETE)
 
 $(BUILD_DIR):
@@ -167,6 +178,16 @@ $(BUILD_DIR)/%.o: $(SRC_DIR)/fs/%.c | $(BUILD_DIR) limine-setup
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/wm/%.c | $(BUILD_DIR) limine-setup
 	@printf "$(YELLOW)[CC]$(RESET)[wm] $< -> $@"
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/%.o: $(SRC_DIR)/usb/%.c | $(BUILD_DIR) limine-setup
+	@printf "$(YELLOW)[CC]$(RESET)[usb] $< -> $@"
+	mkdir -p $(dir $@)
+	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BUILD_DIR)/uhci.o: $(SRC_DIR)/usb/uhci.c | $(BUILD_DIR) limine-setup
+	@printf "$(YELLOW)[CC]$(RESET)[usb] $< -> $@"
 	mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
