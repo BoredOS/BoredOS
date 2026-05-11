@@ -108,6 +108,7 @@ static int copy_tree(const char *src_dir, const char *dst_dir) {
 
 static void print_usage(void) {
     printf("boredos_install [OPTIONS] /dev/DEVICE\n");
+    printf("  --list-disks, -l    Show all available disks and exit\n");
     printf("  --uefi              UEFI (GPT + ESP) [default]\n");
     printf("  --bios              BIOS/MBR\n");
     printf("  --no-partition      Skip fdisk\n");
@@ -141,6 +142,21 @@ static void serial_printf(const char *fmt, ...) {
     serial_write_user(buf);
 }
 
+static void list_disks(void) {
+    int n = sys_disk_get_count();
+    
+    printf("\nAvailable disks:\n");
+    for (int i = 0; i < n; i++) {
+        disk_info_t d;
+        if (sys_disk_get_info(i, &d) != 0) continue;
+        if (d.is_partition) continue;
+        
+        uint32_t mb = d.total_sectors / 2048;
+        printf("  /dev/%s - %u MB\n", d.devname, mb);
+    }
+    printf("\n");
+}
+
 int main(int argc, char **argv) {
     int is_uefi       = 1;
     int do_partition  = 1;
@@ -154,7 +170,11 @@ int main(int argc, char **argv) {
     const char *root_dev_arg = NULL;
 
     for (int i = 1; i < argc; i++) {
-        if      (sc_strcmp(argv[i], "--uefi") == 0)         is_uefi = 1;
+        if (sc_strcmp(argv[i], "--list-disks") == 0 || sc_strcmp(argv[i], "-l") == 0) {
+            list_disks();
+            return 0;
+        }
+        else if (sc_strcmp(argv[i], "--uefi") == 0)         is_uefi = 1;
         else if (sc_strcmp(argv[i], "--bios") == 0)         is_uefi = 0;
         else if (sc_strcmp(argv[i], "--no-partition") == 0) do_partition = 0;
         else if (sc_strcmp(argv[i], "--no-format") == 0)    do_format = 0;
