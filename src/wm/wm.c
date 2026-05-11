@@ -100,7 +100,7 @@ static void* rootfs_get_mount_private(const char *mount_path) {
     int mc = vfs_get_mount_count();
     for (int i = 0; i < mc; i++) {
         vfs_mount_t *m = vfs_get_mount(i);
-        if (m && m->active && k_strcmp(m->path, mount_path) == 0) {
+        if (m && m->active && strcmp(m->path, mount_path) == 0) {
             return m->fs_private;
         }
     }
@@ -152,7 +152,7 @@ static void rootfs_write_marker(void) {
     FAT32_FileHandle *fh = fat32_open(ROOT_MARKER_PATH, "w");
     if (!fh || !fh->valid) return;
     const char *msg = "boredos root\n";
-    fat32_write(fh, msg, (uint32_t)k_strlen(msg));
+    fat32_write(fh, msg, (uint32_t)strlen(msg));
     fat32_close(fh);
 }
 
@@ -887,8 +887,8 @@ static bool dock_icon_decode_into_entry(dock_icon_entry_t *entry) {
     if (!entry || !entry->filename) return false;
 
     char full_path[192];
-    k_strcpy(full_path, DOCK_ICON_BASE_PATH);
-    k_strcpy(full_path + k_strlen(full_path), entry->filename);
+    strcpy(full_path, DOCK_ICON_BASE_PATH);
+    strcpy(full_path + strlen(full_path), entry->filename);
 
     FAT32_FileHandle *fh = fat32_open(full_path, "r");
     if (!fh) return false;
@@ -929,7 +929,7 @@ static bool dock_icon_decode_into_entry(dock_icon_entry_t *entry) {
     int img_max_x = img_w - 1;
     int img_max_y = img_h - 1;
 
-    k_memset(entry->pixels, 0, sizeof(entry->pixels));
+    memset(entry->pixels, 0, sizeof(entry->pixels));
     for (int ty = 0; ty < DOCK_ICON_SIZE; ty++) {
         for (int tx = 0; tx < DOCK_ICON_SIZE; tx++) {
             int sx = (DOCK_ICON_SIZE > 1) ? (tx * img_max_x) / (DOCK_ICON_SIZE - 1) : 0;
@@ -1150,7 +1150,7 @@ static void dock_label_from_target(const char *target, char *out_label, int out_
     }
 
     dock_copy_text(out_label, out_size, name);
-    int len = (int)k_strlen(out_label);
+    int len = (int)strlen(out_label);
     if (len > 4 && str_ends_with(out_label, ".elf")) {
         out_label[len - 4] = 0;
     } else if (len > 9 && str_ends_with(out_label, ".shortcut")) {
@@ -1280,14 +1280,14 @@ static void dock_save_config(void) {
     if (!fh) return;
 
     const char *header = "v1\n";
-    fat32_write(fh, header, (int)k_strlen(header));
+    fat32_write(fh, header, (int)strlen(header));
 
     for (int i = 0; i < dock_item_count; i++) {
         dock_write_int(fh, dock_items[i].icon_slot);
         fat32_write(fh, "|", 1);
-        fat32_write(fh, dock_items[i].label, (int)k_strlen(dock_items[i].label));
+        fat32_write(fh, dock_items[i].label, (int)strlen(dock_items[i].label));
         fat32_write(fh, "|", 1);
-        fat32_write(fh, dock_items[i].target, (int)k_strlen(dock_items[i].target));
+        fat32_write(fh, dock_items[i].target, (int)strlen(dock_items[i].target));
         fat32_write(fh, "\n", 1);
     }
 
@@ -2654,8 +2654,8 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
 
         if (msg_box_visible) {
             ttf_font_t *_ttf = graphics_get_current_ttf();
-            int title_w = _ttf ? font_manager_get_string_width(_ttf, msg_box_title) : (int)(k_strlen(msg_box_title) * 8);
-            int text_w  = _ttf ? font_manager_get_string_width(_ttf, msg_box_text)  : (int)(k_strlen(msg_box_text)  * 8);
+            int title_w = _ttf ? font_manager_get_string_width(_ttf, msg_box_title) : (int)(strlen(msg_box_title) * 8);
+            int text_w  = _ttf ? font_manager_get_string_width(_ttf, msg_box_text)  : (int)(strlen(msg_box_text)  * 8);
             int content_w = (title_w > text_w) ? title_w : text_w;
             int padding = 30; // horizontal padding on each side
             int mw = content_w + padding * 2;

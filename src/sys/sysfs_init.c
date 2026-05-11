@@ -11,33 +11,33 @@
 
 // --- Helper: itoa ---
 static void sys_itoa(int n, char *s) {
-    k_itoa(n, s);
+    itoa(n, s);
 }
 
 // --- Graphics Implementation ---
 static int read_gfx_drm(char *buf, int size, int offset) {
     char out[512];
-    k_memset(out, 0, 512);
-    k_strcpy(out, "Driver: Simple Framebuffer\n");
-    k_strcpy(out + k_strlen(out), "Resolution: ");
-    char s[32]; k_itoa(get_screen_width(), s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "x");
-    k_itoa(get_screen_height(), s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "\nDepth: ");
-    k_itoa(graphics_get_fb_bpp(), s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), " bpp\nAddress: 0x");
-    k_itoa_hex(graphics_get_fb_addr(), s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "\n");
+    memset(out, 0, 512);
+    strcpy(out, "Driver: Simple Framebuffer\n");
+    strcpy(out + strlen(out), "Resolution: ");
+    char s[32]; itoa(get_screen_width(), s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "x");
+    itoa(get_screen_height(), s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "\nDepth: ");
+    itoa(graphics_get_fb_bpp(), s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), " bpp\nAddress: 0x");
+    itoa_hex(graphics_get_fb_addr(), s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "\n");
 
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
@@ -45,22 +45,22 @@ static int read_gfx_drm(char *buf, int size, int offset) {
 static int read_mem_tracking(char *buf, int size, int offset) {
     MemStats stats = memory_get_stats();
     char out[1024];
-    k_memset(out, 0, 1024);
+    memset(out, 0, 1024);
     
-    k_strcpy(out, "--- Kernel Heap Tracking ---\n");
-    k_strcpy(out + k_strlen(out), "Allocated Blocks: ");
-    char s[32]; k_itoa(stats.allocated_blocks, s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "\nFragmentation: ");
-    k_itoa(stats.fragmentation_percent, s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "%\n");
+    strcpy(out, "--- Kernel Heap Tracking ---\n");
+    strcpy(out + strlen(out), "Allocated Blocks: ");
+    char s[32]; itoa(stats.allocated_blocks, s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "\nFragmentation: ");
+    itoa(stats.fragmentation_percent, s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "%\n");
 
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
@@ -71,19 +71,19 @@ static int read_sys_modules(char *buf, int size, int offset) {
     
     for (int i = 0; i < count; i++) {
         kernel_module_t *mod = module_manager_get_index(i);
-        k_strcpy(out + k_strlen(out), "  - ");
-        k_strcpy(out + k_strlen(out), mod->name);
-        k_strcpy(out + k_strlen(out), " (");
-        char sz_s[16]; k_itoa(mod->size / 1024, sz_s);
-        k_strcpy(out + k_strlen(out), sz_s);
-        k_strcpy(out + k_strlen(out), " KB)\n");
+        strcpy(out + strlen(out), "  - ");
+        strcpy(out + strlen(out), mod->name);
+        strcpy(out + strlen(out), " (");
+        char sz_s[16]; itoa(mod->size / 1024, sz_s);
+        strcpy(out + strlen(out), sz_s);
+        strcpy(out + strlen(out), " KB)\n");
     }
 
-    int len = k_strlen(out);
+    int len = strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
@@ -93,40 +93,40 @@ static int read_pci_bus(char *buf, int size, int offset) {
     int count = pci_enumerate_devices(devices, 64);
     
     char out[4096];
-    k_memset(out, 0, 4096);
-    k_strcpy(out, "PCI Bus Devices:\n");
+    memset(out, 0, 4096);
+    strcpy(out, "PCI Bus Devices:\n");
     for (int i = 0; i < count; i++) {
         char line[128];
-        k_strcpy(line, " [");
-        char b_s[8]; k_itoa(devices[i].bus, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), ":");
-        k_itoa(devices[i].device, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), ":");
-        k_itoa(devices[i].function, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), "] Vendor:");
-        k_itoa_hex(devices[i].vendor_id, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), " Device:");
-        k_itoa_hex(devices[i].device_id, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), " Class:");
-        k_itoa_hex(devices[i].class_code, b_s);
-        k_strcpy(line + k_strlen(line), b_s);
-        k_strcpy(line + k_strlen(line), "\n");
+        strcpy(line, " [");
+        char b_s[8]; itoa(devices[i].bus, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), ":");
+        itoa(devices[i].device, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), ":");
+        itoa(devices[i].function, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), "] Vendor:");
+        itoa_hex(devices[i].vendor_id, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), " Device:");
+        itoa_hex(devices[i].device_id, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), " Class:");
+        itoa_hex(devices[i].class_code, b_s);
+        strcpy(line + strlen(line), b_s);
+        strcpy(line + strlen(line), "\n");
         
-        if (k_strlen(out) + k_strlen(line) < 4095) {
-            k_strcpy(out + k_strlen(out), line);
+        if (strlen(out) + strlen(line) < 4095) {
+            strcpy(out + strlen(out), line);
         }
     }
 
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
@@ -151,35 +151,35 @@ static int read_cpu_info(char *buf, int size, int offset) {
     for (uint32_t i = 0; i < cpu_count; i++) {
         char c_s[32];
         
-        k_strcpy(out + k_strlen(out), "processor\t: ");
-        k_itoa(i, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "processor\t: ");
+        itoa(i, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "vendor_id\t: ");
-        k_strcpy(out + k_strlen(out), vendor);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "vendor_id\t: ");
+        strcpy(out + strlen(out), vendor);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "cpu family\t: ");
-        k_itoa(info.family, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "cpu family\t: ");
+        itoa(info.family, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "model\t\t: ");
-        k_itoa(info.model, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "model\t\t: ");
+        itoa(info.model, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "model name\t: ");
-        k_strcpy(out + k_strlen(out), model);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "model name\t: ");
+        strcpy(out + strlen(out), model);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "stepping\t: ");
-        k_itoa(info.stepping, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "stepping\t: ");
+        itoa(info.stepping, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "microcode\t: 0x");
+        strcpy(out + strlen(out), "microcode\t: 0x");
         char hex[16];
         int temp = info.microcode;
         int hex_pos = 0;
@@ -188,64 +188,64 @@ static int read_cpu_info(char *buf, int size, int offset) {
             hex[hex_pos++] = digit < 10 ? '0' + digit : 'a' + (digit - 10);
         }
         hex[hex_pos] = '\0';
-        k_strcpy(out + k_strlen(out), hex);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), hex);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "cache size\t: ");
-        k_itoa(info.cache_size, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), " KB\n");
+        strcpy(out + strlen(out), "cache size\t: ");
+        itoa(info.cache_size, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), " KB\n");
         
-        k_strcpy(out + k_strlen(out), "physical id\t: 0\n");
-        k_strcpy(out + k_strlen(out), "siblings\t: ");
-        k_itoa(cpu_count, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "physical id\t: 0\n");
+        strcpy(out + strlen(out), "siblings\t: ");
+        itoa(cpu_count, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "core id\t\t: ");
-        k_itoa(i, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "core id\t\t: ");
+        itoa(i, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "cpu cores\t: ");
-        k_itoa(cpu_count, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "cpu cores\t: ");
+        itoa(cpu_count, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "apicid\t\t: ");
-        k_itoa(i, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "apicid\t\t: ");
+        itoa(i, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "initial apicid\t: ");
-        k_itoa(i, c_s);
-        k_strcpy(out + k_strlen(out), c_s);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "initial apicid\t: ");
+        itoa(i, c_s);
+        strcpy(out + strlen(out), c_s);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "fpu\t\t: yes\n");
-        k_strcpy(out + k_strlen(out), "fpu_exception\t: yes\n");
+        strcpy(out + strlen(out), "fpu\t\t: yes\n");
+        strcpy(out + strlen(out), "fpu_exception\t: yes\n");
         
-        k_strcpy(out + k_strlen(out), "cpuid level\t: 13\n");
+        strcpy(out + strlen(out), "cpuid level\t: 13\n");
         
-        k_strcpy(out + k_strlen(out), "wp\t\t: yes\n");
+        strcpy(out + strlen(out), "wp\t\t: yes\n");
         
-        k_strcpy(out + k_strlen(out), "flags\t\t: ");
-        k_strcpy(out + k_strlen(out), flags);
-        k_strcpy(out + k_strlen(out), "\n");
+        strcpy(out + strlen(out), "flags\t\t: ");
+        strcpy(out + strlen(out), flags);
+        strcpy(out + strlen(out), "\n");
         
-        k_strcpy(out + k_strlen(out), "bugs\t\t: \n");
-        k_strcpy(out + k_strlen(out), "bogomips\t: 4800.00\n");
+        strcpy(out + strlen(out), "bugs\t\t: \n");
+        strcpy(out + strlen(out), "bogomips\t: 4800.00\n");
         
         if (i < cpu_count - 1) {
-            k_strcpy(out + k_strlen(out), "\n");
+            strcpy(out + strlen(out), "\n");
         }
     }
     
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) { kfree(out); return 0; }
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     kfree(out);
     return to_copy;
 }
@@ -253,57 +253,57 @@ static int read_cpu_info(char *buf, int size, int offset) {
 // --- Devices Implementation ---
 static int read_sys_devices(char *buf, int size, int offset) {
     char out[2048];
-    k_memset(out, 0, 2048);
+    memset(out, 0, 2048);
     
     extern int disk_get_count(void);
     extern Disk* disk_get_by_index(int index);
     
     int dcount = disk_get_count();
-    k_strcpy(out, "Block Devices:\n");
+    strcpy(out, "Block Devices:\n");
     for (int i = 0; i < dcount; i++) {
         Disk *d = disk_get_by_index(i);
         if (d && !d->is_partition) {
-            k_strcpy(out + k_strlen(out), "  ");
-            k_strcpy(out + k_strlen(out), d->devname);
-            k_strcpy(out + k_strlen(out), " - ");
-            k_strcpy(out + k_strlen(out), d->label);
-            k_strcpy(out + k_strlen(out), "\n");
+            strcpy(out + strlen(out), "  ");
+            strcpy(out + strlen(out), d->devname);
+            strcpy(out + strlen(out), " - ");
+            strcpy(out + strlen(out), d->label);
+            strcpy(out + strlen(out), "\n");
         }
     }
     
-    k_strcpy(out + k_strlen(out), "\nCharacter Devices:\n");
-    k_strcpy(out + k_strlen(out), "  console - System console\n");
-    k_strcpy(out + k_strlen(out), "  tty - Terminal devices\n");
-    k_strcpy(out + k_strlen(out), "  psmouse - Mouse input\n");
-    k_strcpy(out + k_strlen(out), "  keyboard - Keyboard input\n");
-    k_strcpy(out + k_strlen(out), "  framebuffer - Framebuffer device\n");
+    strcpy(out + strlen(out), "\nCharacter Devices:\n");
+    strcpy(out + strlen(out), "  console - System console\n");
+    strcpy(out + strlen(out), "  tty - Terminal devices\n");
+    strcpy(out + strlen(out), "  psmouse - Mouse input\n");
+    strcpy(out + strlen(out), "  keyboard - Keyboard input\n");
+    strcpy(out + strlen(out), "  framebuffer - Framebuffer device\n");
     
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
 // --- Class Implementation ---
 static int read_sys_class(char *buf, int size, int offset) {
     char out[1024];
-    k_memset(out, 0, 1024);
+    memset(out, 0, 1024);
     
-    k_strcpy(out, "Classes:\n");
-    k_strcpy(out + k_strlen(out), "  block - Block device class\n");
-    k_strcpy(out + k_strlen(out), "  input - Input device class\n");
-    k_strcpy(out + k_strlen(out), "  tty - TTY device class\n");
-    k_strcpy(out + k_strlen(out), "  sound - Sound device class\n");
-    k_strcpy(out + k_strlen(out), "  video - Video device class\n");
-    k_strcpy(out + k_strlen(out), "  net - Network device class\n");
+    strcpy(out, "Classes:\n");
+    strcpy(out + strlen(out), "  block - Block device class\n");
+    strcpy(out + strlen(out), "  input - Input device class\n");
+    strcpy(out + strlen(out), "  tty - TTY device class\n");
+    strcpy(out + strlen(out), "  sound - Sound device class\n");
+    strcpy(out + strlen(out), "  video - Video device class\n");
+    strcpy(out + strlen(out), "  net - Network device class\n");
     
-    int len = (int)k_strlen(out);
+    int len = (int)strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 
@@ -311,15 +311,15 @@ static int read_sys_class(char *buf, int size, int offset) {
 static int read_gpio_debug(char *buf, int size, int offset) {
     uint8_t p64 = inb(0x64);
     char out[64] = "Port 0x64 Status: ";
-    char s[16]; k_itoa(p64, s);
-    k_strcpy(out + k_strlen(out), s);
-    k_strcpy(out + k_strlen(out), "\n");
+    char s[16]; itoa(p64, s);
+    strcpy(out + strlen(out), s);
+    strcpy(out + strlen(out), "\n");
     
-    int len = k_strlen(out);
+    int len = strlen(out);
     if (offset >= len) return 0;
     int to_copy = len - offset;
     if (to_copy > size) to_copy = size;
-    k_memcpy(buf, out + offset, to_copy);
+    memcpy(buf, out + offset, to_copy);
     return to_copy;
 }
 

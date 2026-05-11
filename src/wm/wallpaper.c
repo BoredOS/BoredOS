@@ -160,7 +160,7 @@ void wallpaper_save_setting(const char *path) {
         serial_str("[WALLPAPER] Failed to save setting\n");
         return;
     }
-    fat32_write(fh, path, (uint32_t)k_strlen(path));
+    fat32_write(fh, path, (uint32_t)strlen(path));
     fat32_close(fh);
     serial_str("[WALLPAPER] Setting saved: ");
     serial_str(path);

@@ -9,16 +9,17 @@
 #include <stdbool.h>
 
 // Kernel string utilities
-void k_memset(void *dest, int val, size_t len);
-void k_memcpy(void *dest, const void *src, size_t len);
-int k_memcmp (const void *str1, const void *str2, size_t count);
-size_t k_strlen(const char *str);
-int k_strcmp(const char *s1, const char *s2);
-int k_strncmp(const char *s1, const char *s2, size_t n);
-void k_strcpy(char *dest, const char *src);
-int k_atoi(const char *str);
-void k_itoa(int n, char *buf);
-void k_itoa_hex(uint64_t n, char *buf);
+void *memmove(void *dest, const void *src, uint64_t n);
+void memset(void *dest, int val, size_t len);
+void memcpy(void *dest, const void *src, size_t len);
+int memcmp (const void *str1, const void *str2, size_t count);
+size_t strlen(const char *str);
+int strcmp(const char *s1, const char *s2);
+int strncmp(const char *s1, const char *s2, size_t n);
+void strcpy(char *dest, const char *src);
+int atoi(const char *str);
+void itoa(int n, char *buf);
+void itoa_hex(uint64_t n, char *buf);
 
 // Kernel timing utilities
 void k_delay(int iterations);

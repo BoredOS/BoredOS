@@ -52,19 +52,19 @@ uint64_t exception_handler_c(registers_t *regs) {
     
     // Serial Mirror
     serial_write("\n*** EXCEPTION ***\nVector: ");
-    k_itoa_hex(vector, buf);
+    itoa_hex(vector, buf);
     serial_write("0x");
     serial_write(buf);
     
     if ((regs->cs & 0x3) != 0) {
         serial_write("\n*** USER MODE EXCEPTION ***\nVector: 0x");
-        k_itoa_hex(vector, buf);
+        itoa_hex(vector, buf);
         serial_write(buf);
         serial_write("\nRIP: 0x");
-        k_itoa_hex(regs->rip, buf);
+        itoa_hex(regs->rip, buf);
         serial_write(buf);
         serial_write("\nError Code: 0x");
-        k_itoa_hex(regs->err_code, buf);
+        itoa_hex(regs->err_code, buf);
         serial_write(buf);
         serial_write("\nTerminating process.\n");
         
@@ -77,12 +77,12 @@ uint64_t exception_handler_c(registers_t *regs) {
 
     // Kernel mode exception
     const char *name = (vector < 32) ? exception_messages[vector] : "Unknown Kernel Exception";
-    serial_write("\nRIP: 0x"); k_itoa_hex(regs->rip, buf); serial_write(buf);
-    serial_write("\nErr: 0x"); k_itoa_hex(regs->err_code, buf); serial_write(buf);
+    serial_write("\nRIP: 0x"); itoa_hex(regs->rip, buf); serial_write(buf);
+    serial_write("\nErr: 0x"); itoa_hex(regs->err_code, buf); serial_write(buf);
     if (vector == 14) { 
         uint64_t cr2;
         asm volatile("mov %%cr2, %0" : "=r"(cr2));
-        serial_write("\nCR2: 0x"); k_itoa_hex(cr2, buf); serial_write(buf);
+        serial_write("\nCR2: 0x"); itoa_hex(cr2, buf); serial_write(buf);
     }
     serial_write("\n");
     kernel_panic(regs, name);

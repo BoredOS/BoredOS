@@ -3,7 +3,7 @@
 
 #include "kutils.h"
 
-#define atoi k_atoi
+#define atoi atoi
 #define rand() 0
 #define exit(x) while(1)
 

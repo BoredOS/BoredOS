@@ -37,13 +37,13 @@ int e1000_init(pci_device_t* pci_dev) {
     extern void serial_write(const char *str);
     serial_write("[E1000] MMIO Base (virt): 0x");
     char hex_buf[32];
-    k_itoa_hex((uint64_t)mmio_base, hex_buf);
+    itoa_hex((uint64_t)mmio_base, hex_buf);
     serial_write(hex_buf);
     serial_write("\n");
 
     uint32_t status_reg = e1000_read_reg(mmio_base, E1000_REG_STATUS);
     serial_write("[E1000] Status: 0x");
-    k_itoa_hex(status_reg, hex_buf);
+    itoa_hex(status_reg, hex_buf);
     serial_write(hex_buf);
     serial_write("\n");
 
@@ -69,7 +69,7 @@ int e1000_init(pci_device_t* pci_dev) {
     serial_write("[E1000] MAC: ");
     for(int i=0; i<6; i++) {
         char buf[4];
-        k_itoa_hex(e1000_dev.mac_address.bytes[i], buf);
+        itoa_hex(e1000_dev.mac_address.bytes[i], buf);
         serial_write(buf);
         if(i<5) serial_write(":");
     }
@@ -81,8 +81,8 @@ int e1000_init(pci_device_t* pci_dev) {
     e1000_dev.tx_descriptors = tx_descriptors;
     e1000_dev.tx_head = 0;
     e1000_dev.tx_tail = 0;
-    k_memset(tx_descriptors, 0, sizeof(tx_descriptors));
-    k_memset(tx_buffers, 0, sizeof(tx_buffers));
+    memset(tx_descriptors, 0, sizeof(tx_descriptors));
+    memset(tx_buffers, 0, sizeof(tx_buffers));
 
     for (int i = 0; i < E1000_TX_RING_SIZE; i++) {
         e1000_dev.tx_buffers[i] = tx_buffers[i];
@@ -102,8 +102,8 @@ int e1000_init(pci_device_t* pci_dev) {
     e1000_dev.rx_descriptors = rx_descriptors;
     e1000_dev.rx_head = 0;
     e1000_dev.rx_tail = E1000_RX_RING_SIZE - 1;
-    k_memset(rx_descriptors, 0, sizeof(rx_descriptors));
-    k_memset(rx_buffers, 0, sizeof(rx_buffers));
+    memset(rx_descriptors, 0, sizeof(rx_descriptors));
+    memset(rx_buffers, 0, sizeof(rx_buffers));
     for (int i = 0; i < E1000_RX_RING_SIZE; i++) {
         e1000_dev.rx_buffers[i] = rx_buffers[i];
         e1000_dev.rx_descriptors[i].buffer_addr = v2p((uint64_t)(uintptr_t)rx_buffers[i]);

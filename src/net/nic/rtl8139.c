@@ -65,7 +65,7 @@ int rtl8139_init(pci_device_t* pci_dev) {
 
     extern void serial_write(const char *str);
     serial_write("[RTL8139] MMIO Base: 0x");
-    char hex_buf[32]; k_itoa_hex(mmio_base_addr, hex_buf); serial_write(hex_buf); serial_write("\n");
+    char hex_buf[32]; itoa_hex(mmio_base_addr, hex_buf); serial_write(hex_buf); serial_write("\n");
 
     // Power on (CONFIG1)
     rtl8139_outb(RTL8139_CONFIG_1, 0x00);
@@ -89,7 +89,7 @@ int rtl8139_init(pci_device_t* pci_dev) {
     serial_write("[RTL8139] MAC: ");
     for(int i=0; i<6; i++) {
         char buf[4];
-        k_itoa_hex(mac_addr[i], buf);
+        itoa_hex(mac_addr[i], buf);
         serial_write(buf);
         if(i<5) serial_write(":");
     }

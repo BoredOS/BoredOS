@@ -7,18 +7,18 @@
 
 #include "../drivers/acpi.h"
 
-void k_memset(void *dest, int val, size_t len) {
+void memset(void *dest, int val, size_t len) {
     unsigned char *ptr = (unsigned char *)dest;
     while (len-- > 0) *ptr++ = (unsigned char)val;
 }
 
-void k_memcpy(void *dest, const void *src, size_t len) {
+void memcpy(void *dest, const void *src, size_t len) {
     unsigned char *d = (unsigned char *)dest;
     const unsigned char *s = (const unsigned char *)src;
     while (len-- > 0) *d++ = *s++;
 }
 
-int k_memcmp (const void *str1, const void *str2, size_t count) {
+int memcmp(const void *str1, const void *str2, size_t count) {
     register const unsigned char *s1 = (const unsigned char*)str1;
     register const unsigned char *s2 = (const unsigned char*)str2;
 
@@ -29,13 +29,30 @@ int k_memcmp (const void *str1, const void *str2, size_t count) {
     return 0;
 }
 
-size_t k_strlen(const char *str) {
+void *memmove(void *dest, const void *src, uint64_t n) {
+    uint8_t *pdest = (uint8_t *)dest;
+    const uint8_t *psrc = (const uint8_t *)src;
+
+    if (src > dest) {
+        for (uint64_t i = 0; i < n; i++) {
+            pdest[i] = psrc[i];
+        }
+    } else if (src < dest) {
+        for (uint64_t i = n; i > 0; i--) {
+            pdest[i-1] = psrc[i-1];
+        }
+    }
+
+    return dest;
+}
+
+size_t strlen(const char *str) {
     size_t len = 0;
     while (str[len]) len++;
     return len;
 }
 
-int k_strcmp(const char *s1, const char *s2) {
+int strcmp(const char *s1, const char *s2) {
     while (*s1 && (*s1 == *s2)) {
         s1++;
         s2++;
@@ -43,7 +60,7 @@ int k_strcmp(const char *s1, const char *s2) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-int k_strncmp(const char *s1, const char *s2, size_t n) {
+int strncmp(const char *s1, const char *s2, size_t n) {
     while (n && *s1 && (*s1 == *s2)) {
         s1++;
         s2++;
@@ -53,12 +70,12 @@ int k_strncmp(const char *s1, const char *s2, size_t n) {
     return *(const unsigned char*)s1 - *(const unsigned char*)s2;
 }
 
-void k_strcpy(char *dest, const char *src) {
+void strcpy(char *dest, const char *src) {
     while (*src) *dest++ = *src++;
     *dest = 0;
 }
 
-int k_atoi(const char *str) {
+int atoi(const char *str) {
     int res = 0;
     int sign = 1;
     if (*str == '-') { sign = -1; str++; }
@@ -69,7 +86,7 @@ int k_atoi(const char *str) {
     return res * sign;
 }
 
-void k_itoa(int n, char *buf) {
+void itoa(int n, char *buf) {
     if (n == 0) {
         buf[0] = '0'; buf[1] = 0; return;
     }
@@ -89,7 +106,7 @@ void k_itoa(int n, char *buf) {
     }
 }
 
-void k_itoa_hex(uint64_t n, char *buf) {
+void itoa_hex(uint64_t n, char *buf) {
     const char *digits = "0123456789ABCDEF";
     if (n == 0) {
         buf[0] = '0';

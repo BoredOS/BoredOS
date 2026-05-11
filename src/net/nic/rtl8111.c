@@ -85,7 +85,7 @@ int rtl8111_init(pci_device_t* pci_dev) {
 
     extern void serial_write(const char *str);
     serial_write("[RTL8111] MMIO Base: 0x");
-    char hex_buf[32]; k_itoa_hex(mmio_base_addr, hex_buf); serial_write(hex_buf); serial_write("\n");
+    char hex_buf[32]; itoa_hex(mmio_base_addr, hex_buf); serial_write(hex_buf); serial_write("\n");
 
     rtl8111_outb(RTL8111_CR, RTL8111_CR_RST);
     for (int i = 0; i < 100000; i++) {
@@ -103,14 +103,14 @@ int rtl8111_init(pci_device_t* pci_dev) {
 
     serial_write("[RTL8111] MAC: ");
     for(int i=0; i<6; i++) {
-        char buf[4]; k_itoa_hex(mac_addr[i], buf); serial_write(buf);
+        char buf[4]; itoa_hex(mac_addr[i], buf); serial_write(buf);
         if(i<5) serial_write(":");
     }
     serial_write("\n");
 
     rtl8111_outb(0x50, 0xC0); 
 
-    k_memset(rx_desc, 0, sizeof(rx_desc));
+    memset(rx_desc, 0, sizeof(rx_desc));
     for (int i = 0; i < RTL8111_NUM_RX_DESC; i++) {
         uint64_t buf_phys = v2p((uint64_t)(uintptr_t)rx_buffers[i]);
         rx_desc[i].buf_addr = buf_phys;
@@ -125,7 +125,7 @@ int rtl8111_init(pci_device_t* pci_dev) {
     rtl8111_outl(RTL8111_RDSAR, (uint32_t)rx_ring_phys);
     rtl8111_outl(RTL8111_RDSAR + 4, (uint32_t)(rx_ring_phys >> 32));
 
-    k_memset(tx_desc, 0, sizeof(tx_desc));
+    memset(tx_desc, 0, sizeof(tx_desc));
     uint64_t tx_ring_phys = v2p((uint64_t)(uintptr_t)tx_desc);
     rtl8111_outl(RTL8111_TDSAR, (uint32_t)tx_ring_phys);
     rtl8111_outl(RTL8111_TDSAR + 4, (uint32_t)(tx_ring_phys >> 32));

@@ -92,10 +92,10 @@ int network_init(void) {
         extern void serial_write(const char *str);
         serial_write("[NET] IP Assigned: ");
         char buf[32];
-        k_itoa(ip.bytes[0], buf); serial_write(buf); serial_write(".");
-        k_itoa(ip.bytes[1], buf); serial_write(buf); serial_write(".");
-        k_itoa(ip.bytes[2], buf); serial_write(buf); serial_write(".");
-        k_itoa(ip.bytes[3], buf); serial_write(buf); serial_write("\n");
+        itoa(ip.bytes[0], buf); serial_write(buf); serial_write(".");
+        itoa(ip.bytes[1], buf); serial_write(buf); serial_write(".");
+        itoa(ip.bytes[2], buf); serial_write(buf); serial_write(".");
+        itoa(ip.bytes[3], buf); serial_write(buf); serial_write("\n");
     } else {
         extern void serial_write(const char *str);
         serial_write("[NET] DHCP Failed during init\n");

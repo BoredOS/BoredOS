@@ -55,7 +55,7 @@ static struct acpi_sdt *acpi_get_sdt(const char signature[4]) {
             for (size_t i = 0; i < entries; i++) {
                 struct acpi_sdt *tbl = (struct acpi_sdt *)p2v(acpi_xsdt->tables[i]);
                 if (!tbl) continue;
-                if (!k_memcmp(tbl->signature, signature, 4))
+                if (!memcmp(tbl->signature, signature, 4))
                     return tbl;
             }
         }
@@ -74,7 +74,7 @@ static struct acpi_sdt *acpi_get_sdt(const char signature[4]) {
     for (size_t i = 0; i < entries; i++) {
         struct acpi_sdt *tbl = (struct acpi_sdt *)p2v(tables[i]);
         if (!tbl) continue;
-        if (!k_memcmp(tbl->signature, signature, 4))
+        if (!memcmp(tbl->signature, signature, 4))
             return tbl;
     }
 
@@ -89,14 +89,14 @@ void acpi_parse_s5(void) {
 
     char *dsdt = (char *)p2v((uintptr_t)acpi_fadt->dsdt);
 
-    if (k_memcmp(dsdt, "DSDT", 4) != 0) return;
+    if (memcmp(dsdt, "DSDT", 4) != 0) return;
 
     uint32_t dsdt_len = *(uint32_t*)(dsdt + 4);
     char *ptr = dsdt + 36;
     char *end = dsdt + dsdt_len;
 
     while (ptr < end) {
-        if (k_memcmp(ptr, "_S5_", 4) == 0) {
+        if (memcmp(ptr, "_S5_", 4) == 0) {
             ptr += 4;
             if (*ptr == 0x12) {
                 ptr += 3;

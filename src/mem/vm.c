@@ -58,7 +58,7 @@ static void mem_write32(int addr, int val) {
 
 static void vm_reset(void) {
     sp = 0;
-    k_memset(memory, 0, VM_MEMORY_SIZE);
+    memset(memory, 0, VM_MEMORY_SIZE);
     vm_heap_ptr = 8192;
 }
 
@@ -167,7 +167,7 @@ static void vm_syscall(int id) {
         case VM_SYS_STRLEN: {
             int addr = pop();
             if (addr >= 0 && addr < VM_MEMORY_SIZE) {
-                push(k_strlen((char*)&memory[addr]));
+                push(strlen((char*)&memory[addr]));
             } else push(0);
             break;
         }
@@ -175,7 +175,7 @@ static void vm_syscall(int id) {
             int a2 = pop();
             int a1 = pop();
             if (a1 >= 0 && a1 < VM_MEMORY_SIZE && a2 >= 0 && a2 < VM_MEMORY_SIZE) {
-                push(k_strcmp((char*)&memory[a1], (char*)&memory[a2]));
+                push(strcmp((char*)&memory[a1], (char*)&memory[a2]));
             } else push(0);
             break;
         }
@@ -183,7 +183,7 @@ static void vm_syscall(int id) {
             int src = pop();
             int dest = pop();
             if (dest >= 0 && dest < VM_MEMORY_SIZE && src >= 0 && src < VM_MEMORY_SIZE) {
-                k_strcpy((char*)&memory[dest], (char*)&memory[src]);
+                strcpy((char*)&memory[dest], (char*)&memory[src]);
                 push(dest);
             } else push(0);
             break;
@@ -198,7 +198,7 @@ static void vm_syscall(int id) {
             int val = pop();
             int ptr = pop();
             if (ptr >= 0 && ptr + n <= VM_MEMORY_SIZE) {
-                k_memset(&memory[ptr], val, n);
+                memset(&memory[ptr], val, n);
                 push(ptr);
             } else push(0);
             break;
@@ -322,7 +322,7 @@ static void vm_syscall(int id) {
         case VM_SYS_ATOI: {
              int addr = pop();
              if (addr >= 0 && addr < VM_MEMORY_SIZE) {
-                 push(k_atoi((char*)&memory[addr]));
+                 push(atoi((char*)&memory[addr]));
              } else push(0);
              break;
         }
@@ -330,7 +330,7 @@ static void vm_syscall(int id) {
             int addr = pop();
             int val = pop();
             if (addr >= 0 && addr < VM_MEMORY_SIZE) {
-                k_itoa(val, (char*)&memory[addr]);
+                itoa(val, (char*)&memory[addr]);
             }
             push(0);
             break;
@@ -503,7 +503,7 @@ int vm_exec(const uint8_t *code, int code_size) {
     }
     
     // Load program into memory at address 0
-    k_memset(memory, 0, VM_MEMORY_SIZE);
+    memset(memory, 0, VM_MEMORY_SIZE);
     for(int i=0; i<code_size; i++) memory[i] = code[i];
     
     int pc = 8; // Skip header

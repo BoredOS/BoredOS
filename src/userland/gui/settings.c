@@ -271,7 +271,7 @@ static void generate_lumberjack_pattern(void) {
     }
 }
 
-static void k_itoa_hex(uint64_t num, char* str) {
+static void itoa_hex(uint64_t num, char* str) {
     if (num == 0) {
         str[0] = '0';
         str[1] = '\0';
@@ -731,7 +731,7 @@ static void control_panel_paint_network(ui_window_t win) {
         char b[4];
         mac_str[0] = 0;
         for (int i=0; i<6; i++) {
-            k_itoa_hex(mac.bytes[i], b);
+            itoa_hex(mac.bytes[i], b);
             if (b[1] == 0) { b[1] = b[0]; b[0] = '0'; b[2] = 0; } // zero pad
             strcat(mac_str, b);
             if (i < 5) strcat(mac_str, ":");

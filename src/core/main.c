@@ -237,7 +237,7 @@ static void fat32_mkdir_recursive(const char *path) {
 
 static bool cmdline_has_flag(const char *cmdline, const char *flag) {
     if (!cmdline || !flag || !flag[0]) return false;
-    int flag_len = (int)k_strlen(flag);
+    int flag_len = (int)strlen(flag);
     const char *p = cmdline;
     while (*p) {
         while (*p == ' ') p++;
@@ -245,19 +245,19 @@ static bool cmdline_has_flag(const char *cmdline, const char *flag) {
         const char *start = p;
         while (*p && *p != ' ') p++;
         int len = (int)(p - start);
-        if (len == flag_len && k_strncmp(start, flag, (size_t)flag_len) == 0) return true;
+        if (len == flag_len && strncmp(start, flag, (size_t)flag_len) == 0) return true;
     }
     return false;
 }
 
 static bool cmdline_read_value(const char *cmdline, const char *key, char *out, int out_len) {
     if (!cmdline || !key || !out || out_len <= 1) return false;
-    int key_len = (int)k_strlen(key);
+    int key_len = (int)strlen(key);
     const char *p = cmdline;
     while (*p) {
         while (*p == ' ') p++;
         if (!*p) break;
-        if (k_strncmp(p, key, (size_t)key_len) == 0) {
+        if (strncmp(p, key, (size_t)key_len) == 0) {
             const char *val = p + key_len;
             int i = 0;
             while (*val && *val != ' ' && i < out_len - 1) {
@@ -390,10 +390,10 @@ void kmain(void) {
     
     if (bootloader_info_request.response != NULL) {
         if (bootloader_info_request.response->name) {
-            k_strcpy(g_bootfs_state.bootloader_name, bootloader_info_request.response->name);
+            strcpy(g_bootfs_state.bootloader_name, bootloader_info_request.response->name);
         }
         if (bootloader_info_request.response->version) {
-            k_strcpy(g_bootfs_state.bootloader_version, bootloader_info_request.response->version);
+            strcpy(g_bootfs_state.bootloader_version, bootloader_info_request.response->version);
         }
     }
     

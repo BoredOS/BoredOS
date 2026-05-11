@@ -353,11 +353,11 @@ static void *slab_alloc(int cls) {
     // Freelist head must be a kernel higher-half address. Treat anything below the conservative
     // threshold 0xFFFF000000000000 as corruption (canonical boundary is 0xFFFF800000000000).
     if ((uintptr_t)obj < 0xFFFF000000000000ULL) {
-        char b[17]; extern void k_itoa_hex(uint64_t, char *);
+        char b[17]; extern void itoa_hex(uint64_t, char *);
         serial_write("[SLAB] corrupt freelist cls=");
-        k_itoa_hex((uint64_t)cls, b); serial_write(b);
-        serial_write(" page="); k_itoa_hex((uint64_t)page, b); serial_write(b);
-        serial_write(" fl=");   k_itoa_hex((uint64_t)obj, b);  serial_write(b);
+        itoa_hex((uint64_t)cls, b); serial_write(b);
+        serial_write(" page="); itoa_hex((uint64_t)page, b); serial_write(b);
+        serial_write(" fl=");   itoa_hex((uint64_t)obj, b);  serial_write(b);
         serial_write("\n");
 
         // Remove the corrupted page from the list to avoid hitting it again

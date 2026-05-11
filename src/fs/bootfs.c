@@ -70,7 +70,7 @@ static char g_limine_conf_path[64] = "";
 static bootfs_custom_file_t *bootfs_find_custom(const char *name) {
     bootfs_custom_file_t *f = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
     while (f) {
-        if (k_strcmp(f->name, name) == 0) return f;
+        if (strcmp(f->name, name) == 0) return f;
         f = f->next;
     }
     return NULL;
@@ -82,8 +82,8 @@ void bootfs_register_file(const char *name, void *data, uint32_t size) {
     if (!f) {
         f = (bootfs_custom_file_t*)kmalloc(sizeof(bootfs_custom_file_t));
         if (!f) return;
-        k_memset(f, 0, sizeof(bootfs_custom_file_t));
-        k_strcpy(f->name, name);
+        memset(f, 0, sizeof(bootfs_custom_file_t));
+        strcpy(f->name, name);
         f->next = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
         g_bootfs_state.custom_files = f;
     }
@@ -94,13 +94,13 @@ void bootfs_register_file(const char *name, void *data, uint32_t size) {
 
 static bool is_metadata_path(const char *path) {
     if (!path) return false;
-    return k_strncmp(path, "metadata", 8) == 0;
+    return strncmp(path, "metadata", 8) == 0;
 }
 
 static bool is_metadata_file(const char *path) {
-    if (k_strcmp(path, "metadata/boot_time") == 0) return true;
-    if (k_strcmp(path, "metadata/boot_flags") == 0) return true;
-    if (k_strcmp(path, "metadata/version") == 0) return true;
+    if (strcmp(path, "metadata/boot_time") == 0) return true;
+    if (strcmp(path, "metadata/boot_flags") == 0) return true;
+    if (strcmp(path, "metadata/version") == 0) return true;
     return false;
 }
 
@@ -111,8 +111,8 @@ static void* bootfs_open(void *fs_private, const char *path, const char *mode) {
     bootfs_handle_t *h = (bootfs_handle_t*)kmalloc(sizeof(bootfs_handle_t));
     if (!h) return NULL;
     
-    k_memset(h, 0, sizeof(bootfs_handle_t));
-    k_strcpy(h->path, path);
+    memset(h, 0, sizeof(bootfs_handle_t));
+    strcpy(h->path, path);
     h->offset = 0;
     
     if (path[0] == '\0') {
@@ -134,28 +134,28 @@ static int generate_metadata_content(const char *file, char *buffer, int max_siz
     buffer[0] = '\0';
     int len = 0;
     
-    if (k_strcmp(file, "metadata/boot_time") == 0) {
+    if (strcmp(file, "metadata/boot_time") == 0) {
         extern uint32_t wm_get_ticks(void);
         uint32_t ticks = wm_get_ticks();
         
-        k_strcpy(buffer, "Boot time: ");
+        strcpy(buffer, "Boot time: ");
         char time_buf[32];
-        k_itoa(g_bootfs_state.boot_time_ms, time_buf);
-        k_strcpy(buffer + k_strlen(buffer), time_buf);
-        k_strcpy(buffer + k_strlen(buffer), " ms\nTicks: ");
-        k_itoa(ticks, time_buf);
-        k_strcpy(buffer + k_strlen(buffer), time_buf);
-        k_strcpy(buffer + k_strlen(buffer), "\n");
-        len = k_strlen(buffer);
-    } else if (k_strcmp(file, "metadata/version") == 0) {
-        k_strcpy(buffer, "Bootloader: ");
-        k_strcpy(buffer + k_strlen(buffer), g_bootfs_state.bootloader_name);
-        k_strcpy(buffer + k_strlen(buffer), "\nVersion: ");
-        k_strcpy(buffer + k_strlen(buffer), g_bootfs_state.bootloader_version);
-        k_strcpy(buffer + k_strlen(buffer), "\n");
-        len = k_strlen(buffer);
-    } else if (k_strcmp(file, "metadata/boot_flags") == 0) {
-        k_strcpy(buffer, "Boot flags: 0x");
+        itoa(g_bootfs_state.boot_time_ms, time_buf);
+        strcpy(buffer + strlen(buffer), time_buf);
+        strcpy(buffer + strlen(buffer), " ms\nTicks: ");
+        itoa(ticks, time_buf);
+        strcpy(buffer + strlen(buffer), time_buf);
+        strcpy(buffer + strlen(buffer), "\n");
+        len = strlen(buffer);
+    } else if (strcmp(file, "metadata/version") == 0) {
+        strcpy(buffer, "Bootloader: ");
+        strcpy(buffer + strlen(buffer), g_bootfs_state.bootloader_name);
+        strcpy(buffer + strlen(buffer), "\nVersion: ");
+        strcpy(buffer + strlen(buffer), g_bootfs_state.bootloader_version);
+        strcpy(buffer + strlen(buffer), "\n");
+        len = strlen(buffer);
+    } else if (strcmp(file, "metadata/boot_flags") == 0) {
+        strcpy(buffer, "Boot flags: 0x");
         char flags_buf[8];
         uint8_t flags = g_bootfs_state.boot_flags;
         int hex_digit = (flags >> 4) & 0xF;
@@ -164,8 +164,8 @@ static int generate_metadata_content(const char *file, char *buffer, int max_siz
         flags_buf[1] = hex_digit < 10 ? '0' + hex_digit : 'a' + (hex_digit - 10);
         flags_buf[2] = '\n';
         flags_buf[3] = '\0';
-        k_strcpy(buffer + k_strlen(buffer), flags_buf);
-        len = k_strlen(buffer);
+        strcpy(buffer + strlen(buffer), flags_buf);
+        len = strlen(buffer);
     }
     
     return len;
@@ -180,30 +180,30 @@ static int bootfs_read(void *fs_private, void *handle, void *buf, int size) {
     
     int content_len = 0;
     
-    if (k_strcmp(h->path, "limine.conf") == 0) {
-        k_memcpy(content_buffer, g_bootfs_state.limine_conf, 
+    if (strcmp(h->path, "limine.conf") == 0) {
+        memcpy(content_buffer, g_bootfs_state.limine_conf, 
                  g_bootfs_state.limine_conf_len);
         content_len = g_bootfs_state.limine_conf_len;
-    } else if (k_strcmp(h->path, "kernel") == 0) {
-        k_strcpy(content_buffer, "Kernel reference\nSize: ");
+    } else if (strcmp(h->path, "kernel") == 0) {
+        strcpy(content_buffer, "Kernel reference\nSize: ");
         char size_buf[32];
-        k_itoa(g_bootfs_state.kernel_size, size_buf);
-        k_strcpy(content_buffer + k_strlen(content_buffer), size_buf);
-        k_strcpy(content_buffer + k_strlen(content_buffer), " bytes\n");
-        content_len = k_strlen(content_buffer);
-    } else if (k_strcmp(h->path, "initrd") == 0) {
-        k_strcpy(content_buffer, "Initial ramdisk reference\nSize: ");
+        itoa(g_bootfs_state.kernel_size, size_buf);
+        strcpy(content_buffer + strlen(content_buffer), size_buf);
+        strcpy(content_buffer + strlen(content_buffer), " bytes\n");
+        content_len = strlen(content_buffer);
+    } else if (strcmp(h->path, "initrd") == 0) {
+        strcpy(content_buffer, "Initial ramdisk reference\nSize: ");
         char size_buf[32];
-        k_itoa(g_bootfs_state.initrd_size, size_buf);
-        k_strcpy(content_buffer + k_strlen(content_buffer), size_buf);
-        k_strcpy(content_buffer + k_strlen(content_buffer), " bytes\n");
-        content_len = k_strlen(content_buffer);
-    } else if (k_strcmp(h->path, "initrd.tar") == 0) {
+        itoa(g_bootfs_state.initrd_size, size_buf);
+        strcpy(content_buffer + strlen(content_buffer), size_buf);
+        strcpy(content_buffer + strlen(content_buffer), " bytes\n");
+        content_len = strlen(content_buffer);
+    } else if (strcmp(h->path, "initrd.tar") == 0) {
         kfree(content_buffer);
         if (h->offset >= (int)g_bootfs_state.initrd_size) return 0;
         int avail = (int)g_bootfs_state.initrd_size - h->offset;
         int to_read = (size < avail) ? size : avail;
-        k_memcpy(buf, (uint8_t*)g_bootfs_state.initrd_ptr + h->offset, to_read);
+        memcpy(buf, (uint8_t*)g_bootfs_state.initrd_ptr + h->offset, to_read);
         h->offset += to_read;
         return to_read;
     } else if (is_metadata_file(h->path)) {
@@ -215,7 +215,7 @@ static int bootfs_read(void *fs_private, void *handle, void *buf, int size) {
             if (h->offset >= (int)cf->size) return 0;
             int avail = (int)cf->size - h->offset;
             int to_read = (avail < size) ? avail : size;
-            k_memcpy(buf, cf->data + h->offset, to_read);
+            memcpy(buf, cf->data + h->offset, to_read);
             h->offset += to_read;
             return to_read;
         }
@@ -232,7 +232,7 @@ static int bootfs_read(void *fs_private, void *handle, void *buf, int size) {
     int available = content_len - h->offset;
     int read_size = (available < size) ? available : size;
     
-    k_memcpy(buf, content_buffer + h->offset, read_size);
+    memcpy(buf, content_buffer + h->offset, read_size);
     h->offset += read_size;
     
     kfree(content_buffer);
@@ -243,7 +243,7 @@ static int bootfs_write(void *fs_private, void *handle, const void *buf, int siz
     bootfs_handle_t *h = (bootfs_handle_t*)handle;
     if (!h || !buf || size <= 0) return -1;
     
-    if (k_strcmp(h->path, "limine.conf") != 0) {
+    if (strcmp(h->path, "limine.conf") != 0) {
         return -1; 
     }
     
@@ -251,7 +251,7 @@ static int bootfs_write(void *fs_private, void *handle, const void *buf, int siz
     if (max_write <= 0) return -1;
     
     int write_size = (size < max_write) ? size : max_write;
-    k_memcpy(g_bootfs_state.limine_conf + h->offset, buf, write_size);
+    memcpy(g_bootfs_state.limine_conf + h->offset, buf, write_size);
     h->offset += write_size;
     
     if (h->offset > g_bootfs_state.limine_conf_len) {
@@ -299,49 +299,49 @@ static int bootfs_readdir(void *fs_private, const char *rel_path, vfs_dirent_t *
     
     if (rel_path[0] == '\0') {
         if (count < max) {
-            k_strcpy(entries[count].name, "limine.conf");
+            strcpy(entries[count].name, "limine.conf");
             entries[count].size = g_bootfs_state.limine_conf_len;
             entries[count].is_directory = 0;
             count++;
         }
         
         if (count < max) {
-            k_strcpy(entries[count].name, "kernel");
+            strcpy(entries[count].name, "kernel");
             entries[count].size = g_bootfs_state.kernel_size;
             entries[count].is_directory = 0;
             count++;
         }
         
         if (count < max) {
-            k_strcpy(entries[count].name, "initrd");
+            strcpy(entries[count].name, "initrd");
             entries[count].size = g_bootfs_state.initrd_size;
             entries[count].is_directory = 0;
             count++;
         }
         
         if (count < max) {
-            k_strcpy(entries[count].name, "initrd.tar");
+            strcpy(entries[count].name, "initrd.tar");
             entries[count].size = g_bootfs_state.initrd_size;
             entries[count].is_directory = 0;
             count++;
         }
         
         if (count < max) {
-            k_strcpy(entries[count].name, "metadata");
+            strcpy(entries[count].name, "metadata");
             entries[count].size = 0;
             entries[count].is_directory = 1;
             count++;
         }
         bootfs_custom_file_t *cf = (bootfs_custom_file_t*)g_bootfs_state.custom_files;
         while (cf && count < max) {
-            k_strcpy(entries[count].name, cf->name);
+            strcpy(entries[count].name, cf->name);
             entries[count].size = cf->size;
             entries[count].is_directory = 0;
             count++;
             cf = cf->next;
         }
     }
-    else if (k_strcmp(rel_path, "metadata") == 0) {
+    else if (strcmp(rel_path, "metadata") == 0) {
         const char *meta_files[] = {
             "boot_time",
             "boot_flags",
@@ -349,7 +349,7 @@ static int bootfs_readdir(void *fs_private, const char *rel_path, vfs_dirent_t *
         };
         
         for (int i = 0; i < 3 && count < max; i++) {
-            k_strcpy(entries[count].name, meta_files[i]);
+            strcpy(entries[count].name, meta_files[i]);
             entries[count].size = 0;
             entries[count].is_directory = 0;
             count++;
@@ -367,7 +367,7 @@ static bool bootfs_rmdir(void *fs_private, const char *rel_path) {
     if (!rel_path) rel_path = "";
     if (rel_path[0] == '/') rel_path++;
     
-    if (k_strcmp(rel_path, "metadata") == 0) {
+    if (strcmp(rel_path, "metadata") == 0) {
         return false; /* metadata directory is protected */
     }
     
@@ -379,7 +379,7 @@ static bool bootfs_unlink(void *fs_private, const char *rel_path) {
     if (rel_path[0] == '/') rel_path++;
     
     /* Only limine.conf can be deleted */
-    if (k_strcmp(rel_path, "limine.conf") != 0) {
+    if (strcmp(rel_path, "limine.conf") != 0) {
         return false;
     }
     
@@ -411,24 +411,24 @@ static bool bootfs_rename(void *fs_private, const char *old_path, const char *ne
     if (new_rel[0] == '/') new_rel++;
     
     /* Only limine.conf can be renamed */
-    if (k_strcmp(old_rel, "limine.conf") != 0) {
+    if (strcmp(old_rel, "limine.conf") != 0) {
         return false;
     }
     
     /* kernel and initrd are protected */
-    if (k_strcmp(new_rel, "kernel") == 0 || k_strcmp(new_rel, "initrd") == 0) {
+    if (strcmp(new_rel, "kernel") == 0 || strcmp(new_rel, "initrd") == 0) {
         return false;
     }
     
     /* metadata directory is protected */
-    if (k_strncmp(new_rel, "metadata", 8) == 0) {
+    if (strncmp(new_rel, "metadata", 8) == 0) {
         return false;
     }
     
     extern bool vfs_rename(const char *old_path, const char *new_path);
     
     char new_partition_path[256];
-    k_strcpy(new_partition_path, "/");
+    strcpy(new_partition_path, "/");
     
     /* Manually append new_rel to new_partition_path */
     int path_len = 0;
@@ -442,7 +442,7 @@ static bool bootfs_rename(void *fs_private, const char *old_path, const char *ne
         return false;
     }
     
-    k_memcpy(new_partition_path + path_len, new_rel, rel_len + 1);
+    memcpy(new_partition_path + path_len, new_rel, rel_len + 1);
     
     /* Rename on partition filesystem */
     bool result = vfs_rename("/limine.conf", new_partition_path);
@@ -466,13 +466,13 @@ static bool bootfs_exists(void *fs_private, const char *rel_path) {
     
     if (rel_path[0] == '\0') return true;
     
-    if (k_strcmp(rel_path, "limine.conf") == 0) return true;
-    if (k_strcmp(rel_path, "efi") == 0) return true;
-    if (k_strcmp(rel_path, "kernel") == 0) return true;
-    if (k_strcmp(rel_path, "initrd") == 0) return true;
-    if (k_strcmp(rel_path, "initrd.tar") == 0) return true;
+    if (strcmp(rel_path, "limine.conf") == 0) return true;
+    if (strcmp(rel_path, "efi") == 0) return true;
+    if (strcmp(rel_path, "kernel") == 0) return true;
+    if (strcmp(rel_path, "initrd") == 0) return true;
+    if (strcmp(rel_path, "initrd.tar") == 0) return true;
     
-    if (k_strcmp(rel_path, "metadata") == 0) return true;
+    if (strcmp(rel_path, "metadata") == 0) return true;
     if (is_metadata_file(rel_path)) return true;
     if (bootfs_find_custom(rel_path)) return true;
     
@@ -484,8 +484,8 @@ static bool bootfs_is_dir(void *fs_private, const char *rel_path) {
     if (rel_path[0] == '/') rel_path++;
     
     if (rel_path[0] == '\0') return true;
-    if (k_strcmp(rel_path, "efi") == 0) return true;
-    if (k_strcmp(rel_path, "metadata") == 0) return true; 
+    if (strcmp(rel_path, "efi") == 0) return true;
+    if (strcmp(rel_path, "metadata") == 0) return true; 
     
     return false;
 }
@@ -495,42 +495,42 @@ static int bootfs_get_info(void *fs_private, const char *rel_path, vfs_dirent_t 
     if (!rel_path) rel_path = "";
     if (rel_path[0] == '/') rel_path++;
     
-    k_memset(info, 0, sizeof(vfs_dirent_t));
+    memset(info, 0, sizeof(vfs_dirent_t));
     
     if (rel_path[0] == '\0') {
-        k_strcpy(info->name, "/");
+        strcpy(info->name, "/");
         info->is_directory = 1;
         return 0;
     }
     
-    if (k_strcmp(rel_path, "limine.conf") == 0) {
-        k_strcpy(info->name, "limine.conf");
+    if (strcmp(rel_path, "limine.conf") == 0) {
+        strcpy(info->name, "limine.conf");
         info->size = g_bootfs_state.limine_conf_len;
         info->is_directory = 0;
         return 0;
     }
     
-    if (k_strcmp(rel_path, "kernel") == 0) {
-        k_strcpy(info->name, "kernel");
+    if (strcmp(rel_path, "kernel") == 0) {
+        strcpy(info->name, "kernel");
         info->size = g_bootfs_state.kernel_size;
         info->is_directory = 0;
         return 0;
-    } else if (k_strcmp(rel_path, "initrd") == 0) {
-        k_strcpy(info->name, "initrd");
+    } else if (strcmp(rel_path, "initrd") == 0) {
+        strcpy(info->name, "initrd");
         info->size = g_bootfs_state.initrd_size;
         info->is_directory = 0;
         return 0;
-    } else if (k_strcmp(rel_path, "initrd.tar") == 0) {
-        k_strcpy(info->name, "initrd.tar");
+    } else if (strcmp(rel_path, "initrd.tar") == 0) {
+        strcpy(info->name, "initrd.tar");
         info->size = g_bootfs_state.initrd_size;
         info->is_directory = 0;
         return 0;
-    } else if (k_strcmp(rel_path, "metadata") == 0) {
-        k_strcpy(info->name, "metadata");
+    } else if (strcmp(rel_path, "metadata") == 0) {
+        strcpy(info->name, "metadata");
         info->is_directory = 1;
         return 0;
-    } else if (k_strcmp(rel_path, "efi") == 0) {
-        k_strcpy(info->name, "efi");
+    } else if (strcmp(rel_path, "efi") == 0) {
+        strcpy(info->name, "efi");
         info->is_directory = 1;
         return 0;
     }
@@ -538,7 +538,7 @@ static int bootfs_get_info(void *fs_private, const char *rel_path, vfs_dirent_t 
     if (is_metadata_file(rel_path)) {
         char temp_buf[4096];
         int len = generate_metadata_content(rel_path, temp_buf, 4096);
-        k_strcpy(info->name, rel_path + 9); 
+        strcpy(info->name, rel_path + 9); 
         info->size = len;
         info->is_directory = 0;
         return 0;
@@ -546,7 +546,7 @@ static int bootfs_get_info(void *fs_private, const char *rel_path, vfs_dirent_t 
     
     bootfs_custom_file_t *cf = bootfs_find_custom(rel_path);
     if (cf) {
-        k_strcpy(info->name, cf->name);
+        strcpy(info->name, cf->name);
         info->size = cf->size;
         info->is_directory = 0;
         return 0;
@@ -565,13 +565,13 @@ static uint32_t bootfs_get_size(void *file_handle) {
     bootfs_handle_t *h = (bootfs_handle_t*)file_handle;
     if (!h) return 0;
     
-    if (k_strcmp(h->path, "limine.conf") == 0) {
+    if (strcmp(h->path, "limine.conf") == 0) {
         return g_bootfs_state.limine_conf_len;
-    } else if (k_strcmp(h->path, "kernel") == 0) {
+    } else if (strcmp(h->path, "kernel") == 0) {
         return g_bootfs_state.kernel_size;
-    } else if (k_strcmp(h->path, "initrd") == 0) {
+    } else if (strcmp(h->path, "initrd") == 0) {
         return g_bootfs_state.initrd_size;
-    } else if (k_strcmp(h->path, "initrd.tar") == 0) {
+    } else if (strcmp(h->path, "initrd.tar") == 0) {
         return g_bootfs_state.initrd_size;
     } else if (is_metadata_file(h->path)) {
         char temp_buf[4096];
@@ -589,10 +589,10 @@ vfs_fs_ops_t* bootfs_get_ops(void) {
 }
 
 void bootfs_state_init(void) {
-    k_memset(&g_bootfs_state, 0, sizeof(bootfs_state_t));
+    memset(&g_bootfs_state, 0, sizeof(bootfs_state_t));
     
-    k_strcpy(g_bootfs_state.bootloader_name, "Limine");
-    k_strcpy(g_bootfs_state.bootloader_version, "6.0.0");
+    strcpy(g_bootfs_state.bootloader_name, "Limine");
+    strcpy(g_bootfs_state.bootloader_version, "6.0.0");
     
 
     g_bootfs_state.limine_conf[0] = '\0';
@@ -637,11 +637,11 @@ void bootfs_refresh_from_disk(void) {
     
     vfs_file_t *boot_conf = vfs_open("/boot/efi/limine.conf", "r");
     if (boot_conf) {
-        k_strcpy(g_limine_conf_path, "/boot/efi/limine.conf");
+        strcpy(g_limine_conf_path, "/boot/efi/limine.conf");
     } else {
         boot_conf = vfs_open("/limine.conf", "r");
         if (boot_conf) {
-            k_strcpy(g_limine_conf_path, "/limine.conf");
+            strcpy(g_limine_conf_path, "/limine.conf");
         }
     }
 

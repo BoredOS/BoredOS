@@ -19,14 +19,14 @@ static void* sysfs_open(void *fs_private, const char *path, const char *mode) {
 
     if (last_slash != -1) {
         char prefix[64];
-        k_memcpy(prefix, path, last_slash);
+        memcpy(prefix, path, last_slash);
         prefix[last_slash] = 0;
         sub = subsystem_get_by_name(prefix);
         
         if (sub) {
             const char *filename = path + last_slash + 1;
             for (int j = 0; j < sub->file_count; j++) {
-                if (k_strcmp(sub->files[j].name, filename) == 0) {
+                if (strcmp(sub->files[j].name, filename) == 0) {
                     sysfs_handle_t *h = (sysfs_handle_t*)kmalloc(sizeof(sysfs_handle_t));
                     h->sub = sub;
                     h->file = &sub->files[j];
@@ -70,7 +70,7 @@ static int sysfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entri
 
     if (exact_sub) {
         for (int i = 0; i < exact_sub->file_count && out < max; i++) {
-            k_strcpy(entries[out].name, exact_sub->files[i].name);
+            strcpy(entries[out].name, exact_sub->files[i].name);
             entries[out].is_directory = 0;
             entries[out].size = 0;
             out++;
@@ -78,11 +78,11 @@ static int sysfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entri
     }
 
     int count = subsystem_get_count();
-    int path_len = k_strlen(path);
+    int path_len = strlen(path);
 
     for (int i = 0; i < count && out < max; i++) {
         kernel_subsystem_t *s = subsystem_get_by_index(i);
-        if (path_len == 0 || (k_strlen(s->name) > path_len && k_strncmp(s->name, path, path_len) == 0 && s->name[path_len] == '/')) {
+        if (path_len == 0 || (strlen(s->name) > path_len && strncmp(s->name, path, path_len) == 0 && s->name[path_len] == '/')) {
             const char *sub_path = s->name + (path_len ? path_len + 1 : 0);
             char comp[64];
             int j = 0;
@@ -96,13 +96,13 @@ static int sysfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entri
 
             bool found = false;
             for (int k = 0; k < out; k++) {
-                if (k_strcmp(entries[k].name, comp) == 0) {
+                if (strcmp(entries[k].name, comp) == 0) {
                     found = true;
                     break;
                 }
             }
             if (!found) {
-                k_strcpy(entries[out].name, comp);
+                strcpy(entries[out].name, comp);
                 entries[out].is_directory = 1;
                 entries[out].size = 0;
                 out++;
@@ -123,22 +123,22 @@ static bool sysfs_exists(void *fs_private, const char *path) {
     for (int j = 0; path[j]; j++) if (path[j] == '/') last_slash = j;
     if (last_slash != -1) {
         char prefix[64];
-        k_memcpy(prefix, path, last_slash);
+        memcpy(prefix, path, last_slash);
         prefix[last_slash] = 0;
         kernel_subsystem_t *sub = subsystem_get_by_name(prefix);
         if (sub) {
             const char *filename = path + last_slash + 1;
             for (int j = 0; j < sub->file_count; j++) {
-                if (k_strcmp(sub->files[j].name, filename) == 0) return true;
+                if (strcmp(sub->files[j].name, filename) == 0) return true;
             }
         }
     }
 
     int count = subsystem_get_count();
-    int path_len = k_strlen(path);
+    int path_len = strlen(path);
     for (int i = 0; i < count; i++) {
         kernel_subsystem_t *s = subsystem_get_by_index(i);
-        if (k_strlen(s->name) > path_len && k_strncmp(s->name, path, path_len) == 0 && s->name[path_len] == '/') return true;
+        if (strlen(s->name) > path_len && strncmp(s->name, path, path_len) == 0 && s->name[path_len] == '/') return true;
     }
 
     return false;
@@ -152,13 +152,13 @@ static bool sysfs_is_dir(void *fs_private, const char *path) {
     for (int j = 0; path[j]; j++) if (path[j] == '/') last_slash = j;
     if (last_slash != -1) {
         char prefix[64];
-        k_memcpy(prefix, path, last_slash);
+        memcpy(prefix, path, last_slash);
         prefix[last_slash] = 0;
         kernel_subsystem_t *sub = subsystem_get_by_name(prefix);
         if (sub) {
             const char *filename = path + last_slash + 1;
             for (int j = 0; j < sub->file_count; j++) {
-                if (k_strcmp(sub->files[j].name, filename) == 0) return false;
+                if (strcmp(sub->files[j].name, filename) == 0) return false;
             }
         }
     }

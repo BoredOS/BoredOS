@@ -1338,7 +1338,7 @@ static uint64_t fs_cmd_list(const syscall_args_t *args) {
     if (count > 0) {
         for (int i = 0; i < count; i++) {
             // Direct copy as layouts are now aligned
-            k_strcpy(u_entries[i].name, v_entries[i].name);
+            strcpy(u_entries[i].name, v_entries[i].name);
             u_entries[i].size = v_entries[i].size;
             u_entries[i].is_directory = v_entries[i].is_directory;
             u_entries[i].start_cluster = v_entries[i].start_cluster;
@@ -1371,7 +1371,7 @@ static uint64_t fs_cmd_get_info(const syscall_args_t *args) {
     vfs_dirent_t v_info;
     int res = vfs_get_info(normalized, &v_info);
     if (res == 0) {
-        k_strcpy(u_info->name, v_info.name);
+        strcpy(u_info->name, v_info.name);
         u_info->size = v_info.size;
         u_info->is_directory = v_info.is_directory;
         u_info->start_cluster = v_info.start_cluster;
@@ -1398,9 +1398,9 @@ static uint64_t fs_cmd_getcwd(const syscall_args_t *args) {
     char *buf = (char *)args->arg2;
     int size = (int)args->arg3;
     if (!buf || size <= 0) return -1;
-    int len = (int)k_strlen(proc->cwd);
+    int len = (int)strlen(proc->cwd);
     if (len >= size) return -1;
-    k_strcpy(buf, proc->cwd);
+    strcpy(buf, proc->cwd);
     return (uint64_t)len;
 }
 
@@ -1411,7 +1411,7 @@ static uint64_t fs_cmd_chdir(const syscall_args_t *args) {
     char normalized[VFS_MAX_PATH];
     vfs_normalize_path(proc->cwd, path, normalized);
     if (vfs_is_directory(normalized)) {
-        k_strcpy(proc->cwd, normalized);
+        strcpy(proc->cwd, normalized);
         return 0;
     }
     return -1;
@@ -1699,13 +1699,13 @@ static uint64_t sys_cmd_set_text_color(const syscall_args_t *args) {
         seq[pos++] = ';';
 
         char num[8];
-        k_itoa(r, num);
+        itoa(r, num);
         for (int i = 0; num[i] && pos < (int)sizeof(seq) - 1; i++) seq[pos++] = num[i];
         seq[pos++] = ';';
-        k_itoa(g, num);
+        itoa(g, num);
         for (int i = 0; num[i] && pos < (int)sizeof(seq) - 1; i++) seq[pos++] = num[i];
         seq[pos++] = ';';
-        k_itoa(b, num);
+        itoa(b, num);
         for (int i = 0; num[i] && pos < (int)sizeof(seq) - 1; i++) seq[pos++] = num[i];
         seq[pos++] = 'm';
 

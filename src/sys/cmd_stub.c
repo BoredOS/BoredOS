@@ -35,13 +35,13 @@ void cmd_putchar(char c) {
 
 void cmd_write_int(int n) {
     char buf[32];
-    k_itoa(n, buf);
+    itoa(n, buf);
     cmd_write(buf);
 }
 
 void cmd_write_hex(uint64_t n) {
     char buf[17];
-    k_itoa_hex(n, buf);
+    itoa_hex(n, buf);
     cmd_write("0x");
     cmd_write(buf);
 }

@@ -87,7 +87,7 @@ static void virtqueue_init(struct virtqueue* vq, uint8_t* mem, uint16_t qsize) {
     uintptr_t used_start = (avail_end + 4095) & ~4095;
     vq->used = (struct vq_used*)used_start;
     
-    k_memset(mem, 0, 16384);
+    memset(mem, 0, 16384);
 }
 
 int virtio_net_init(pci_device_t* pci_dev) {
@@ -105,7 +105,7 @@ int virtio_net_init(pci_device_t* pci_dev) {
 
     extern void serial_write(const char *str);
     serial_write("[VIRTIO-NET] I/O Base: 0x");
-    char hex_buf[32]; k_itoa_hex(io_base, hex_buf); serial_write(hex_buf); serial_write("\n");
+    char hex_buf[32]; itoa_hex(io_base, hex_buf); serial_write(hex_buf); serial_write("\n");
 
     outb(io_base + VIRTIO_PCI_STATUS, 0);
     
@@ -145,7 +145,7 @@ int virtio_net_init(pci_device_t* pci_dev) {
     serial_write("[VIRTIO-NET] MAC: ");
     for(int i=0; i<6; i++) {
         char buf[4];
-        k_itoa_hex(mac_addr[i], buf);
+        itoa_hex(mac_addr[i], buf);
         serial_write(buf);
         if(i<5) serial_write(":");
     }
@@ -176,7 +176,7 @@ int virtio_net_send_packet(const void* data, size_t length) {
     uint16_t head = tx_vq.last_avail_idx % (tx_vq.q_size / 2);
     uint16_t d_idx = head * 2;
 
-    k_memset(&tx_hdr[head], 0, sizeof(struct virtio_net_hdr));
+    memset(&tx_hdr[head], 0, sizeof(struct virtio_net_hdr));
     tx_vq.desc[d_idx].addr = v2p((uint64_t)(uintptr_t)&tx_hdr[head]);
     tx_vq.desc[d_idx].len = sizeof(struct virtio_net_hdr);
     tx_vq.desc[d_idx].flags = VRING_DESC_F_NEXT;
