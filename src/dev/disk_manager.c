@@ -42,6 +42,32 @@ static int dm_strlen(const char *s) {
     return n;
 }
 
+static void dm_copy_fat_label(char *dst, const uint8_t *src) {
+    int end = 11;
+    while (end > 0 && src[end - 1] == ' ') end--;
+    for (int i = 0; i < end && i < 31; i++) dst[i] = (char)src[i];
+    dst[end < 31 ? end : 31] = 0;
+}
+
+static void disk_load_fat32_label(Disk *disk) {
+    uint8_t *buffer;
+    FAT32_BootSector *bpb;
+    char label[32];
+
+    if (!disk || !disk->read_sector) return;
+
+    buffer = (uint8_t*)kmalloc(512);
+    if (!buffer) return;
+
+    if (disk->read_sector(disk, 0, buffer) == 0 && buffer[510] == 0x55 && buffer[511] == 0xAA) {
+        bpb = (FAT32_BootSector*)buffer;
+        dm_copy_fat_label(label, bpb->volume_label);
+        if (label[0]) dm_strcpy(disk->label, label);
+    }
+
+    kfree(buffer);
+}
+
 // === ATA Definitions (Legacy IDE PIO — kept as fallback) ===
 
 #define ATA_PRIMARY_IO   0x1F0
@@ -387,6 +413,8 @@ void disk_register_partition(Disk *parent, uint32_t lba_offset, uint32_t sector_
     part->is_partition = true;
     part->registered = true;
 
+    if (is_fat32) disk_load_fat32_label(part);
+
     disks[disk_count++] = part;
 
     serial_write("[DISK] Registered /dev/");
@@ -567,6 +595,7 @@ static void parse_mbr_partitions(Disk *disk) {
         serial_write("\n");
         disk->is_fat32 = true;
         disk->partition_lba_offset = 0;
+        disk_load_fat32_label(disk);
     } else if (part_count == 0) {
         serial_write("[DISK] No MBR partitions found on /dev/");
         serial_write(disk->devname);

@@ -53,6 +53,7 @@ Below are some of the most used commands available in `/bin`:
 | `rm` | Remove a file. |
 | `mkdir` | Create a new directory. |
 | `man` | View the manual for a specific command (e.g., `man ls`). |
+| `lsblk` | List block devices and partitions with size, type, filesystem, label, and flags. |
 | `sysfetch` | Display system and hardware information. |
 
 

@@ -25,6 +25,7 @@ int main(int argc, char **argv) {
     printf("date           - Print current date and time\n");
     printf("uptime         - Print system uptime\n");
     printf("meminfo        - Print memory information\n");
+    printf("lsblk          - List block devices and partitions\n");
     printf("cowsay [msg]   - Fun cow says something\n");
     printf("beep           - Make a beep sound\n");
     printf("reboot         - Reboot the system\n");

@@ -28,6 +28,13 @@ static void mf_strncpy(char *dst, const char *src, int n) {
     while (i < n) { dst[i++] = ' '; }  /* FAT labels are space-padded */
 }
 
+static void mf_set_disk_label(Disk *disk, const char *label) {
+    int end = 11;
+    while (end > 0 && label[end - 1] == ' ') end--;
+    for (int i = 0; i < end && i < 31; i++) disk->label[i] = label[i];
+    disk->label[end < 31 ? end : 31] = 0;
+}
+
 // On-disk BPB structures
 
 typedef struct __attribute__((packed)) {
@@ -269,13 +276,15 @@ int mkfs_fat32_format(Disk *disk, uint32_t sector_count, const char *label) {
 
     kfree(buf);
 
+    disk->is_fat32 = true;
+    mf_set_disk_label(disk, upper_label);
+
     serial_write("[MKFS] FAT32 formatted: ");
     serial_write(disk->devname);
     serial_write(" label=");
     char lb[12];
-    mf_memcpy(lb, vol_label, 11);
+    mf_memcpy(lb, upper_label, 11);
     lb[11] = 0;
-    for (int i = 0; i < 11; i++) lb[i] = (lb[i] >= 'a' && lb[i] <= 'z') ? lb[i] - 32 : lb[i];
     for (int i = 10; i >= 0 && lb[i] == ' '; i--) lb[i] = 0;
     serial_write(lb);
     serial_write(" spc=");
