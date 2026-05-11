@@ -158,7 +158,7 @@ static int _b_pipe_read(fd_handle_t *h, void *buf, size_t count) {
                 }
                 break;
             }
-            sys_yield();
+            sleep(1);
             continue;
         }
 
@@ -193,7 +193,7 @@ static int _b_pipe_write(fd_handle_t *h, const void *buf, size_t count) {
                 }
                 break;
             }
-            sys_yield();
+            sleep(1);
             continue;
         }
 

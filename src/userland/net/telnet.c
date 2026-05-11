@@ -363,7 +363,7 @@ int main(int argc, char **argv) {
                 connected = 0;
                 break;
             }
-            sys_yield();
+            sys_system(SYSTEM_CMD_SLEEP, 10, 0, 0, 0);
             continue;
         }
 

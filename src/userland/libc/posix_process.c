@@ -3,6 +3,7 @@
 
 #include "errno.h"
 #include "stdio.h"
+#include "stdlib.h"
 #include "string.h"
 #include "sys/types.h"
 #include "sys/wait.h"
@@ -219,6 +220,6 @@ __attribute__((weak)) pid_t waitpid(pid_t pid, int *status, int options) {
             errno = ECHILD;
             return -1;
         }
-        sys_yield();
+        sleep(1);
     }
 }

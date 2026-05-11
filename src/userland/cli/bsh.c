@@ -1438,7 +1438,7 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
         int got = sys_tty_read_in(&ch, 1);
         if (got <= 0) {
             // Throttle idle input polling to avoid pegging the CPU at 100%
-            sleep(1);
+            sleep(50);
             continue;
         }
 

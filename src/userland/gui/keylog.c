@@ -54,7 +54,7 @@ int main(void) {
             draw(win);
             ui_mark_dirty(win, 0, 0, WINDOW_W, WINDOW_H);
         } else {
-            sys_yield();
+            sys_system(SYSTEM_CMD_SLEEP, 10, 0, 0, 0);
         }
     }
 

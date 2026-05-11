@@ -1988,7 +1988,7 @@ int main(int argc, char **argv) {
             ui_mark_dirty(win, 0, 0, win_w, win_h);
             needs_repaint = 0;
         } else {
-            sys_yield();
+            sys_system(SYSTEM_CMD_SLEEP, 16, 0, 0, 0);
         }
     }
     return 0;
