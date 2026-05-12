@@ -2,6 +2,13 @@
 
 BoredOS is built cross-compiled from a host system (such as macOS or Linux) to target the generic `x86_64-elf` platform.
 
+
+## Table of Contents
+
+- [Prerequisites](#prerequisites)
+- [Building the Cross-Compiler on Linux](#building-the-cross-compiler-on-linux)
+- [Installing the Toolchain on Windows](#installing-the-toolchain-on-windows)
+
 ## Prerequisites
 
 To build BoredOS, you need the following tools:
