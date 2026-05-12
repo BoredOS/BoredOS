@@ -65,3 +65,76 @@ x86_64-elf-gcc --version
 ```
 
 > **Note**: Building the cross-compiler can take 20-30 minutes depending on system performance. This is a one-time setup cost.
+
+## Installing the Toolchain on Windows
+
+### Recommended Environment: MSYS2
+
+On Windows, the recommended way to build BoredOS is using **MSYS2**.  
+MSYS2 provides a Unix-like environment with the `pacman` package manager, making it easy to install the required development tools and the `x86_64-elf` cross-toolchain directly from the repositories.
+
+### 1. Install MSYS2
+
+Download and install MSYS2 from the official website:
+
+- https://www.msys2.org/
+
+After installation, launch the **MSYS2 UCRT64** terminal.
+
+---
+
+### 2. Update MSYS2
+
+Before installing packages, fully update the environment:
+
+```bash
+pacman -Syu
+```
+
+You may be asked to close the terminal after the first update.  
+If so:
+
+1. Close the MSYS2 window
+2. Reopen **MSYS2 UCRT64**
+3. Run the update command again:
+
+```bash
+pacman -Syu
+```
+
+Repeat until no further updates are available.
+
+---
+
+### 3. Install Required Packages
+
+Install the required development tools:
+
+```bash
+pacman -S \
+    make \
+    git \
+    nasm \
+    xorriso \
+    qemu-system-x86_64
+```
+
+---
+
+### 4. Install the x86_64 ELF Toolchain
+
+MSYS2 provides the full `x86_64-elf` cross-compilation toolchain directly through `pacman`.
+
+Install it with:
+
+```bash
+pacman -S \
+    mingw-w64-ucrt-x86_64-x86_64-elf-gcc \
+    mingw-w64-ucrt-x86_64-x86_64-elf-binutils
+```
+
+This installs:
+
+- `x86_64-elf-gcc`
+- `x86_64-elf-ld`
+- other required ELF binutils
