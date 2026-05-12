@@ -33,6 +33,9 @@
 #define FS_CMD_DUP2 16
 #define FS_CMD_PIPE 17
 #define FS_CMD_FCNTL 18
+#define FS_CMD_STATFS 19
+#define FS_CMD_MOUNT_COUNT 20
+#define FS_CMD_MOUNT_INFO 21
 
 // System Commands (via SYS_SYSTEM)
 #define SYSTEM_CMD_SET_BG_COLOR 1
@@ -155,6 +158,18 @@ typedef struct {
 int sys_get_os_info(os_info_t *info);
 
 // FS API
+typedef struct {
+    uint64_t total_blocks;
+    uint64_t free_blocks;
+    uint64_t block_size;
+} vfs_statfs_t;
+
+typedef struct {
+    char path[256];
+    char device[32];
+    char fs_type[16];
+} mount_info_t;
+
 int sys_open(const char *path, const char *mode);
 int sys_read(int fd, void *buf, uint32_t len);
 int sys_write_fs(int fd, const void *buf, uint32_t len);
@@ -171,6 +186,9 @@ int sys_dup(int oldfd);
 int sys_dup2(int oldfd, int newfd);
 int sys_pipe(int pipefd[2]);
 int sys_fcntl(int fd, int cmd, int val);
+int sys_fs_statfs(const char *path, vfs_statfs_t *stat);
+int sys_fs_mount_count(void);
+int sys_fs_mount_info(int index, mount_info_t *info);
 
 int sys_tty_create(void);
 int sys_tty_read_out(int tty_id, char *buf, int len);

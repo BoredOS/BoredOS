@@ -161,6 +161,18 @@ int sys_fcntl(int fd, int cmd, int val) {
     return (int)syscall4(SYS_FS, FS_CMD_FCNTL, (uint64_t)fd, (uint64_t)cmd, (uint64_t)val);
 }
 
+int sys_fs_statfs(const char *path, vfs_statfs_t *stat) {
+    return (int)syscall3(SYS_FS, FS_CMD_STATFS, (uint64_t)path, (uint64_t)stat);
+}
+
+int sys_fs_mount_count(void) {
+    return (int)syscall1(SYS_FS, FS_CMD_MOUNT_COUNT);
+}
+
+int sys_fs_mount_info(int index, mount_info_t *info) {
+    return (int)syscall3(SYS_FS, FS_CMD_MOUNT_INFO, (uint64_t)index, (uint64_t)info);
+}
+
 int sys_tty_create(void) {
     return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_TTY_CREATE, 0);
 }

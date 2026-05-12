@@ -1661,6 +1661,22 @@ static uint32_t vfs_fat_get_size(void *file_handle) {
     return ((FAT32_FileHandle*)file_handle)->size;
 }
 
+static int vfs_ramfs_statfs(void *fs_private, vfs_statfs_t *stat) {
+    (void)fs_private;
+    uint64_t rflags = spinlock_acquire_irqsave(&ramfs_lock);
+    
+    stat->total_blocks = MAX_CLUSTERS;
+    uint64_t free_count = 0;
+    for (int i = 0; i < MAX_CLUSTERS; i++) {
+        if (fat_table[i] == 0) free_count++;
+    }
+    stat->free_blocks = free_count;
+    stat->block_size = FAT32_CLUSTER_SIZE;
+    
+    spinlock_release_irqrestore(&ramfs_lock, rflags);
+    return 0;
+}
+
 static struct vfs_fs_ops ramfs_ops = {
     .open = vfs_ramfs_open,
     .close = vfs_ramfs_close,
@@ -1676,7 +1692,8 @@ static struct vfs_fs_ops ramfs_ops = {
     .is_dir = vfs_ramfs_is_dir,
     .get_info = vfs_ramfs_get_info,
     .get_position = vfs_fat_get_position,
-    .get_size = vfs_fat_get_size
+    .get_size = vfs_fat_get_size,
+    .statfs = vfs_ramfs_statfs
 };
 
 struct vfs_fs_ops* fat32_get_ramfs_ops(void) {
@@ -1858,6 +1875,45 @@ static int vfs_realfs_get_info(void *fs_private, const char *rel_path, vfs_diren
     return -1;
 }
 
+static int vfs_realfs_statfs(void *fs_private, vfs_statfs_t *stat) {
+    FAT32_Volume *vol = (FAT32_Volume*)fs_private;
+    uint64_t rflags = spinlock_acquire_irqsave(&vol->lock);
+    
+    stat->total_blocks = vol->total_sectors / vol->sectors_per_cluster;
+    stat->block_size = vol->sectors_per_cluster * 512;
+    
+    // Instead of scanning the entire FAT which can be slow, 
+    // we estimate or count a subset, but let's do a fast count.
+    uint64_t free_count = 0;
+    uint32_t fat_entries = (vol->fat_size * 512) / 4;
+    uint32_t current = 2;
+    
+    uint8_t *fat_buf = (uint8_t*)kmalloc(512);
+    if (fat_buf) {
+        uint32_t cached_sector = 0xFFFFFFFF;
+        while (current < fat_entries) {
+            uint32_t sector = vol->fat_begin_lba + (current * 4) / 512;
+            uint32_t offset = (current * 4) % 512;
+            
+            if (sector != cached_sector) {
+                if (vol->disk->read_sector(vol->disk, sector, fat_buf) != 0) break;
+                cached_sector = sector;
+            }
+            
+            uint32_t val = *(uint32_t*)&fat_buf[offset];
+            if ((val & 0x0FFFFFFF) == 0) free_count++;
+            
+            current++;
+        }
+        kfree(fat_buf);
+    }
+    
+    stat->free_blocks = free_count;
+    
+    spinlock_release_irqrestore(&vol->lock, rflags);
+    return 0;
+}
+
 static struct vfs_fs_ops realfs_ops = {
     .open = vfs_realfs_open,
     .close = vfs_realfs_close,
@@ -1873,7 +1929,8 @@ static struct vfs_fs_ops realfs_ops = {
     .is_dir = vfs_realfs_is_dir,
     .get_info = vfs_realfs_get_info,
     .get_position = vfs_fat_get_position,
-    .get_size = vfs_fat_get_size
+    .get_size = vfs_fat_get_size,
+    .statfs = vfs_realfs_statfs
 };
 
 struct vfs_fs_ops* fat32_get_realfs_ops(void) {

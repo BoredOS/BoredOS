@@ -467,6 +467,14 @@ bool procfs_is_dir(void *fs_private, const char *path) {
     return false; 
 }
 
+static int procfs_statfs(void *fs_private, vfs_statfs_t *stat) {
+    (void)fs_private;
+    stat->total_blocks = 0;
+    stat->free_blocks = 0;
+    stat->block_size = 512;
+    return 0;
+}
+
 vfs_fs_ops_t procfs_ops = {
     .open = procfs_open,
     .close = procfs_close,
@@ -474,7 +482,8 @@ vfs_fs_ops_t procfs_ops = {
     .write = procfs_write,
     .readdir = procfs_readdir,
     .exists = procfs_exists,
-    .is_dir = procfs_is_dir 
+    .is_dir = procfs_is_dir,
+    .statfs = procfs_statfs
 };
 
 vfs_fs_ops_t* procfs_get_ops(void) {

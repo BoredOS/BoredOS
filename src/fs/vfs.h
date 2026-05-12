@@ -13,6 +13,13 @@
 #define VFS_MAX_MOUNTS 16
 #define VFS_MAX_OPEN_FILES 64
 
+// statfs structure
+typedef struct {
+    uint64_t total_blocks;
+    uint64_t free_blocks;
+    uint64_t block_size;
+} vfs_statfs_t;
+
 // Forward declarations
 typedef struct vfs_mount vfs_mount_t;
 typedef struct vfs_file vfs_file_t;
@@ -47,6 +54,7 @@ typedef struct vfs_fs_ops {
     bool  (*exists)(void *fs_private, const char *rel_path);
     bool  (*is_dir)(void *fs_private, const char *rel_path);
     int   (*get_info)(void *fs_private, const char *rel_path, vfs_dirent_t *info);
+    int   (*statfs)(void *fs_private, vfs_statfs_t *stat);
 
     // Handle info (for backward compat with syscall position/size queries)
     uint32_t (*get_position)(void *file_handle);
@@ -99,6 +107,7 @@ bool vfs_rename(const char *old_path, const char *new_path);
 bool vfs_exists(const char *path);
 bool vfs_is_directory(const char *path);
 int vfs_get_info(const char *path, vfs_dirent_t *info);
+int vfs_statfs(const char *path, vfs_statfs_t *stat);
 
 // Mount enumeration
 int vfs_get_mount_count(void);
