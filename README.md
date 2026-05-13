@@ -235,34 +235,3 @@ Distributed under the **GNU General Public License v3**. See [`LICENSE`](LICENSE
 > [!IMPORTANT]
 > You must retain all copyright headers and include the original attribution in any redistributions or derivative works. See the [`NOTICE`](NOTICE) file for more details.
 
----
-
-## ☕ Support the Journey
-
-If you find BoredOS interesting or useful, consider fueling development with a coffee!
-
-<a href="https://buymeacoffee.com/boreddevhq" target="_blank">
-  <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" style="border-radius: 8px;" />
-</a>
-
----
-
-## History
-
-**BoredOS** is the successor to **[BrewKernel](https://github.com/boreddevnl/brewkernel)**, a project started in 2023. BrewKernel served as the foundational learning ground but has since been officially deprecated and archived — it no longer receives updates, bug fixes, or pull request reviews.
-
-BoredOS is a complete architectural reboot, applying years of lessons learned to build a cleaner, more modular, and more capable system.
-
-> [!IMPORTANT]
-> Please direct all issues, discussions, and contributions to this repository. Legacy BrewKernel code is preserved for historical purposes only and is not compatible with BoredOS.
-
----
-
-## License
-
-**Copyright (C) 2023–2026 boreddevnl**
-
-Distributed under the **GNU General Public License v3**. See [`LICENSE`](LICENSE) for details.
-
-> [!IMPORTANT]
-> You must retain all copyright headers and include the original attribution in any redistributions or derivative works. See the [`NOTICE`](NOTICE) file for more details.
