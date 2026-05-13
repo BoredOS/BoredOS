@@ -36,43 +36,21 @@ USERLAND_METADATA_ICONS = $(shell { \
 } | tr ';' '\n' | sed 's@.*/@@' | sed '/^[[:space:]]*$$/d' | sort -u)
 COLLOID_ICONS = $(sort $(DOCK_COLLOID_ICONS) $(USERLAND_COLLOID_ICONS) $(USERLAND_METADATA_ICONS) xterm.png)
 
-C_SOURCES = $(wildcard $(SRC_DIR)/core/*.c) \
-            $(wildcard $(SRC_DIR)/sys/*.c) \
-            $(wildcard $(SRC_DIR)/mem/*.c) \
-            $(wildcard $(SRC_DIR)/dev/*.c) \
-			$(wildcard $(SRC_DIR)/drivers/*.c) \
-            $(wildcard $(SRC_DIR)/input/*.c) \
-            $(wildcard $(SRC_DIR)/net/*.c) \
-            $(wildcard $(SRC_DIR)/net/nic/*.c) \
-            $(wildcard $(SRC_DIR)/fs/*.c) \
-            $(wildcard $(SRC_DIR)/wm/*.c) \
-			$(wildcard $(SRC_DIR)/net/third_party/lwip/core/*.c) \
-			$(wildcard $(SRC_DIR)/net/third_party/lwip/core/ipv4/*.c) \
-			$(SRC_DIR)/net/third_party/lwip/netif/ethernet.c \
-			$(SRC_DIR)/net/third_party/lwip/netif/bridgeif.c
+C_SOURCES := $(shell find $(SRC_DIR) -type f -name '*.c' \
+                ! -path '$(SRC_DIR)/userland/*' \
+                ! -path '*/third_party/lwip/netif/slipif.c')
+ASM_SOURCES := $(shell find $(SRC_DIR) -type f -name '*.asm' ! -path '$(SRC_DIR)/userland/*')
 
-ASM_SOURCES = $(wildcard $(SRC_DIR)/arch/*.asm)
-OBJ_FILES = $(patsubst $(SRC_DIR)/core/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/core/*.c)) \
-            $(patsubst $(SRC_DIR)/sys/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/sys/*.c)) \
-            $(patsubst $(SRC_DIR)/mem/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/mem/*.c)) \
-            $(patsubst $(SRC_DIR)/dev/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/dev/*.c)) \
-			$(patsubst $(SRC_DIR)/drivers/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/drivers/*.c)) \
-            $(patsubst $(SRC_DIR)/input/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/input/*.c)) \
-            $(patsubst $(SRC_DIR)/net/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/net/*.c)) \
-            $(patsubst $(SRC_DIR)/net/nic/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/net/nic/*.c)) \
-            $(patsubst $(SRC_DIR)/fs/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/fs/*.c)) \
-            $(patsubst $(SRC_DIR)/wm/%.c, $(BUILD_DIR)/%.o, $(wildcard $(SRC_DIR)/wm/*.c)) \
-			$(patsubst $(SRC_DIR)/net/third_party/lwip/%.c, $(BUILD_DIR)/lwip/%.o, $(filter $(SRC_DIR)/net/third_party/lwip/%.c, $(C_SOURCES))) \
-            $(patsubst $(SRC_DIR)/arch/%.asm, $(BUILD_DIR)/%.o, $(ASM_SOURCES))
+OBJ_FILES := $(patsubst $(SRC_DIR)/%.c, $(BUILD_DIR)/%.o, $(C_SOURCES)) \
+             $(patsubst $(SRC_DIR)/%.asm, $(BUILD_DIR)/%.o, $(ASM_SOURCES))
+
+INCLUDE_DIRS := $(shell find $(SRC_DIR) -type d ! -path '$(SRC_DIR)/userland*')
+INCLUDES := $(patsubst %, -I%, $(INCLUDE_DIRS))
 
 CFLAGS = -g -O2 -pipe -Wall -Wextra -std=gnu11 -ffreestanding \
          -fno-stack-protector -fno-stack-check -fno-lto -fPIE \
          -m64 -march=x86-64 -msse -msse2 -mstackrealign -mno-red-zone \
-         -I$(SRC_DIR) -I$(SRC_DIR)/net/third_party/lwip -I$(SRC_DIR)/core \
-         -I$(SRC_DIR)/sys -I$(SRC_DIR)/mem -I$(SRC_DIR)/dev \
-         -I$(SRC_DIR)/drivers \
-         -I$(SRC_DIR)/net -I$(SRC_DIR)/net/nic -I$(SRC_DIR)/fs \
-         -I$(SRC_DIR)/wm -I$(SRC_DIR)/input
+         $(INCLUDES)
 
 LDFLAGS = -m elf_x86_64 -nostdlib -static -pie --no-dynamic-linker \
           -z text -z max-page-size=0x1000 -T linker.ld
@@ -94,118 +72,52 @@ all:
 $(BUILD_DIR):
 	$(call PRINT_STEP,CREATING BUILD DIRECTORY)
 	mkdir -p $(BUILD_DIR)
-	mkdir -p $(BUILD_DIR)
 
 limine-setup:
 	$(call PRINT_STEP,SETTING UP LIMINE)
 	@if [ ! -f limine/limine-bios.sys ]; then \
-		printf "$(YELLOW)[LIMINE] Limine binaries missing or invalid. Cloning v$(LIMINE_VERSION)-binary...$(RESET)"; \
+		printf "$(YELLOW)[LIMINE] Limine binaries missing or invalid. Cloning v$(LIMINE_VERSION)-binary...$(RESET)\n"; \
 		rm -rf limine; \
 		git clone https://github.com/limine-bootloader/limine.git --branch=v$(LIMINE_VERSION)-binary --depth=1 limine; \
 	else \
-		printf "$(YELLOW)[LIMINE] Existing Limine binaries found.$(RESET)"; \
+		printf "$(YELLOW)[LIMINE] Existing Limine binaries found.$(RESET)\n"; \
 	fi
 	@if [ ! -f $(SRC_DIR)/core/limine.h ]; then \
-		printf "$(YELLOW)[LIMINE] Copying limine.h...$(RESET)"; \
+		printf "$(YELLOW)[LIMINE] Copying limine.h...$(RESET)\n"; \
 		cp limine/limine.h $(SRC_DIR)/core/limine.h; \
 	else \
-		printf "$(YELLOW)[LIMINE] limine.h already present.$(RESET)"; \
+		printf "$(YELLOW)[LIMINE] limine.h already present.$(RESET)\n"; \
 	fi
-	@printf "$(YELLOW)[LIMINE] Building Limine host utility...$(RESET)"
+	@printf "$(YELLOW)[LIMINE] Building Limine host utility...$(RESET)\n"
 	$(MAKE) -C limine
-	@printf "$(GREEN)[OK] Limine setup complete.$(RESET)"
+	@printf "$(GREEN)[OK] Limine setup complete.$(RESET)\n"
 
 $(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET) $< -> $@"
-	mkdir -p $(dir $@)
+	@printf "$(YELLOW)[CC]$(RESET) $< -> $@\n"
+	@mkdir -p $(dir $@)
 	$(CC) $(CFLAGS) -c $< -o $@
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/core/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[core] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/sys/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[sys] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/mem/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[mem] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/dev/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[dev] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/drivers/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[drivers] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-	
-$(BUILD_DIR)/%.o: $(SRC_DIR)/input/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[input] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/net/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[net] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/net/nic/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[net/nic] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/fs/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[fs] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/wm/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[wm] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/lwip/%.o: $(SRC_DIR)/net/third_party/lwip/%.c | $(BUILD_DIR) limine-setup
-	@printf "$(YELLOW)[CC]$(RESET)[lwIP] $< -> $@"
-	mkdir -p $(dir $@)
-	$(CC) $(CFLAGS) -c $< -o $@
-
-$(BUILD_DIR)/%.o: $(SRC_DIR)/arch/%.asm | $(BUILD_DIR)
-	@printf "$(YELLOW)[ASM]$(RESET) $< -> $@"
+$(BUILD_DIR)/%.o: $(SRC_DIR)/%.asm | $(BUILD_DIR)
+	@printf "$(YELLOW)[ASM]$(RESET) $< -> $@\n"
+	@mkdir -p $(dir $@)
 	$(NASM) $(NASMFLAGS) $< -o $@
 
-$(BUILD_DIR)/test_syscall.o: $(SRC_DIR)/arch/test_syscall.asm | $(BUILD_DIR)
-	@printf "$(YELLOW)[ASM][test_syscall]$(RESET) $< -> $@"
-	$(NASM) $(NASMFLAGS) $< -o $@
-
-$(BUILD_DIR)/user_test.o: $(SRC_DIR)/arch/user_test.asm | $(BUILD_DIR)
-	@printf "$(YELLOW)[ASM][user_test]$(RESET) $< -> $@"
-	$(NASM) $(NASMFLAGS) $< -o $@
-
-$(BUILD_DIR)/process_asm.o: $(SRC_DIR)/arch/process_asm.asm | $(BUILD_DIR)
-	@printf "$(YELLOW)[ASM][process]$(RESET) $< -> $@"
-	$(NASM) $(NASMFLAGS) $< -o $@
 
 $(KERNEL_ELF): $(OBJ_FILES)
 	$(call PRINT_STEP,LINKING KERNEL)
-	@printf "$(YELLOW)[LD]$(RESET) Linking kernel ELF: $@"
+	@printf "$(YELLOW)[LD]$(RESET) Linking kernel ELF: $@\n"
 	$(LD) $(LDFLAGS) -o $@ $(OBJ_FILES)
-	@printf "$(GREEN)[OK]$(RESET) Kernel ELF built: $@"
+	@printf "$(GREEN)[OK]$(RESET) Kernel ELF built: $@\n"
 	$(call PRINT_STEP,BUILDING USERLAND)
 	$(MAKE) -C $(SRC_DIR)/userland
-	@printf "$(GREEN)[OK]$(RESET) Userland build complete."
+	@printf "$(GREEN)[OK]$(RESET) Userland build complete.\n"
 
 $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	$(call PRINT_STEP,BUILDING INITRD)
-	@printf "$(YELLOW)[INITRD]$(RESET) Cleaning previous initrd directory..."
+	@printf "$(YELLOW)[INITRD]$(RESET) Cleaning previous initrd directory...\n"
 	rm -rf $(BUILD_DIR)/initrd
 
-	@printf "$(YELLOW)[INITRD]$(RESET) Creating directory structure..."
+	@printf "$(YELLOW)[INITRD]$(RESET) Creating directory structure...\n"
 	mkdir -p $(BUILD_DIR)/initrd/bin
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/Wallpapers
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/gif
@@ -232,21 +144,21 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/usr/include/libc
 	mkdir -p $(BUILD_DIR)/initrd/usr/lib
 
-	@printf "$(YELLOW)[COPY]$(RESET) Limine binaries + kernel for installer..."
-	@if [ -f limine/BOOTX64.EFI ];     then cp limine/BOOTX64.EFI    $(BUILD_DIR)/initrd/boot/; fi
+	@printf "$(YELLOW)[COPY]$(RESET) Limine binaries + kernel for installer...\n"
+	@if [ -f limine/BOOTX64.EFI ]; then cp limine/BOOTX64.EFI    $(BUILD_DIR)/initrd/boot/; fi
 	@if [ -f limine/BOOTIA32.EFI ];    then cp limine/BOOTIA32.EFI   $(BUILD_DIR)/initrd/boot/; fi
 	@if [ -f limine/limine-bios.sys ]; then cp limine/limine-bios.sys $(BUILD_DIR)/initrd/boot/; fi
 	@cp $(KERNEL_ELF) $(BUILD_DIR)/initrd/boot/boredos.elf
 
-	@printf "$(YELLOW)[COPY]$(RESET) Userland binaries..."
+	@printf "$(YELLOW)[COPY]$(RESET) Userland binaries...\n"
 	@for f in $(SRC_DIR)/userland/bin/*.elf; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/bin/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) TCC support files..."
+	@printf "$(YELLOW)[COPY]$(RESET) TCC support files...\n"
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/tcc/
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/include/*.h $(BUILD_DIR)/initrd/usr/lib/tcc/include/
@@ -263,120 +175,120 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@cp $(SRC_DIR)/userland/libc/*.h $(BUILD_DIR)/initrd/usr/local/include/
 	@cp $(SRC_DIR)/userland/stb_image.h $(BUILD_DIR)/initrd/usr/include/
 
-	@printf "$(YELLOW)[COPY]$(RESET) Wallpapers..."
+	@printf "$(YELLOW)[COPY]$(RESET) Wallpapers...\n"
 	@for f in $(SRC_DIR)/images/wallpapers/*; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/images/Wallpapers/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) GIF assets..."
+	@printf "$(YELLOW)[COPY]$(RESET) GIF assets...\n"
 	@for f in $(SRC_DIR)/images/gif/*.gif; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/images/gif/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) Colloid icons..."
+	@printf "$(YELLOW)[COPY]$(RESET) Colloid icons...\n"
 	@for f in $(COLLOID_ICONS); do \
 		src="$(SRC_DIR)/images/icons/colloid/$$f"; \
 		if [ -f "$$src" ]; then \
-			printf "  -> $$src"; \
+			printf "  -> $$src\n"; \
 			cp "$$src" $(BUILD_DIR)/initrd/Library/images/icons/colloid/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) BoredOS icons..."
+	@printf "$(YELLOW)[COPY]$(RESET) BoredOS icons...\n"
 	@mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/boredos
 	@for f in $(SRC_DIR)/images/icons/boredos/*.png; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/images/icons/boredos/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) Branding assets..."
+	@printf "$(YELLOW)[COPY]$(RESET) Branding assets...\n"
 	@cp -r branding/* $(BUILD_DIR)/initrd/Library/images/branding/
 
-	@printf "$(YELLOW)[COPY]$(RESET) Fonts..."
+	@printf "$(YELLOW)[COPY]$(RESET) Fonts...\n"
 	@for f in $(SRC_DIR)/fonts/*.ttf; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/Fonts/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) Emoji fonts..."
+	@printf "$(YELLOW)[COPY]$(RESET) Emoji fonts...\n"
 	@for f in $(SRC_DIR)/fonts/Emoji/*.ttf; do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/Fonts/Emoji/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) bsh configuration..."
-	@if [ -f $(SRC_DIR)/library/bsh/bshrc ]; then printf "  -> bshrc"; cp $(SRC_DIR)/library/bsh/bshrc $(BUILD_DIR)/initrd/Library/bsh/; fi
-	@if [ -f $(SRC_DIR)/library/bsh/startup.bsh ]; then printf "  -> startup.bsh"; cp $(SRC_DIR)/library/bsh/startup.bsh $(BUILD_DIR)/initrd/Library/bsh/; fi
-	@if [ -f $(SRC_DIR)/library/bsh/boot.bsh ]; then printf "  -> boot.bsh"; cp $(SRC_DIR)/library/bsh/boot.bsh $(BUILD_DIR)/initrd/Library/bsh/; fi
-	@if [ -f $(SRC_DIR)/library/conf/sysfetch.cfg ]; then printf "  -> sysfetch.cfg"; cp $(SRC_DIR)/library/conf/sysfetch.cfg $(BUILD_DIR)/initrd/Library/conf/; fi
+	@printf "$(YELLOW)[COPY]$(RESET) bsh configuration...\n"
+	@if [ -f $(SRC_DIR)/library/bsh/bshrc ]; then printf "  -> bshrc\n"; cp $(SRC_DIR)/library/bsh/bshrc $(BUILD_DIR)/initrd/Library/bsh/; fi
+	@if [ -f $(SRC_DIR)/library/bsh/startup.bsh ]; then printf "  -> startup.bsh\n"; cp $(SRC_DIR)/library/bsh/startup.bsh $(BUILD_DIR)/initrd/Library/bsh/; fi
+	@if [ -f $(SRC_DIR)/library/bsh/boot.bsh ]; then printf "  -> boot.bsh\n"; cp $(SRC_DIR)/library/bsh/boot.bsh $(BUILD_DIR)/initrd/Library/bsh/; fi
+	@if [ -f $(SRC_DIR)/library/conf/sysfetch.cfg ]; then printf "  -> sysfetch.cfg\n"; cp $(SRC_DIR)/library/conf/sysfetch.cfg $(BUILD_DIR)/initrd/Library/conf/; fi
 
-	@printf "$(YELLOW)[COPY]$(RESET) DOOM assets..."
-	@if [ -f $(SRC_DIR)/userland/games/doom/doom1.wad ]; then printf "  -> doom1.wad"; cp $(SRC_DIR)/userland/games/doom/doom1.wad $(BUILD_DIR)/initrd/Library/DOOM/; fi
+	@printf "$(YELLOW)[COPY]$(RESET) DOOM assets...\n"
+	@if [ -f $(SRC_DIR)/userland/games/doom/doom1.wad ]; then printf "  -> doom1.wad\n"; cp $(SRC_DIR)/userland/games/doom/doom1.wad $(BUILD_DIR)/initrd/Library/DOOM/; fi
 
-	@printf "$(YELLOW)[COPY]$(RESET) ASCII art..."
-	@if [ -f $(SRC_DIR)/library/art/boredos.txt ]; then printf "  -> boredos.txt"; cp $(SRC_DIR)/library/art/boredos.txt $(BUILD_DIR)/initrd/Library/art/; fi
+	@printf "$(YELLOW)[COPY]$(RESET) ASCII art...\n"
+	@if [ -f $(SRC_DIR)/library/art/boredos.txt ]; then printf "  -> boredos.txt\n"; cp $(SRC_DIR)/library/art/boredos.txt $(BUILD_DIR)/initrd/Library/art/; fi
 
-	@printf "$(YELLOW)[COPY]$(RESET) Documentation..."
+	@printf "$(YELLOW)[COPY]$(RESET) Documentation...\n"
 	@for f in $$(find docs -name '*.md' 2>/dev/null); do \
 		if [ -f "$$f" ]; then \
-			printf "  -> $$f"; \
+			printf "  -> $$f\n"; \
 			dir=$$(dirname "$$f"); \
 			mkdir -p $(BUILD_DIR)/initrd/"$$dir"; \
 			cp "$$f" $(BUILD_DIR)/initrd/"$$dir"/; \
 		fi \
 	done
 
-	@printf "$(YELLOW)[COPY]$(RESET) Root files..."
-	@if [ -f README.md ]; then printf "  -> README.md"; cp README.md $(BUILD_DIR)/initrd/; fi
-	@if [ -f LICENSE ]; then printf "  -> LICENSE"; cp LICENSE $(BUILD_DIR)/initrd/; fi
-	@if [ -f limine.conf ]; then printf "  -> limine.conf"; cp limine.conf $(BUILD_DIR)/initrd/; fi
+	@printf "$(YELLOW)[COPY]$(RESET) Root files...\n"
+	@if [ -f README.md ]; then printf "  -> README.md\n"; cp README.md $(BUILD_DIR)/initrd/; fi
+	@if [ -f LICENSE ]; then printf "  -> LICENSE\n"; cp LICENSE $(BUILD_DIR)/initrd/; fi
+	@if [ -f limine.conf ]; then printf "  -> limine.conf\n"; cp limine.conf $(BUILD_DIR)/initrd/; fi
 	
-	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar..."
+	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar...\n"
 	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
-	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar"
+	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar\n"
 
 $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar limine.conf limine-setup
 	$(call PRINT_STEP,CREATING ISO IMAGE)
-	@printf "$(YELLOW)[ISO]$(RESET) Cleaning previous ISO root..."
+	@printf "$(YELLOW)[ISO]$(RESET) Cleaning previous ISO root...\n"
 	rm -rf $(ISO_DIR)
 
-	@printf "$(YELLOW)[ISO]$(RESET) Creating ISO directory structure..."
+	@printf "$(YELLOW)[ISO]$(RESET) Creating ISO directory structure...\n"
 	mkdir -p $(ISO_DIR)
 	mkdir -p $(ISO_DIR)/EFI/BOOT
 	
-	@printf "$(YELLOW)[COPY]$(RESET) Kernel ELF..."
+	@printf "$(YELLOW)[COPY]$(RESET) Kernel ELF...\n"
 	cp $(KERNEL_ELF) $(ISO_DIR)/
 
-	@printf "$(YELLOW)[COPY]$(RESET) Limine config..."
+	@printf "$(YELLOW)[COPY]$(RESET) Limine config...\n"
 	cp limine.conf $(ISO_DIR)/
 	
-	@printf "$(YELLOW)[COPY]$(RESET) Initrd..."
+	@printf "$(YELLOW)[COPY]$(RESET) Initrd...\n"
 	cp $(BUILD_DIR)/initrd.tar $(ISO_DIR)/
 
-	@printf "$(YELLOW)[CONFIG]$(RESET) Adding initrd module path..."
-	printf "    module_path: boot():/initrd.tar" >> $(ISO_DIR)/limine.conf
+	@printf "$(YELLOW)[CONFIG]$(RESET) Adding initrd module path...\n"
+	printf "    module_path: boot():/initrd.tar\n" >> $(ISO_DIR)/limine.conf
 	
-	@printf "$(YELLOW)[COPY]$(RESET) Optional splash image..."
-	@if [ -f branding/splash.jpg ]; then printf "  -> splash.jpg"; cp branding/splash.jpg $(ISO_DIR)/splash.jpg; else printf "  -> no splash.jpg found"; fi
+	@printf "$(YELLOW)[COPY]$(RESET) Optional splash image...\n"
+	@if [ -f branding/splash.jpg ]; then printf "  -> splash.jpg\n"; cp branding/splash.jpg $(ISO_DIR)/splash.jpg; else printf "  -> no splash.jpg found\n"; fi
 	
-	@printf "$(YELLOW)[COPY]$(RESET) Limine boot files..."
+	@printf "$(YELLOW)[COPY]$(RESET) Limine boot files...\n"
 	cp limine/limine-bios.sys $(ISO_DIR)/
 	cp limine/limine-bios-cd.bin $(ISO_DIR)/
 	cp limine/limine-uefi-cd.bin $(ISO_DIR)/
 	
-	@printf "$(YELLOW)[COPY]$(RESET) EFI bootloaders..."
+	@printf "$(YELLOW)[COPY]$(RESET) EFI bootloaders...\n"
 	cp limine/BOOTX64.EFI $(ISO_DIR)/EFI/BOOT/
 	cp limine/BOOTIA32.EFI $(ISO_DIR)/EFI/BOOT/
 
@@ -387,15 +299,15 @@ $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar limine.conf limine-setup
 		-efi-boot-part --efi-boot-image --protective-msdos-label \
 		$(ISO_DIR) -o $(ISO_IMAGE)
 	
-	@printf "$(YELLOW)[LIMINE]$(RESET) Installing BIOS bootloader..."
+	@printf "$(YELLOW)[LIMINE]$(RESET) Installing BIOS bootloader...\n"
 	./limine/limine bios-install $(ISO_IMAGE)
-	@printf "$(GREEN)[OK]$(RESET) ISO image ready: $(ISO_IMAGE)"
+	@printf "$(GREEN)[OK]$(RESET) ISO image ready: $(ISO_IMAGE)\n"
 
 clean:
 	$(call PRINT_STEP,CLEANING BUILD OUTPUT)
 	rm -rf $(BUILD_DIR) $(ISO_DIR) $(ISO_IMAGE)
 	$(MAKE) -C $(SRC_DIR)/userland clean
-	@printf "$(GREEN)[OK]$(RESET) Clean complete."
+	@printf "$(GREEN)[OK]$(RESET) Clean complete.\n"
 
 disk.qcow2:
 	$(call PRINT_STEP,CREATING 10GB EXPANDABLE DISK IMAGE)
@@ -456,7 +368,7 @@ endif
 
 $(OVMF_VARS):
 	@if [ -f $(OVMF_VARS_TMPL) ]; then \
-		printf "$(YELLOW)[UEFI]$(RESET) Creating local NVRAM vars..."; \
+		printf "$(YELLOW)[UEFI]$(RESET) Creating local NVRAM vars...\n"; \
 		cp $(OVMF_VARS_TMPL) $(OVMF_VARS); \
 	fi
 
