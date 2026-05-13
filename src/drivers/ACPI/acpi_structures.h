@@ -1,3 +1,9 @@
+/*
+ * Copyright (c) 2026 Myles "Mellurboo" Wilson
+ * Unauthorized copying or distribution is prohibited.
+ * Provided "as is" without warranty.
+*/
+
 #ifndef ACPI_STRUCTURES_H 
 #define ACPI_STRUCTURES_H 
 

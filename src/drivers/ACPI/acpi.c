@@ -1,7 +1,14 @@
+/*
+ * Copyright (c) 2026 Myles "Mellurboo" Wilson
+ * Unauthorized copying or distribution is prohibited.
+ * Provided "as is" without warranty.
+*/
+
 #include <stdint.h>
 #include <stddef.h>
 
 #include "acpi_structures.h"
+#include "../I2C/acpi_i2c.h"
 #include "acpi.h"
 #include "../sys/idt.h"
 #include "../core/limine.h"
@@ -36,7 +43,7 @@ static int acpi_checksum(void *ptr, size_t len) {
     return sum == 0;
 }
 
-static void *acpi_get_rsdp(void){
+struct acpi_rsdp *acpi_get_rsdp(void){
     extern volatile struct limine_rsdp_request acpi_rsdp_request;
 
     if (!acpi_rsdp_request.response) 
@@ -47,7 +54,7 @@ static void *acpi_get_rsdp(void){
     return acpi_rsdp_request.response->address;
 }
 
-static struct acpi_sdt *acpi_get_sdt(const char signature[4]) {
+struct acpi_sdt *acpi_get_sdt(const char signature[4]) {
     if (acpi_rsdp->revision >= 2 && acpi_rsdp->xsdt_address) {
         struct acpi_xsdt *acpi_xsdt = (struct acpi_xsdt *)p2v(acpi_rsdp->xsdt_address);
         if (acpi_checksum(acpi_xsdt, acpi_xsdt->header.length)) {
@@ -81,8 +88,8 @@ static struct acpi_sdt *acpi_get_sdt(const char signature[4]) {
     return NULL;
 }
 
-static uint16_t SLP_TYPa = 0;
-static uint16_t SLP_TYPb = 0;
+uint16_t SLP_TYPa = 0;
+uint16_t SLP_TYPb = 0;
 
 void acpi_parse_s5(void) {
     if (!acpi_fadt || !acpi_fadt->dsdt) return;
@@ -199,8 +206,11 @@ int acpi_init(void){
         ptr += h->length;
     }
 
+    acpi_i2c_enumerate();
+
     return 0;
 }
+
 
 uint32_t acpi_irq_to_gsi(uint32_t irq) {
     for (size_t i = 0; i < iso_count; i++) {
@@ -218,3 +228,8 @@ uint16_t acpi_irq_flags(uint32_t irq) {
     return 0;
 }
 
+
+struct acpi_sdt *acpi_get_dsdt(void) {
+    if (!acpi_fadt || !acpi_fadt->dsdt) return NULL;
+    return (struct acpi_sdt *)p2v((uintptr_t)acpi_fadt->dsdt);
+}
