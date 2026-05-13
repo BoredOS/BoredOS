@@ -691,7 +691,9 @@ void process_kill_by_tty(int tty_id) {
     if (tty_id < 0) return;
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (processes[i].pid != 0xFFFFFFFF && processes[i].pid != 0 && processes[i].tty_id == tty_id) {
-            process_terminate(&processes[i]);
+            if (!processes[i].exited && !processes[i].kill_pending) {
+                process_terminate(&processes[i]);
+            }
         }
     }
 }
@@ -735,6 +737,7 @@ void process_terminate(process_t *to_delete) {
 
 void process_terminate_with_status(process_t *to_delete, int status) {
     if (!to_delete || to_delete->pid == 0xFFFFFFFF || to_delete->pid == 0) return;
+    if (to_delete->exited || to_delete->kill_pending) return;
 
     uint32_t cpu_count = smp_cpu_count();
     for (uint32_t c = 0; c < cpu_count && c < MAX_CPUS_SCHED; c++) {

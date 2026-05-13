@@ -21,3 +21,5 @@ Let us know if this is just an idea you'd like to see, or if you plan on submitt
 
 **5. Additional Context:**
 Add any other context, mockup screenshots, or links to technical documentation (e.g., OSDev Wiki links) here.
+
+**6. Please add tags to your issue to help with organization.**

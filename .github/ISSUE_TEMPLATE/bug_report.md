@@ -27,3 +27,5 @@ A clear and concise description of what the bug is. What did you expect to happe
 
 **5. Additional Context:**
 Add any other context about the problem here (e.g., "This only happens when my mouse is moving").
+
+**6. Please add tags to your issue to help with organization.**

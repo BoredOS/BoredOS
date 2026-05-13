@@ -1416,26 +1416,61 @@ static uint64_t fs_cmd_chdir(const syscall_args_t *args) {
     }
     return -1;
 }
-#define FS_CMD_TABLE_SIZE 19
+static uint64_t fs_cmd_statfs(const syscall_args_t *args) {
+    const char *path = (const char *)args->arg2;
+    vfs_statfs_t *stat = (vfs_statfs_t *)args->arg3;
+    if (!path || !stat) return -1;
+    return vfs_statfs(path, stat) == 0 ? 0 : -1;
+}
+
+static uint64_t fs_cmd_mount_count(const syscall_args_t *args) {
+    (void)args;
+    return (uint64_t)vfs_get_mount_count();
+}
+
+typedef struct {
+    char path[256];
+    char device[32];
+    char fs_type[16];
+} syscall_mount_info_t;
+
+static uint64_t fs_cmd_mount_info(const syscall_args_t *args) {
+    int index = (int)args->arg2;
+    syscall_mount_info_t *info = (syscall_mount_info_t *)args->arg3;
+    if (!info) return -1;
+    
+    vfs_mount_t *m = vfs_get_mount(index);
+    if (!m) return -1;
+    
+    strcpy(info->path, m->path);
+    strcpy(info->device, m->device);
+    strcpy(info->fs_type, m->fs_type);
+    return 0;
+}
+
+#define FS_CMD_TABLE_SIZE 22
 static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
-    [FS_CMD_OPEN]     = fs_cmd_open,      // 1
-    [FS_CMD_READ]     = fs_cmd_read,      // 2
-    [FS_CMD_WRITE]    = fs_cmd_write,     // 3
-    [FS_CMD_CLOSE]    = fs_cmd_close,     // 4
-    [FS_CMD_SEEK]     = fs_cmd_seek,      // 5
-    [FS_CMD_TELL]     = fs_cmd_tell,      // 6
-    [FS_CMD_LIST]     = fs_cmd_list,      // 7
-    [FS_CMD_DELETE]   = fs_cmd_delete,    // 8
-    [FS_CMD_SIZE]     = fs_cmd_size,      // 9
-    [FS_CMD_MKDIR]    = fs_cmd_mkdir,     // 10
-    [FS_CMD_EXISTS]   = fs_cmd_exists,    // 11
-    [FS_CMD_GETCWD]   = fs_cmd_getcwd,    // 12
-    [FS_CMD_CHDIR]    = fs_cmd_chdir,     // 13
-    [FS_CMD_GET_INFO] = fs_cmd_get_info,  // 14
-    [FS_CMD_DUP]      = fs_cmd_dup,       // 15
-    [FS_CMD_DUP2]     = fs_cmd_dup2,      // 16
-    [FS_CMD_PIPE]     = fs_cmd_pipe,      // 17
-    [FS_CMD_FCNTL]    = fs_cmd_fcntl,     // 18
+    [FS_CMD_OPEN]        = fs_cmd_open,      // 1
+    [FS_CMD_READ]        = fs_cmd_read,      // 2
+    [FS_CMD_WRITE]       = fs_cmd_write,     // 3
+    [FS_CMD_CLOSE]       = fs_cmd_close,     // 4
+    [FS_CMD_SEEK]        = fs_cmd_seek,      // 5
+    [FS_CMD_TELL]        = fs_cmd_tell,      // 6
+    [FS_CMD_LIST]        = fs_cmd_list,      // 7
+    [FS_CMD_DELETE]      = fs_cmd_delete,    // 8
+    [FS_CMD_SIZE]        = fs_cmd_size,      // 9
+    [FS_CMD_MKDIR]       = fs_cmd_mkdir,     // 10
+    [FS_CMD_EXISTS]      = fs_cmd_exists,    // 11
+    [FS_CMD_GETCWD]      = fs_cmd_getcwd,    // 12
+    [FS_CMD_CHDIR]       = fs_cmd_chdir,     // 13
+    [FS_CMD_GET_INFO]    = fs_cmd_get_info,  // 14
+    [FS_CMD_DUP]         = fs_cmd_dup,       // 15
+    [FS_CMD_DUP2]        = fs_cmd_dup2,      // 16
+    [FS_CMD_PIPE]        = fs_cmd_pipe,      // 17
+    [FS_CMD_FCNTL]       = fs_cmd_fcntl,     // 18
+    [FS_CMD_STATFS]      = fs_cmd_statfs,    // 19
+    [FS_CMD_MOUNT_COUNT] = fs_cmd_mount_count, // 20
+    [FS_CMD_MOUNT_INFO]  = fs_cmd_mount_info,  // 21
 };
 
 static uint64_t sys_cmd_set_bg_color(const syscall_args_t *args) {

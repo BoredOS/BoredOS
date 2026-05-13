@@ -166,6 +166,14 @@ static bool sysfs_is_dir(void *fs_private, const char *path) {
     return sysfs_exists(fs_private, path);
 }
 
+static int sysfs_statfs(void *fs_private, vfs_statfs_t *stat) {
+    (void)fs_private;
+    stat->total_blocks = 0;
+    stat->free_blocks = 0;
+    stat->block_size = 512;
+    return 0;
+}
+
 vfs_fs_ops_t sysfs_ops = {
     .open = sysfs_open,
     .close = sysfs_close,
@@ -173,7 +181,8 @@ vfs_fs_ops_t sysfs_ops = {
     .write = sysfs_write,
     .readdir = sysfs_readdir,
     .exists = sysfs_exists,
-    .is_dir = sysfs_is_dir
+    .is_dir = sysfs_is_dir,
+    .statfs = sysfs_statfs
 };
 
 vfs_fs_ops_t* sysfs_get_ops(void) {

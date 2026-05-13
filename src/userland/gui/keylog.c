@@ -1,15 +1,11 @@
+// Copyright (c) 2026 Lluciocc (https://github.com/lluciocc)
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "libc/syscall.h"
 #include "libc/libui.h"
 #include "libc/stdlib.h"
 #include <stdint.h>
 #include <stdbool.h>
-
-/*
-@Lluciocc
-The most SIMPLE keylogger for debug
-FEAT:
-- Log every key pressed in the terminal and gives their keycode
-*/
 
 #define WINDOW_W 400
 #define WINDOW_H 200

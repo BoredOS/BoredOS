@@ -710,6 +710,26 @@ bool vfs_is_directory(const char *path) {
     return mount->ops->is_dir(mount->fs_private, rel_path);
 }
 
+int vfs_statfs(const char *path, vfs_statfs_t *stat) {
+    if (!path || !stat) return -1;
+    
+    char normalized[VFS_MAX_PATH];
+    vfs_normalize_path("/", path, normalized);
+    
+    const char *rel_path = NULL;
+    vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
+    if (!mount) return -1;
+    
+    if (mount->ops->statfs) {
+        return mount->ops->statfs(mount->fs_private, stat);
+    }
+    
+    stat->total_blocks = 0;
+    stat->free_blocks = 0;
+    stat->block_size = 512;
+    return 0;
+}
+
 int vfs_get_info(const char *path, vfs_dirent_t *info) {
     if (!path || !info) return -1;
 

@@ -15,6 +15,7 @@ Notes:
 ---
 
 ## Documentation
+- [ ] Code contains appropriate comments (REQUIRED for medium to large PR's.)
 
 - [ ] Documentation updated if needed
 
