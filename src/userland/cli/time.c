@@ -5,16 +5,11 @@
 #include "stdlib.h"
 #include "syscall.h"
 
+// CMDLINE_MAX includes the trailing NUL, so at most 511 command-line bytes can
+// be reconstructed here. Unchecked concatenation can overflow CMDLINE_MAX; all
+// command-line construction in this file must go through the checked append
+// helpers below.
 #define CMDLINE_MAX 512
-
-static int sc_strcmp(const char *a, const char *b) {
-    while (*a && *a == *b) {
-        a++;
-        b++;
-    }
-
-    return (unsigned char)*a - (unsigned char)*b;
-}
 
 static int has_slash(const char *s) {
     while (s && *s) {
@@ -37,7 +32,7 @@ static int ends_with_elf(const char *s) {
     if (len < 4)
         return 0;
 
-    return sc_strcmp(s + len - 4, ".elf") == 0;
+    return strcmp(s + len - 4, ".elf") == 0;
 }
 
 static void print_usage(void) {
@@ -113,8 +108,8 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (sc_strcmp(argv[1], "-h") == 0 ||
-        sc_strcmp(argv[1], "--help") == 0) {
+    if (strcmp(argv[1], "-h") == 0 ||
+        strcmp(argv[1], "--help") == 0) {
         print_usage();
         return 0;
     }
@@ -135,7 +130,15 @@ int main(int argc, char **argv) {
     printf("\n");
     printf("Command: %s\n", cmdline);
     printf("Exit code: %d\n", ret);
+
+    if (ret == -1) {
+        printf("Command failed with non-zero exit code, not reporting time.\n");
+        return ret;
+    }
+
     printf("Elapsed: %llu ms\n", elapsed);
+
+    sys_system(SYSTEM_CMD_SLEEP, 1, 0, 0, 0);
 
     return ret;
 }
