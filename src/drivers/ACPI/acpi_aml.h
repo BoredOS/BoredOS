@@ -7,6 +7,7 @@
 
 #include <stdint.h>
 #include <stddef.h>
+#include <stdbool.h>
 
 #define AML_ZERO_OP         0x00
 #define AML_ONE_OP          0x01
@@ -82,7 +83,10 @@ typedef struct {
 /// @param aml first AML byte (SDT base + 36)
 /// @param len byte length of the AML region
 /// @param ctx output context; devices array must be pre-allocated
+void aml_find_i2c_controllers(const uint8_t *aml, size_t len);
 void aml_walk_table(const uint8_t *aml, size_t len, aml_walk_ctx_t *ctx);
+
+bool is_touchpad_hid(const char *hid);
 
 /// @brief Scan DSDT AML for _S5_ and extract SLP_TYPa/b for S5 power-off
 /// @param aml first AML byte (DSDT base + 36)

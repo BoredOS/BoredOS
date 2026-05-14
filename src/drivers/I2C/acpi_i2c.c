@@ -8,6 +8,7 @@
 #include "../ACPI/acpi_structures.h"
 #include "../core/kconsole.h"
 #include "../core/platform.h"
+#include "../core/kutils.h"
 
 static aml_i2c_dev_t  i2c_devices[ACPI_I2C_MAX_DEVICES];
 static size_t         i2c_device_count = 0;
@@ -28,28 +29,74 @@ static void walk_all_ssdts(aml_walk_ctx_t *ctx) {
     struct acpi_rsdp *rsdp = acpi_get_rsdp();
     if (!rsdp) return;
 
+    serial_write("[acpi_i2c] RSDP revision ");
+    serial_write_num(rsdp->revision);
+    serial_write("\n");
+
+    // Scan XSDT if available
     if (rsdp->revision >= 2 && rsdp->xsdt_address) {
         struct acpi_xsdt *xsdt = (struct acpi_xsdt *)p2v(rsdp->xsdt_address);
         size_t entries = (xsdt->header.length - sizeof(struct acpi_sdt)) / 8;
+        serial_write("[acpi_i2c] XSDT entries: "); serial_write_num(entries); serial_write("\n");
         for (size_t i = 0; i < entries; i++) {
             struct acpi_sdt *sdt = (struct acpi_sdt *)p2v(xsdt->tables[i]);
             if (!sdt) continue;
-            if (__builtin_memcmp(sdt->signature, "SSDT", 4) == 0)
+            
+            serial_write("[acpi_i2c] Table: ");
+            char sig[5] = {0}; memcpy(sig, sdt->signature, 4);
+            char oem[7] = {0}; memcpy(oem, sdt->oem_id, 6);
+            char oem_t[9] = {0}; memcpy(oem_t, sdt->oem_table_id, 8);
+            serial_write(sig); serial_write(" "); serial_write(oem); 
+            serial_write(":"); serial_write(oem_t);
+            serial_write(" len="); serial_write_num(sdt->length);
+            serial_write("\n");
+
+            // Deep search for _HID on ALL tables
+            const uint8_t *aml = (const uint8_t *)sdt + ACPI_SDT_HEADER_LEN;
+            size_t len = sdt->length - ACPI_SDT_HEADER_LEN;
+            for (size_t k = 0; k + 8 < len; k++) {
+                if (memcmp(&aml[k], "_HID", 4) == 0) {
+                    serial_write("[acpi_i2c] FOUND _HID in "); serial_write(sig);
+                    serial_write(" offset 0x"); serial_write_hex((uint32_t)k);
+                    serial_write(" ID: ");
+                    const uint8_t *id_ptr = &aml[k + 4];
+                    if (*id_ptr == AML_STRING_PREFIX) serial_write((const char *)id_ptr + 1);
+                    else if (*id_ptr == AML_DWORD_PREFIX) serial_write_hex(*(uint32_t*)(id_ptr + 1));
+                    serial_write("\n");
+                }
+                // Also search for raw 'SYNA' bytes (EISAID encoding)
+                if (memcmp(&aml[k], "\x53\x59\x4E\x41", 4) == 0) {
+                    serial_write("[acpi_i2c] Found SYNA bytes at offset 0x");
+                    serial_write_hex((uint32_t)k);
+                    serial_write("\n");
+                }
+            }
+
+            if (__builtin_memcmp(sdt->signature, "SSDT", 4) == 0) {
+                const uint8_t *aml_ptr = (const uint8_t *)sdt + ACPI_SDT_HEADER_LEN;
+                size_t aml_len = sdt->length - ACPI_SDT_HEADER_LEN;
+                aml_find_i2c_controllers(aml_ptr, aml_len);
                 walk_sdt(sdt, ctx);
+            }
         }
-        return;
     }
 
-    // RSDT fallback 
-    if (!rsdp->rsdt_address) return;
-    struct acpi_sdt *rsdt = (struct acpi_sdt *)p2v(rsdp->rsdt_address);
-    uint32_t *tables = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt));
-    size_t entries = (rsdt->length - sizeof(struct acpi_sdt)) / 4;
-    for (size_t i = 0; i < entries; i++) {
-        struct acpi_sdt *sdt = (struct acpi_sdt *)p2v(tables[i]);
-        if (!sdt) continue;
-        if (__builtin_memcmp(sdt->signature, "SSDT", 4) == 0)
-            walk_sdt(sdt, ctx);
+    // Also scan RSDT 
+    if (rsdp->rsdt_address) {
+        struct acpi_sdt *rsdt = (struct acpi_sdt *)p2v(rsdp->rsdt_address);
+        uint32_t *tables = (uint32_t *)((uint8_t *)rsdt + sizeof(struct acpi_sdt));
+        size_t entries = (rsdt->length - sizeof(struct acpi_sdt)) / 4;
+        serial_write("[acpi_i2c] RSDT entries: "); serial_write_num(entries); serial_write("\n");
+        for (size_t i = 0; i < entries; i++) {
+            struct acpi_sdt *sdt = (struct acpi_sdt *)p2v(tables[i]);
+            if (!sdt) continue;
+            if (__builtin_memcmp(sdt->signature, "SSDT", 4) == 0) {
+                const uint8_t *aml_ptr = (const uint8_t *)sdt + ACPI_SDT_HEADER_LEN;
+                size_t aml_len = sdt->length - ACPI_SDT_HEADER_LEN;
+                aml_find_i2c_controllers(aml_ptr, aml_len);
+                walk_sdt(sdt, ctx);
+            }
+        }
     }
 }
 
@@ -62,9 +109,12 @@ int acpi_i2c_enumerate(void) {
         .count    = 0,
     };
 
-    // Walk DSDT - pointed to by FADT, not listed in XSDT/RSDT 
+    // Walk DSDT - check both 32-bit and 64-bit pointers
     struct acpi_sdt *dsdt = acpi_get_dsdt();
     if (dsdt) {
+        serial_write("[acpi_i2c] Walking DSDT (len=");
+        serial_write_num(dsdt->length);
+        serial_write(")\n");
         walk_sdt(dsdt, &ctx);
     } else {
         serial_write("[acpi_i2c] warning: DSDT not found\n");
@@ -75,31 +125,10 @@ int acpi_i2c_enumerate(void) {
 
     i2c_device_count = ctx.count;
 
-    for (size_t i = 0; i < i2c_device_count; i++) {
-        const aml_i2c_dev_t *d = &i2c_devices[i];
-        serial_write("[acpi_i2c] ");
-        serial_write(d->name);
-        serial_write("  hid=");
-        serial_write(d->hid);
-        serial_write("  addr=0x");
-        serial_write_hex(d->slave_address);
-        serial_write("  speed=");
-        serial_write_num(d->speed_hz);
-        serial_write(" Hz");
-        if (d->ten_bit_addr)  serial_write("  10-bit");
-        if (d->power_flags & (AML_PWR_HAS_PS0 | AML_PWR_HAS_PS3)) serial_write("  PS0/3");
-        if (d->power_flags & (AML_PWR_HAS_PR0 | AML_PWR_HAS_PR3)) serial_write("  PR0/3");
-        if (d->has_dsm) {
-            serial_write("  hid_desc_reg=0x");
-            serial_write_hex(d->hid_desc_addr);
-        }
-        serial_write("\n");
-    }
-
     if (i2c_device_count != 0) {
-        log_ok("I2C enumeration complete");
-    } else {
-        log_fail("No I2C devices found in ACPI tables");
+        serial_write("[acpi_i2c] Enumerated ");
+        serial_write_num(i2c_device_count);
+        serial_write(" I2C devices from ACPI\n");
     }
 
     return (int)i2c_device_count;

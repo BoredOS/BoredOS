@@ -98,10 +98,22 @@ int pci_find_device_by_class(uint8_t class_code, uint8_t subclass, pci_device_t*
     return 0;
 }
 
-uint32_t pci_get_bar(pci_device_t *dev, int bar_num) {
+uint64_t pci_get_bar(pci_device_t *dev, int bar_num) {
     if (!dev || bar_num < 0 || bar_num > 5) return 0;
     uint8_t offset = 0x10 + (bar_num * 4);
-    return pci_read_config(dev->bus, dev->device, dev->function, offset);
+    uint32_t bar_low = pci_read_config(dev->bus, dev->device, dev->function, offset);
+    
+    // Check if this is a 64-bit memory BAR (Type bits 1-2 == 2)
+    if ((bar_low & 0x01) == 0 && ((bar_low >> 1) & 0x03) == 0x02) {
+        if (bar_num < 5) {
+            uint32_t bar_high = pci_read_config(dev->bus, dev->device, dev->function, offset + 4);
+            return ((uint64_t)bar_high << 32) | (bar_low & ~0xF);
+        }
+    }
+    
+    // Standard 32-bit BAR or I/O BAR
+    if (bar_low & 0x01) return bar_low & ~0x3; // I/O
+    return bar_low & ~0xF; // Memory
 }
 
 void pci_enable_bus_mastering(pci_device_t *dev) {

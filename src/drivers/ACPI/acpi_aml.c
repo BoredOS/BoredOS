@@ -3,159 +3,120 @@
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 
 #include "acpi_aml.h"
-#include "kutils.h"
-#include "kconsole.h"
-#include <stdint.h>
-#include <stddef.h>
+#include "../core/kutils.h"
+#include "../core/kconsole.h"
 
-/// @brief Decode AML PkgLength field, advance past it
-/// @param pp in/out byte pointer, advanced past the field on return
-/// @param end hard bound; returns 0 if field exceeds it
-/// @return total package length including the PkgLength bytes, 0 on error
-static size_t decode_pkglen(const uint8_t **pp, const uint8_t *end) {
+// Internal helpers for decoding AML 
+
+static uint64_t decode_pkglen(const uint8_t **pp, const uint8_t *end) {
     if (*pp >= end) return 0;
     uint8_t b0 = *(*pp)++;
-    uint8_t extra = b0 >> 6;
-    size_t  len;
+    uint8_t count = (b0 >> 6);
+    if (count == 0) return (b0 & 0x3F);
 
-    if (extra == 0) {
-        len = b0 & 0x3F;   // 1-byte form: bits[5:0] 
-    } else {
-        len = b0 & 0x0F;   // multi-byte form: bits[3:0] are low nibble 
-        if (*pp + extra > end) return 0;
-        for (uint8_t i = 0; i < extra; i++)
-            len |= (size_t)(*(*pp)++) << (4 + 8 * i);
+    uint64_t len = (b0 & 0x0F);
+    for (uint8_t i = 0; i < count; i++) {
+        if (*pp >= end) break;
+        len |= ((uint64_t)*(*pp)++) << (4 + 8 * i);
     }
     return len;
 }
 
-/// @brief Decode the last NameSeg of an AML NameString into out
-/// @param pp in/out byte pointer, advanced past the full name on return
-/// @param end hard bound
-/// @param out receives null-terminated 4-char NameSeg
-static void decode_nameseg(const uint8_t **pp, const uint8_t *end,
-                            char out[AML_NAME_LEN]) {
-    out[0] = '\0';
-    if (*pp >= end) return;
-
-    while (*pp < end && (**pp == '\\' || **pp == '^')) (*pp)++;
-    if (*pp >= end) return;
-
-    uint8_t lead = **pp;
-
-    if (lead == 0x00) {
-        (*pp)++;
-        return;
-    } else if (lead == 0x2E) {   // DualNamePath two 4-char segs 
-        (*pp)++;
-        if (*pp + 8 > end) return;
-        (*pp) += 4;
-        for (int i = 0; i < 4; i++) out[i] = (char)(*pp)[i];
-        out[4] = '\0';
-        (*pp) += 4;
-    } else if (lead == 0x2F) {   // MultiNamePath count + N segs 
-        (*pp)++;
-        if (*pp >= end) return;
-        uint8_t count = *(*pp)++;
-        if (*pp + (size_t)count * 4 > end) return;
-        const uint8_t *last = *pp + (count - 1) * 4;
-        for (int i = 0; i < 4; i++) out[i] = (char)last[i];
-        out[4] = '\0';
-        *pp += (size_t)count * 4;
-    } else {                     // plain 4-char NameSeg 
-        if (*pp + 4 > end) return;
-        for (int i = 0; i < 4; i++) out[i] = (char)(*pp)[i];
-        out[4] = '\0';
-        (*pp) += 4;
-    }
-}
-
-/// @brief Decode any AML integer data object (Zero, One, Byte, Word, DWord, QWord)
-/// @param pp in/out byte pointer, advanced past the object on return
-/// @param end hard bound
-/// @return decoded integer value, 0 on unknown opcode (pointer not advanced)
 static uint64_t decode_integer(const uint8_t **pp, const uint8_t *end) {
     if (*pp >= end) return 0;
     uint8_t op = *(*pp)++;
     switch (op) {
-        case AML_ZERO_OP:     return 0;
-        case AML_ONE_OP:      return 1;
-        case AML_BYTE_PREFIX:
-            if (*pp + 1 > end) return 0;
+        case AML_ZERO_OP: return 0;
+        case AML_ONE_OP:  return 1;
+        case AML_BYTE_PREFIX: {
+            if (*pp >= end) return 0;
             return *(*pp)++;
+        }
         case AML_WORD_PREFIX: {
-            if (*pp + 2 > end) return 0;
-            uint16_t v = (uint16_t)((*pp)[0]) | ((uint16_t)((*pp)[1]) << 8);
-            *pp += 2; return v;
+            if (*pp + 1 >= end) return 0;
+            uint16_t v = (uint16_t)(*pp)[0] | ((uint16_t)(*pp)[1] << 8);
+            *pp += 2;
+            return v;
         }
         case AML_DWORD_PREFIX: {
-            if (*pp + 4 > end) return 0;
-            uint32_t v = (uint32_t)((*pp)[0])
-                       | ((uint32_t)((*pp)[1]) << 8)
-                       | ((uint32_t)((*pp)[2]) << 16)
-                       | ((uint32_t)((*pp)[3]) << 24);
-            *pp += 4; return v;
+            if (*pp + 3 >= end) return 0;
+            uint32_t v = (uint32_t)(*pp)[0] | ((uint32_t)(*pp)[1] << 8) | 
+                         ((uint32_t)(*pp)[2] << 16) | ((uint32_t)(*pp)[3] << 24);
+            *pp += 4;
+            return v;
         }
         case AML_QWORD_PREFIX: {
-            if (*pp + 8 > end) return 0;
+            if (*pp + 7 >= end) return 0;
             uint64_t v = 0;
-            for (int i = 0; i < 8; i++) v |= (uint64_t)((*pp)[i]) << (8 * i);
-            *pp += 8; return v;
+            for (int i = 0; i < 8; i++) v |= ((uint64_t)(*pp)[i] << (8 * i));
+            *pp += 8;
+            return v;
         }
-        default:
-            (*pp)--;
-            return 0;
     }
+    return 0;
 }
 
-/// @brief Convert 32-bit packed EISAID value to ASCII HID string (e.g. "PNP0C0E")
-/// @param id EISAID as decoded by decode_integer (little-endian from AML)
-/// @param out receives null-terminated 8-char string
-static void eisaid_to_str(uint32_t id, char out[AML_HID_LEN]) {
-    uint32_t v = ((id & 0x000000FF) << 24)
-               | ((id & 0x0000FF00) << 8)
-               | ((id & 0x00FF0000) >> 8)
-               | ((id & 0xFF000000) >> 24);
+static void decode_nameseg(const uint8_t **pp, const uint8_t *end, char out[AML_NAME_LEN]) {
+    if (*pp + 3 >= end) {
+        memcpy(out, "    ", 4);
+        out[4] = '\0';
+        return;
+    }
+    memcpy(out, *pp, 4);
+    out[4] = '\0';
+    *pp += 4;
+}
 
-    out[0] = (char)('@' + ((v >> 26) & 0x1F));
-    out[1] = (char)('@' + ((v >> 21) & 0x1F));
-    out[2] = (char)('@' + ((v >> 16) & 0x1F));
+static void eisaid_to_str(uint32_t v, char out[AML_HID_LEN]) {
+    // Decode EISA ID: compressed 32-bit ID as per ACPI specification.
+    
+    // Some firmware swaps the bytes, so handle both
+    uint32_t id = v;
+    if (((id >> 26) & 0x1F) == 0) {
+        // Swap bytes
+        id = ((v >> 24) & 0xFF) | ((v >> 8) & 0xFF00) | ((v << 8) & 0xFF0000) | ((v << 24) & 0xFF000000);
+    }
 
+    out[0] = (char)('@' + ((id >> 26) & 0x1F));
+    out[1] = (char)('@' + ((id >> 21) & 0x1F));
+    out[2] = (char)('@' + ((id >> 16) & 0x1F));
+    
     static const char hex[] = "0123456789ABCDEF";
-    out[3] = hex[(v >> 12) & 0xF];
-    out[4] = hex[(v >>  8) & 0xF];
-    out[5] = hex[(v >>  4) & 0xF];
-    out[6] = hex[(v >>  0) & 0xF];
+    out[3] = hex[(id >> 12) & 0xF];
+    out[4] = hex[(id >>  8) & 0xF];
+    out[5] = hex[(id >>  4) & 0xF];
+    out[6] = hex[(id >>  0) & 0xF];
     out[7] = '\0';
 }
 
-/// @brief Parse _HID data object (string or EISAID DWord) into dev->hid
-/// @param pp in/out byte pointer positioned at the data object
-/// @param end hard bound
-/// @param dev target device record
-static void parse_hid(const uint8_t **pp, const uint8_t *end,
-                      aml_i2c_dev_t *dev) {
+static void parse_hid(const uint8_t **pp, const uint8_t *end, aml_i2c_dev_t *dev) {
     if (*pp >= end) return;
+    uint8_t op = **pp;
 
-    if (**pp == AML_STRING_PREFIX) {
+    if (op == AML_STRING_PREFIX) {
         (*pp)++;
         const char *s = (const char *)*pp;
-        strncpy(dev->hid, s, AML_HID_LEN - 1);
-        dev->hid[AML_HID_LEN - 1] = '\0';
-        while (*pp < end && **pp) (*pp)++;
+        size_t len = 0;
+        while (*pp < end && **pp) { len++; (*pp)++; }
         if (*pp < end) (*pp)++;
-    } else if (**pp == AML_DWORD_PREFIX) {
-        uint32_t id = (uint32_t)decode_integer(pp, end);
-        eisaid_to_str(id, dev->hid);
+        
+        if (len >= AML_HID_LEN) len = AML_HID_LEN - 1;
+        memcpy(dev->hid, s, len);
+        dev->hid[len] = '\0';
+    } else if (op == AML_DWORD_PREFIX) {
+        (*pp)++;
+        if (*pp + 3 < end) {
+            uint32_t v = (uint32_t)(*pp)[0] | ((uint32_t)(*pp)[1] << 8) | 
+                         ((uint32_t)(*pp)[2] << 16) | ((uint32_t)(*pp)[3] << 24);
+            eisaid_to_str(v, dev->hid);
+            *pp += 4;
+        }
+    } else {
+        (*pp)++;
     }
 }
 
-/// @brief Parse _CRS Buffer for an I2cSerialBusV2 descriptor, fill dev CRS fields
-/// @param pp in/out byte pointer positioned at BufferOp
-/// @param end hard bound
-/// @param dev receives slave_address, speed_hz, ten_bit_addr on success
-static void parse_crs(const uint8_t **pp, const uint8_t *end,
-                      aml_i2c_dev_t *dev) {
+static void parse_crs(const uint8_t **pp, const uint8_t *end, aml_i2c_dev_t *dev) {
     if (*pp >= end || **pp != AML_BUFFER_OP) return;
     (*pp)++;
 
@@ -175,14 +136,21 @@ static void parse_crs(const uint8_t **pp, const uint8_t *end,
         if (tag == ACPI_RESOURCE_END_TAG) break;
 
         if (tag == ACPI_LARGE_I2C_SERIAL_BUS) {
-            if (res + sizeof(aml_i2c_resource_t) > buf_end) break;
-            const aml_i2c_resource_t *r = (const aml_i2c_resource_t *)res;
-            if (r->serial_bus_type == ACPI_I2C_SERIAL_BUS_TYPE) {
-                dev->slave_address = r->slave_address;
-                dev->speed_hz      = r->connection_speed;
-                dev->ten_bit_addr  = (r->type_specific_flags & 0x01) ? 1 : 0;
+            uint16_t item_len = (uint16_t)(res[1]) | ((uint16_t)(res[2]) << 8);
+            if (res + 3 + item_len > buf_end) break;
+            
+            // Offset 5 is Serial Bus Type (1 = I2C)
+            if (res[5] == ACPI_I2C_SERIAL_BUS_TYPE && item_len >= 15) {
+                uint32_t speed = (uint32_t)res[12] | ((uint32_t)res[13] << 8) |
+                                 ((uint32_t)res[14] << 16) | ((uint32_t)res[15] << 24);
+                uint16_t addr = (uint16_t)res[16] | ((uint16_t)res[17] << 8);
+                
+                if (addr != 0) {
+                    dev->speed_hz = speed;
+                    dev->slave_address = addr;
+                }
             }
-            res += sizeof(uint8_t) + sizeof(uint16_t) + r->length;
+            res += 3 + item_len;
             continue;
         }
 
@@ -194,21 +162,25 @@ static void parse_crs(const uint8_t **pp, const uint8_t *end,
             res += 1 + (tag & 0x07);
         }
     }
-
     *pp = buf_end;
 }
 
-static void record_power_state(const char name[AML_NAME_LEN],
-                                aml_i2c_dev_t *dev) {
+static void record_power_state(const char name[AML_NAME_LEN], aml_i2c_dev_t *dev) {
     if      (memcmp(name, "_PS0", 4) == 0) dev->power_flags |= AML_PWR_HAS_PS0;
     else if (memcmp(name, "_PS3", 4) == 0) dev->power_flags |= AML_PWR_HAS_PS3;
     else if (memcmp(name, "_PR0", 4) == 0) dev->power_flags |= AML_PWR_HAS_PR0;
     else if (memcmp(name, "_PR3", 4) == 0) dev->power_flags |= AML_PWR_HAS_PR3;
 }
 
-/// @brief Best-effort skip of one AML data object to keep the scan on track
-/// @param pp in/out byte pointer, advanced past the object on return
-/// @param end hard bound
+bool is_touchpad_hid(const char *hid) {
+    if (!hid || !hid[0]) return false;
+    if (memcmp(hid, "PNP0C50", 7) == 0) return true; // Generic HID-over-I2C
+    if (memcmp(hid, "SYNA", 4) == 0)    return true; // Synaptics
+    if (memcmp(hid, "ELAN", 4) == 0)    return true; // Elantech
+    if (memcmp(hid, "ALPS", 4) == 0)    return true; // Alps
+    return false;
+}
+
 static void skip_object(const uint8_t **pp, const uint8_t *end) {
     if (*pp >= end) return;
     uint8_t op = **pp;
@@ -238,12 +210,7 @@ static void skip_object(const uint8_t **pp, const uint8_t *end) {
     }
 }
 
-/// @brief Scan one Device() scope body for _HID, _CRS, _DSM, and power objects
-/// @param p first byte of the scope body (after NameSeg)
-/// @param end one past last byte of the scope
-/// @param dev device record to populate
-static void scan_device_scope(const uint8_t *p, const uint8_t *end,
-                               aml_i2c_dev_t *dev) {
+static void scan_device_scope(const uint8_t *p, const uint8_t *end, aml_i2c_dev_t *dev) {
     while (p < end) {
         uint8_t op = *p;
 
@@ -252,9 +219,20 @@ static void scan_device_scope(const uint8_t *p, const uint8_t *end,
             char seg[AML_NAME_LEN];
             decode_nameseg(&p, end, seg);
 
-            if      (memcmp(seg, "_HID", 4) == 0) parse_hid(&p, end, dev);
-            else if (memcmp(seg, "_CRS", 4) == 0) parse_crs(&p, end, dev);
-            else { record_power_state(seg, dev); skip_object(&p, end); }
+            if (memcmp(seg, "_HID", 4) == 0) {
+                parse_hid(&p, end, dev);
+            } else if (memcmp(seg, "_CID", 4) == 0) {
+                aml_i2c_dev_t tmp = {0};
+                parse_hid(&p, end, &tmp);
+                if (!dev->hid[0] || memcmp(dev->hid, "MCHP", 4) == 0) {
+                    memcpy(dev->hid, tmp.hid, AML_HID_LEN);
+                }
+            } else if (memcmp(seg, "_CRS", 4) == 0) {
+                parse_crs(&p, end, dev);
+            } else { 
+                record_power_state(seg, dev); 
+                skip_object(&p, end); 
+            }
             continue;
         }
 
@@ -263,155 +241,160 @@ static void scan_device_scope(const uint8_t *p, const uint8_t *end,
             const uint8_t *method_start = p;
             size_t pkglen = decode_pkglen(&p, end);
             if (!pkglen) break;
-
             const uint8_t *method_end = method_start + pkglen;
             if (method_end > end) method_end = end;
 
-            char seg[AML_NAME_LEN];
-            const uint8_t *name_ptr = p;
-            decode_nameseg(&name_ptr, method_end, seg);
-
-            if (memcmp(seg, "_DSM", 4) == 0) {
-                const uint8_t *body = name_ptr + 1;   // skip MethodFlags we dont care abt it rn
-                const uint8_t *scan = body;
-                const uint8_t *guid = (const uint8_t *)ACPI_I2C_HID_DSM_GUID;
-
-                while (scan + 16 < method_end) {
-                    if (memcmp(scan, guid, 16) != 0) { scan++; continue; }
-                    scan += 16;
-                    while (scan + 4 < method_end) {
-                        if (*scan != AML_RETURN_OP)  { scan++; continue; }
-                        scan++;
-                        if (*scan != AML_PACKAGE_OP) { continue; }
-                        scan++;
-                        const uint8_t *ps = scan;
-                        size_t pl = decode_pkglen(&scan, method_end);
-                        if (!pl) break;
-                        const uint8_t *pe = ps + pl;
-                        if (pe > method_end || scan >= pe) break;
-                        uint8_t nelem = *scan++;
-                        if (nelem < 1) break;
-                        uint64_t val = decode_integer(&scan, pe);
-                        if (val <= 0xFFFF) {
-                            dev->hid_desc_addr = (uint16_t)val;
-                            dev->has_dsm       = 1;
-                        }
-                        goto method_done;
-                    }
-                    break;
+            // Search the method body for a literal Buffer containing an I2C descriptor
+            const uint8_t *scan = p;
+            while (scan + 8 < method_end && dev->speed_hz == 0) {
+                if (*scan == AML_BUFFER_OP) {
+                    const uint8_t *buf_ptr = scan;
+                    parse_crs(&buf_ptr, method_end, dev);
                 }
-            } else {
-                record_power_state(seg, dev);
+                scan++;
             }
-
-        method_done:
             p = method_end;
             continue;
         }
 
-        // skip nested Device or Scope without recursing 
-        if (op == AML_EXTOP_PREFIX && p + 1 < end && *(p + 1) == AML_DEVICE_OP) {
-            p += 2;
-            const uint8_t *s = p;
-            size_t l = decode_pkglen(&p, end);
-            if (l) p = s + l; else break;
-            continue;
-        }
-
-        if (op == AML_SCOPE_OP) {
-            p++;
-            const uint8_t *s = p;
-            size_t l = decode_pkglen(&p, end);
-            if (l) p = s + l; else break;
-            continue;
+        // fallback: scan for I2C tag in buffers
+        if (op == AML_BUFFER_OP && dev->speed_hz == 0) {
+            const uint8_t *scan = p;
+            parse_crs(&scan, end, dev);
         }
 
         p++;
     }
 }
 
+void aml_find_i2c_controllers(const uint8_t *aml, size_t len) {
+    if (!aml || !len) return;
+    const uint8_t *p = aml;
+    const uint8_t *end = aml + len;
+
+    while (p + 10 < end) {
+        // Look for NameOp + "_HID" or similar pattern
+        if (*p == AML_NAME_OP) {
+            char name[AML_NAME_LEN];
+            const uint8_t *scan = p + 1;
+            decode_nameseg(&scan, end, name);
+            if (memcmp(name, "_HID", 4) == 0) {
+                // Check if it matches INTC1040 or INTC1043
+                if (scan + 8 < end && scan[0] == AML_STRING_PREFIX) {
+                    const char *hid = (const char*)(scan + 1);
+                    if (memcmp(hid, "INTC1040", 8) == 0 || memcmp(hid, "INTC1043", 8) == 0) {
+                        
+                        // Scan for Memory/DWord/QWord resource descriptors
+                        const uint8_t *crs = scan;
+                        while (crs + 14 < end && crs < scan + 2048) {
+                            if (crs[0] == 0x86) {
+                                // Memory32Fixed
+                            } else if (crs[0] == 0x88) {
+                                // DWord Memory
+                            } else if (crs[0] == 0x89) {
+                                // QWord Memory
+                            } else if (crs[0] == 0x8A) {
+                                // Extended Resource
+                            }
+                            crs++;
+                        }
+                    }
+                    // Also look for the Touchpad itself
+                    else if (is_touchpad_hid(hid)) {
+                    }
+                }
+            }
+        }
+        p++;
+    }
+}
 
 void aml_walk_table(const uint8_t *aml, size_t len, aml_walk_ctx_t *ctx) {
     if (!aml || !len || !ctx || !ctx->devices) return;
-
     const uint8_t *p   = aml;
     const uint8_t *end = aml + len;
 
     while (p + 2 < end) {
-        if (p[0] != AML_EXTOP_PREFIX || p[1] != AML_DEVICE_OP) { p++; continue; }
-        p += 2;
+        uint8_t op = *p;
+        if (op == AML_EXTOP_PREFIX && p[1] == AML_DEVICE_OP) {
+            p += 2;
+            const uint8_t *scope_start = p;
+            size_t pkglen = decode_pkglen(&p, end);
+            if (!pkglen) { p++; continue; }
+            const uint8_t *scope_end = scope_start + pkglen;
+            if (scope_end > end) scope_end = end;
 
-        const uint8_t *scope_start = p;
-        size_t pkglen = decode_pkglen(&p, end);
-        if (!pkglen) continue;
+            char dev_name[AML_NAME_LEN];
+            decode_nameseg(&p, scope_end, dev_name);
 
-        const uint8_t *scope_end = scope_start + pkglen;
-        if (scope_end > end) scope_end = end;
+            if (ctx->count < ctx->capacity) {
+                aml_i2c_dev_t *dev = &ctx->devices[ctx->count];
+                memset(dev, 0, sizeof(aml_i2c_dev_t));
+                memcpy(dev->name, dev_name, AML_NAME_LEN);
+                scan_device_scope(p, scope_end, dev);
 
-        char dev_name[AML_NAME_LEN];
-        decode_nameseg(&p, scope_end, dev_name);
+                if (dev->hid[0]) {
+                    if (dev->speed_hz || is_touchpad_hid(dev->hid) || memcmp(dev->name, "TPD", 3) == 0) {
+                        dev->valid = 1;
+                        ctx->count++;
+                    }
+                }
 
-        if (ctx->count >= ctx->capacity) break;
-
-        aml_i2c_dev_t *dev = &ctx->devices[ctx->count];
-        memset(dev, 0, sizeof(aml_i2c_dev_t));
-        memcpy(dev->name, dev_name, AML_NAME_LEN);
-
-        scan_device_scope(p, scope_end, dev);
-
-        scan_device_scope(p, scope_end, dev);
-
-        if (dev->hid[0] && dev->speed_hz) {
-            dev->valid = 1;
-            ctx->count++;
+                if (dev->slave_address == 0) {
+                    const uint8_t *scan = p;
+                    while (scan + 20 < scope_end && dev->slave_address == 0) {
+                        if (*scan == ACPI_LARGE_I2C_SERIAL_BUS) {
+                            uint16_t len = (uint16_t)(scan[1]) | ((uint16_t)(scan[2]) << 8);
+                            if (scan + 3 + len <= scope_end && scan[5] == ACPI_I2C_SERIAL_BUS_TYPE && len >= 15) {
+                                dev->speed_hz = (uint32_t)scan[12] | ((uint32_t)scan[13] << 8) |
+                                                ((uint32_t)scan[14] << 16) | ((uint32_t)scan[15] << 24);
+                                dev->slave_address = (uint16_t)scan[16] | ((uint16_t)scan[17] << 8);
+                            }
+                        }
+                        scan++;
+                    }
+                }
+            }
+            p++;
+        } else if (op == AML_SCOPE_OP) {
+             p++;
+             size_t pkglen = decode_pkglen(&p, end);
+             // Just move into the scope and keep scanning
+             if (!pkglen) p++;
+        } else {
+            p++;
         }
-
-        p = scope_end;
     }
 }
 
-int aml_parse_s5(const uint8_t *aml, size_t len,
-                 uint16_t *slp_typa, uint16_t *slp_typb) {
+int aml_parse_s5(const uint8_t *aml, size_t len, uint16_t *slp_typa, uint16_t *slp_typb) {
     if (!aml || !len || !slp_typa || !slp_typb) return 0;
-
     const uint8_t *end = aml + len;
     const uint8_t *p   = aml;
 
     while (p + 4 < end) {
-        if (p[0] != '_' || p[1] != 'S' || p[2] != '5' || p[3] != '_') {
-            p++; continue;
-        }
-        p += 4;
-
-        // scan ahead up to 4 bytes for PackageOp; on diff firmware layouts YMMV 
-        int found_pkg = 0;
-        for (int skip = 0; skip < 4 && p + skip < end; skip++) {
-            if (p[skip] == AML_PACKAGE_OP) {
-                p += skip + 1;
-                found_pkg = 1;
-                break;
+        if (p[0] == '_' && p[1] == 'S' && p[2] == '5' && p[3] == '_') {
+            p += 4;
+            int found_pkg = 0;
+            for (int skip = 0; skip < 4 && p + skip < end; skip++) {
+                if (p[skip] == AML_PACKAGE_OP) { p += skip + 1; found_pkg = 1; break; }
             }
+            if (!found_pkg) continue;
+            const uint8_t *pkg_start = p;
+            size_t pkglen = decode_pkglen(&p, end);
+            if (!pkglen) continue;
+            const uint8_t *pkg_end = pkg_start + pkglen;
+            if (pkg_end > end) pkg_end = end;
+            if (p >= pkg_end) continue;
+            uint8_t num = *p++;
+            if (num < 2) continue;
+            uint64_t typa = decode_integer(&p, pkg_end);
+            uint64_t typb = decode_integer(&p, pkg_end);
+            *slp_typa = (uint16_t)((typa & 0x7) << 10);
+            *slp_typb = (uint16_t)((typb & 0x7) << 10);
+            return 1;
         }
-        if (!found_pkg) continue;
-
-        const uint8_t *pkg_start = p;
-        size_t pkglen = decode_pkglen(&p, end);
-        if (!pkglen) continue;
-
-        const uint8_t *pkg_end = pkg_start + pkglen;
-        if (pkg_end > end) pkg_end = end;
-
-        if (p >= pkg_end) continue;
-        uint8_t num = *p++;
-        if (num < 2) continue;
-
-        uint64_t typa = decode_integer(&p, pkg_end);
-        uint64_t typb = decode_integer(&p, pkg_end);
-
-        *slp_typa = (uint16_t)((typa & 0x7) << 10);
-        *slp_typb = (uint16_t)((typb & 0x7) << 10);
-        return 1;
+        p++;
     }
-
     return 0;
 }

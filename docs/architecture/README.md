@@ -11,6 +11,8 @@ The documentation is split by area so you can go directly to the subsystem you w
 | Graphics | [`graphics/window_manager.md`](architecture/graphics/window_manager.md) | Window manager design and display composition. |
 | Hardware | [`hardware/input.md`](architecture/hardware/input.md) | Hardware-level input support and device wiring. |
 | Hardware | [`hardware/pci.md`](architecture/hardware/pci.md) | PCI bus management and device enumeration. |
+| Hardware | [`hardware/i2c.md`](architecture/hardware/i2c.md) | I2C bus management and controller drivers. |
+| System | [`ACPI/acpi_interface.md`](architecture/ACPI/acpi_interface.md) | Power management and ACPI hardware discovery. |
 | Input | [`input/keyboard.md`](architecture/input/keyboard.md) | Keyboard input handling and key mapping. |
 | Memory | [`memory/memory.md`](architecture/memory/memory.md) | Memory architecture, paging, and address space layout. |
 | Memory | [`memory/memory_manager.md`](architecture/memory/memory_manager.md) | Memory allocation and management systems. |

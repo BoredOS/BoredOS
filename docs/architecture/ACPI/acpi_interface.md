@@ -44,28 +44,34 @@ Two functions expose this mapping to the rest of the kernel:
 
 ## AML Parsing
 
-The DSDT and any SSDTs present in the firmware contain AML (ACPI Machine Language) bytecode describing the hardware namespace. BoredOS does not implement a full AML interpreter - instead `src/drivers/ACPI/acpi_aml.c` implements a targeted byte-stream walker sufficient for I2C device enumeration.
+The DSDT and any SSDTs present in the firmware contain AML (ACPI Machine Language) bytecode describing the hardware namespace. BoredOS does not implement a full AML interpreter - instead `src/drivers/ACPI/acpi_aml.c` implements a targeted byte-stream walker sufficient for I2C device enumeration and basic power management.
 
 The walker handles:
 
-- **`_HID`** - device identification, either as an inline string or a packed EISAID integer.
-- **`_CRS`** - current resource settings; specifically scans for `I2cSerialBusV2` descriptors (large item tag `0x8E`) to extract slave address, bus speed, and addressing mode.
-- **`_DSM`** - device-specific method; scans the raw method body for the I2C-HID GUID (`3cdff6f7-4267-4555-ad05-b30a3d8938de`) and extracts the HID descriptor register address from the static return package.
-- **Power states** - records presence of `_PS0`, `_PS3`, `_PR0`, `_PR3` as flags.
+- **`_HID` & `_CID`** - Device identification. Supports inline strings and packed EISAID integers.
+    - Specifically recognizes touchpads/input devices: `PNP0C50`, `SYNA`, `ELAN`, `ALPS`.
+- **`_CRS`** - Current Resource Settings. Scans for `I2cSerialBusV2` descriptors (large item tag `0x8E`) to extract slave address and bus speed.
+- **Deep Scanning** - If a device lacks a static `_CRS`, the walker scans AML methods for literal `Buffer` objects that contain I2C serial bus descriptors.
+- **Controller Detection** - Identifies Intel I2C controllers via HIDs `INTC1040` and `INTC1043`.
+- **Power States** - Records presence of `_PS0`, `_PS3`, `_PR0`, `_PR3` as flags for power management.
 
 > [!IMPORTANT]
-> `_CRS` and `_DSM` must be statically defined `Name()` objects for the walker to read them. Dynamically computed resources via AML method evaluation are not supported.
+> While the walker can find literal buffers inside methods, it still cannot evaluate complex AML logic or dynamic expressions.
 
 ---
 
 ## I2C Enumeration
 
-`acpi_i2c_enumerate()` is called at the end of `acpi_init()`. It walks the DSDT via `acpi_get_dsdt()` followed by all SSDTs found in the XSDT/RSDT, feeding each into `aml_walk_table()`.
+`acpi_i2c_enumerate()` is called during kernel initialization. It performs a comprehensive sweep of the ACPI namespace:
 
-Devices are emitted into a flat table when both a `_HID` and a valid `I2cSerialBusV2` resource (non-zero `connection_speed`) are found. The result is accessible via:
+1. **DSDT Walk**: Scans the main DSDT for I2C devices.
+2. **SSDT Walk**: Iterates through all Secondary System Description Tables.
+3. **Deep HID Search**: Performs a raw byte search across *all* system tables for `_HID` patterns and specific EISAIDs (like `SYNA`) to catch devices that might be missed by the structured walker.
 
-- `acpi_i2c_count()` - number of enumerated devices.
-- `acpi_i2c_get(index)` - pointer to an `aml_i2c_dev_t` record containing the name, HID, slave address, speed, DSM result, and power flags.
+Devices are recorded in a global table, accessible via:
+
+- `acpi_i2c_count()` - Number of enumerated devices.
+- `acpi_i2c_get(index)` - Pointer to an `aml_i2c_dev_t` record containing the name, HID, slave address, and capabilities.
 
 ---
 

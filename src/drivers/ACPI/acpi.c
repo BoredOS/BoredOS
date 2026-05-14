@@ -7,6 +7,7 @@
 
 #include "acpi_structures.h"
 #include "../I2C/acpi_i2c.h"
+#include "../I2C/i2c_lpss.h"
 #include "acpi.h"
 #include "../sys/idt.h"
 #include "../core/limine.h"
@@ -205,6 +206,7 @@ int acpi_init(void){
     }
 
     acpi_i2c_enumerate();
+    i2c_lpss_init();
 
     return 0;
 }
@@ -228,6 +230,17 @@ uint16_t acpi_irq_flags(uint32_t irq) {
 
 
 struct acpi_sdt *acpi_get_dsdt(void) {
-    if (!acpi_fadt || !acpi_fadt->dsdt) return NULL;
-    return (struct acpi_sdt *)p2v((uintptr_t)acpi_fadt->dsdt);
+    if (!acpi_fadt) return NULL;
+    
+    // Check 64-bit X_DSDT first (FADT revision >= 2 usually)
+    if (acpi_fadt->header.length >= 148 && acpi_fadt->x_dsdt) {
+        return (struct acpi_sdt *)p2v(acpi_fadt->x_dsdt);
+    }
+    
+    // Fallback to 32-bit DSDT
+    if (acpi_fadt->dsdt) {
+        return (struct acpi_sdt *)p2v((uintptr_t)acpi_fadt->dsdt);
+    }
+    
+    return NULL;
 }
