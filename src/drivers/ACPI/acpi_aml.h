@@ -1,8 +1,6 @@
-/*
- * Copyright (c) 2026 Myles "Mellurboo" Wilson
- * Unauthorized copying or distribution is prohibited.
- * Provided "as is" without warranty.
-*/
+// Copyright (c) 2026 Myles Wilson (myles@bleedkernel.com)
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 
 #ifndef ACPI_AML_H
 #define ACPI_AML_H
@@ -49,7 +47,7 @@ typedef struct __attribute__((packed)) {
 
 /*
     GUID: 3cdff6f7-4267-4555-ad05-b30a3d8938de, mixed-endian AML layout
-    sorry i know its a magic number but tis the way of things :pensive:
+    sorry i know its a magic number but tis the way of things
 */
 #define ACPI_I2C_HID_DSM_GUID \
     "\xf7\xf6\xdf\x3c\x67\x42\x55\x45\xad\x05\xb3\x0a\x3d\x89\x38\xde"
