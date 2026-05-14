@@ -27,6 +27,7 @@
 #include "app_metadata.h"
 #include "disk.h"
 #include "mkfs_fat32.h"
+#include "spinlock.h"
 
 #define SYSTEM_CMD_DISK_GET_COUNT  100
 #define SYSTEM_CMD_DISK_GET_INFO   101
@@ -2207,6 +2208,39 @@ static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
     return (uint64_t)keymap_get_current();
 }
 
+#define CLIPBOARD_MAX_SIZE 4096
+static char g_clipboard[CLIPBOARD_MAX_SIZE];
+static int  g_clipboard_len = 0;
+static spinlock_t g_clipboard_lock = SPINLOCK_INIT;
+
+static uint64_t sys_cmd_clipboard_write(const syscall_args_t *args) {
+    const char *buf = (const char *)args->arg2;
+    int len = (int)args->arg3;
+    if (!buf || len <= 0) return 0;
+    if (len > CLIPBOARD_MAX_SIZE) len = CLIPBOARD_MAX_SIZE;
+    uint64_t flags = spinlock_acquire_irqsave(&g_clipboard_lock);
+    for (int i = 0; i < len; i++) g_clipboard[i] = buf[i];
+    g_clipboard_len = len;
+    spinlock_release_irqrestore(&g_clipboard_lock, flags);
+    return (uint64_t)len;
+}
+
+static uint64_t sys_cmd_clipboard_read(const syscall_args_t *args) {
+    char *buf = (char *)args->arg2;
+    int max_len = (int)args->arg3;
+    if (!buf || max_len <= 0) return 0;
+    uint64_t flags = spinlock_acquire_irqsave(&g_clipboard_lock);
+    int n = g_clipboard_len < max_len ? g_clipboard_len : max_len;
+    for (int i = 0; i < n; i++) buf[i] = g_clipboard[i];
+    spinlock_release_irqrestore(&g_clipboard_lock, flags);
+    return (uint64_t)n;
+}
+
+static uint64_t sys_cmd_clipboard_len(const syscall_args_t *args) {
+    (void)args;
+    return (uint64_t)g_clipboard_len;
+}
+
 typedef struct {
     char     devname[16];
     char     label[32];
@@ -2484,6 +2518,9 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_PARALLEL_RUN]        = sys_cmd_parallel_run,
     [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
     [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
+    [SYSTEM_CMD_CLIPBOARD_WRITE]     = sys_cmd_clipboard_write,
+    [SYSTEM_CMD_CLIPBOARD_READ]      = sys_cmd_clipboard_read,
+    [SYSTEM_CMD_CLIPBOARD_LEN]       = sys_cmd_clipboard_len,
     [SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE] = sys_cmd_set_mouse_cursor_scale,
     [SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE] = sys_cmd_get_mouse_cursor_scale,
     [SYSTEM_CMD_TTY_CREATE]          = sys_cmd_tty_create,

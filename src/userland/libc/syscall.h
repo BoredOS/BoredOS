@@ -108,6 +108,10 @@
 #define SYSTEM_CMD_GET_ELF_METADATA 76
 #define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
 
+#define SYSTEM_CMD_CLIPBOARD_WRITE  54
+#define SYSTEM_CMD_CLIPBOARD_READ   55
+#define SYSTEM_CMD_CLIPBOARD_LEN    56
+
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
 #define SPAWN_FLAG_TTY_ID 0x4
@@ -308,5 +312,10 @@ int sys_disk_umount(const char *mountpoint);
 int sys_disk_sync(const char *mountpoint);
 int sys_disk_rescan(const char *devname);
 int sys_disk_replace_kernel(const char *src_path, const char *esp_mountpoint);
+
+// Clipboard API
+int sys_clipboard_write(const char *buf, int len);
+int sys_clipboard_read(char *buf, int max_len);
+int sys_clipboard_len(void);
 
 #endif

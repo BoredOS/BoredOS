@@ -89,6 +89,18 @@ int sys_system(int cmd, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t ar
     return (int)syscall5(SYS_SYSTEM, (uint64_t)cmd, arg1, arg2, arg3, arg4);
 }
 
+int sys_clipboard_write(const char *buf, int len) {
+    return sys_system(SYSTEM_CMD_CLIPBOARD_WRITE, (uint64_t)buf, (uint64_t)len, 0, 0);
+}
+
+int sys_clipboard_read(char *buf, int max_len) {
+    return sys_system(SYSTEM_CMD_CLIPBOARD_READ, (uint64_t)buf, (uint64_t)max_len, 0, 0);
+}
+
+int sys_clipboard_len(void) {
+    return sys_system(SYSTEM_CMD_CLIPBOARD_LEN, 0, 0, 0, 0);
+}
+
 int sys_open(const char *path, const char *mode) {
     return (int)syscall3(SYS_FS, FS_CMD_OPEN, (uint64_t)path, (uint64_t)mode);
 }

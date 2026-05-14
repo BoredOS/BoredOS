@@ -75,4 +75,8 @@ void ui_window_set_title(ui_window_t win, const char *title);
 void ui_window_set_resizable(ui_window_t win, bool resizable);
 void ui_set_font(ui_window_t win, const char *path);
 
+// Clipboard API — text only, null-terminated strings
+void ui_clipboard_set(const char *text);
+int  ui_clipboard_get(char *buf, int max_len);
+
 #endif

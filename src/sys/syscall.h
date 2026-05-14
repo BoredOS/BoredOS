@@ -127,6 +127,10 @@ typedef struct {
 #define SYSTEM_CMD_GET_ELF_METADATA 76
 #define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
 
+#define SYSTEM_CMD_CLIPBOARD_WRITE  54
+#define SYSTEM_CMD_CLIPBOARD_READ   55
+#define SYSTEM_CMD_CLIPBOARD_LEN    56
+
 void syscall_init(void);
 uint64_t syscall_handler_c(registers_t *regs);
 

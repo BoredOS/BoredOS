@@ -102,3 +102,15 @@ void ui_window_set_resizable(ui_window_t win, bool resizable) {
 void ui_set_font(ui_window_t win, const char *path) {
     syscall3(SYS_GUI, GUI_CMD_SET_FONT, (uint64_t)win, (uint64_t)path);
 }
+
+void ui_clipboard_set(const char *text) {
+    if (!text) return;
+    int len = 0;
+    while (text[len]) len++;
+    sys_clipboard_write(text, len + 1);
+}
+
+int ui_clipboard_get(char *buf, int max_len) {
+    if (!buf || max_len <= 0) return 0;
+    return sys_clipboard_read(buf, max_len);
+}
