@@ -20,7 +20,7 @@ $(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_M
 endef
 
 LIBC_SOURCES = $(wildcard libc/*.c)
-LIBC_OBJS = $(patsubst libc/%.c, $(BIN_DIR)/%.o, $(LIBC_SOURCES)) $(BIN_DIR)/crt0.o $(BIN_DIR)/libwidget.o $(BIN_DIR)/stb_image.o
+LIBC_OBJS = $(patsubst libc/%.c, $(BIN_DIR)/libc_%.o, $(LIBC_SOURCES)) $(BIN_DIR)/crt0.o $(BIN_DIR)/libwidget.o $(BIN_DIR)/stb_image.o
 
 VPATH = cli gui sys games libc net cli/third_party
 vpath %.c cli gui sys games libc net cli/third_party
@@ -46,7 +46,7 @@ $(BIN_DIR):
 $(BIN_DIR)/crt0.o: crt0.asm
 	$(AS) -f elf64 $< -o $@
 
-$(BIN_DIR)/%.o: libc/%.c | $(BIN_DIR)
+$(BIN_DIR)/libc_%.o: libc/%.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BIN_DIR)/libwidget.o: ../wm/libwidget.c | $(BIN_DIR)

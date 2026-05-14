@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <syscall.h>
 #include <stdbool.h>
+#include <unistd.h>
 #include "utf-8.h"
 
 #define MAX_LINE 512
@@ -39,6 +40,8 @@ typedef struct {
 static bsh_config_t g_cfg;
 static char g_paths[MAX_PATHS][MAX_PATH_LEN];
 static int g_path_count = 0;
+static char g_resolved_command_path[256];
+static int g_resolve_status = -1;
 
 static char g_history[MAX_HISTORY][MAX_LINE];
 static int g_history_count = 0;
@@ -678,55 +681,138 @@ static bool is_elf_file(const char *path) {
     return hdr[0] == 0x7F && hdr[1] == 'E' && hdr[2] == 'L' && hdr[3] == 'F';
 }
 
-static int resolve_command(const char *cmd, char *out, int out_len) {
-    if (!cmd || !cmd[0]) return -1;
-
-    bool has_slash = false;
+static bool contains_slash(const char *cmd) {
+    if (!cmd) return false;
     for (int i = 0; cmd[i]; i++) {
-        if (cmd[i] == '/') { has_slash = true; break; }
+        if (cmd[i] == '/') return true;
+    }
+    return false;
+}
+
+static const char *env_get_value(char *const envp[], const char *name) {
+    int name_len;
+
+    if (!envp || !name || !name[0]) return NULL;
+
+    name_len = (int)strlen(name);
+
+    for (int i = 0; envp[i]; i++) {
+        if (starts_with(envp[i], name) && envp[i][name_len] == '=') {
+            return envp[i] + name_len + 1;
+        }
     }
 
-    if (has_slash) {
-        if (sys_exists(cmd)) {
-            if (!is_file_path(cmd)) return -2;
-            if (!is_elf_file(cmd)) return -3;
-            str_copy(out, cmd, out_len);
-            return 0;
-        }
-        if (!ends_with(cmd, ".elf")) {
-            char temp[256];
-            str_copy(temp, cmd, sizeof(temp));
-            str_append(temp, ".elf", sizeof(temp));
-            if (sys_exists(temp)) {
-                if (!is_file_path(temp)) return -2;
-                if (!is_elf_file(temp)) return -3;
-                str_copy(out, temp, out_len);
-                return 0;
+    return NULL;
+}
+
+static void build_path_candidate(char *out, int out_len, const char *dir, int dir_len, const char *cmd) {
+    int pos = 0;
+
+    if (!out || out_len <= 0) return;
+    out[0] = 0;
+    if (!dir || !cmd) return;
+
+    for (int i = 0; i < dir_len && dir[i] && pos < out_len - 1; i++) {
+        out[pos++] = dir[i];
+    }
+    out[pos] = 0;
+
+    if (pos > 0 && out[pos - 1] != '/' && pos < out_len - 1) {
+        out[pos++] = '/';
+        out[pos] = 0;
+    }
+
+    for (int i = 0; cmd[i] && pos < out_len - 1; i++) {
+        out[pos++] = cmd[i];
+    }
+    out[pos] = 0;
+}
+
+static int accept_command_candidate(const char *candidate) {
+    if (access(candidate, X_OK) != 0) return -1;
+    if (!is_file_path(candidate)) return -2;
+    if (!is_elf_file(candidate)) return -3;
+
+    str_copy(g_resolved_command_path, candidate, sizeof(g_resolved_command_path));
+    return 0;
+}
+
+static char *resolve_in_path_string(const char *cmd, const char *path_str) {
+    int first_error = -1;
+    int start = 0;
+    int i = 0;
+
+    if (!path_str || !path_str[0]) {
+        g_resolve_status = -1;
+        return NULL;
+    }
+
+    while (1) {
+        if (path_str[i] == ':' || path_str[i] == 0) {
+            int len = i - start;
+
+            if (len > 0) {
+                char candidate[256];
+                int res;
+
+                build_path_candidate(candidate, sizeof(candidate), path_str + start, len, cmd);
+                res = accept_command_candidate(candidate);
+                if (res == 0) {
+                    g_resolve_status = 0;
+                    return g_resolved_command_path;
+                }
+                if (res != -1 && first_error == -1) first_error = res;
+
+                if (!ends_with(cmd, ".elf")) {
+                    str_append(candidate, ".elf", sizeof(candidate));
+                    res = accept_command_candidate(candidate);
+                    if (res == 0) {
+                        g_resolve_status = 0;
+                        return g_resolved_command_path;
+                    }
+                    if (res != -1 && first_error == -1) first_error = res;
+                }
             }
+
+            start = i + 1;
         }
-        return -1;
+
+        if (path_str[i] == 0) break;
+        i++;
     }
 
-    for (int i = 0; i < g_path_count; i++) {
-        char temp[256];
-        temp[0] = 0;
-        str_copy(temp, g_paths[i], sizeof(temp));
-        if (temp[0] && temp[strlen(temp) - 1] != '/') str_append(temp, "/", sizeof(temp));
-        str_append(temp, cmd, sizeof(temp));
-        if (sys_exists(temp) && is_file_path(temp) && is_elf_file(temp)) {
-            str_copy(out, temp, out_len);
-            return 0;
-        }
-        if (!ends_with(cmd, ".elf")) {
-            str_append(temp, ".elf", sizeof(temp));
-            if (sys_exists(temp) && is_file_path(temp) && is_elf_file(temp)) {
-                str_copy(out, temp, out_len);
-                return 0;
-            }
-        }
+    g_resolve_status = first_error;
+    return NULL;
+}
+
+static char *resolve_command_path(const char *cmd, char *const envp[]) {
+    const char *path;
+    int res;
+
+    g_resolved_command_path[0] = 0;
+    g_resolve_status = -1;
+
+    if (!cmd || !cmd[0]) return NULL;
+
+    if (contains_slash(cmd)) {
+        res = accept_command_candidate(cmd);
+        g_resolve_status = res;
+        return (res == 0) ? g_resolved_command_path : NULL;
     }
 
-    return -1;
+    path = env_get_value(envp, "PATH");
+    if (!path) path = g_cfg.path;
+
+    return resolve_in_path_string(cmd, path);
+}
+
+static int resolve_command(const char *cmd, char *out, int out_len) {
+    char *resolved = resolve_command_path(cmd, NULL);
+
+    if (!resolved) return g_resolve_status;
+
+    str_copy(out, resolved, out_len);
+    return 0;
 }
 
 static void build_args_string(int argc, char *argv[], int start, char *out, int out_len) {
@@ -796,7 +882,7 @@ static int collect_command_matches(const char *prefix, char matches[][MAX_MATCH_
     int count = 0;
     const char *builtins[] = {
         "cd", "pwd", "ls", "cat", "echo", "clear", "mkdir", "rm",
-        "touch", "cp", "mv", "man", "alias", "unalias", ".", "exit"
+        "touch", "cp", "mv", "man", "alias", "unalias", "time", ".", "exit"
     };
     for (int i = 0; i < (int)(sizeof(builtins) / sizeof(builtins[0])); i++) {
         if (starts_with(builtins[i], prefix)) count = add_match_unique(matches, count, builtins[i]);
@@ -910,17 +996,34 @@ static void show_matches(const char *prompt_tmpl, const char *line, int len, cha
     redraw_input(prompt_tmpl, line, len, len);
 }
 
-static int wait_for_pid(int pid) {
-    int status = 0;
+static int wait_for_pid_status(int pid, int *status) {
     while (1) {
-        int rc = sys_waitpid(pid, &status, 1);
-        if (rc == pid || rc < 0) break;
+        int child_status = 0;
+
+        int rc = sys_waitpid(pid, &child_status, 1);
+
+        if (rc == pid) {
+            if (status) *status = child_status;
+            return 0;
+        }
+
+        if (rc < 0) return -1;
+
         if (g_tty_id >= 0) {
             int fg = sys_tty_get_fg(g_tty_id);
-            if (fg != pid) break;
+            if (fg != pid) return -1;
         }
+
         sleep(10);
     }
+}
+
+static int wait_for_pid(int pid) {
+    int status = 0;
+
+    if (wait_for_pid_status(pid, &status) != 0)
+        return -1;
+
     return status;
 }
 
@@ -932,6 +1035,120 @@ static int bsh_open_file(const char *path, const char *mode, bool *is_kernel) {
 
 static void cmd_clear(void) {
     sys_write(1, "\x1b[2J\x1b[H", 7);
+}
+
+static void print_command_resolution_error(const char *who, const char *cmd, int res) {
+    set_color(g_color_error);
+    if (res == -2) {
+        printf("%s: is a directory: %s\n", who, cmd);
+    } else if (res == -3) {
+        printf("%s: not executable: %s\n", who, cmd);
+    } else {
+        printf("%s: command not found: %s\n", who, cmd);
+    }
+    reset_color();
+}
+
+static void builtin_time_usage(void) {
+    printf("Usage: time <command> [args...]\n");
+    printf("\n");
+    printf("Examples:\n");
+    printf("  time ls\n");
+    printf("  time hexdump file.txt\n");
+    printf("  time /bin/hexdump.elf file.txt\n");
+}
+
+// Reads the system uptime in milliseconds by parsing /proc/uptime
+// before and after running the command, then calculating the difference.
+static unsigned long long read_uptime_ms(void) {
+    char buf[64];
+    int fd;
+    int bytes;
+    int seconds;
+
+    fd = sys_open("/proc/uptime", "r");
+    if (fd < 0) return 0;
+
+    bytes = sys_read(fd, buf, sizeof(buf) - 1);
+    sys_close(fd);
+
+    if (bytes <= 0) return 0;
+
+    buf[bytes] = 0;
+    seconds = atoi(buf);
+
+    return (unsigned long long)seconds * 1000ULL;
+}
+
+static int builtin_time(int argc, char *argv[]) {
+    char *resolved;
+    char full_path[256];
+    char args_buf[256];
+    char cmdline[MAX_LINE];
+    unsigned long long start;
+    unsigned long long end;
+    unsigned long long elapsed;
+    int pid = -1;
+    int ret = -1;
+
+    if (argc < 2) {
+        builtin_time_usage();
+        return 1;
+    }
+
+    if (str_eq(argv[1], "-h") || str_eq(argv[1], "--help")) {
+        builtin_time_usage();
+        return 0;
+    }
+
+    resolved = resolve_command_path(argv[1], NULL);
+    if (!resolved) {
+        print_command_resolution_error("time", argv[1], g_resolve_status);
+        return 1;
+    }
+    str_copy(full_path, resolved, sizeof(full_path));
+
+    build_args_string(argc, argv, 2, args_buf, sizeof(args_buf));
+
+    str_copy(cmdline, full_path, sizeof(cmdline));
+    if (args_buf[0]) {
+        str_append(cmdline, " ", sizeof(cmdline));
+        str_append(cmdline, args_buf, sizeof(cmdline));
+    }
+
+    start = read_uptime_ms();
+
+    for (int attempt = 0; attempt < 5; attempt++) {
+        pid = sys_spawn(full_path, args_buf[0] ? args_buf : NULL, SPAWN_FLAG_TERMINAL | SPAWN_FLAG_INHERIT_TTY, 0);
+        if (pid >= 0) break;
+        sleep(10);
+    }
+
+    if (pid >= 0) {
+        if (g_tty_id >= 0) sys_tty_set_fg(g_tty_id, pid);
+        if (wait_for_pid_status(pid, &ret) != 0) ret = -1;
+        if (g_tty_id >= 0) sys_tty_set_fg(g_tty_id, 0);
+    }
+
+    end = read_uptime_ms();
+
+    if (end >= start) elapsed = end - start;
+    else elapsed = 0;
+
+    printf("\n");
+    printf("Command: %s\n", cmdline);
+    printf("Exit code: %d\n", ret);
+
+    if (ret == -1) {
+        printf("Command failed with non-zero exit code, not reporting time.\n");
+        return ret;
+    }
+
+    printf("Elapsed: %llu ms\n", elapsed);
+
+    sys_system(SYSTEM_CMD_SLEEP, 1, 0, 0, 0);
+
+    return ret;
 }
 
 static int builtin_cd(int argc, char *argv[]) {
@@ -1327,6 +1544,7 @@ static int execute_builtin(int argc, char *argv[]) {
     if (str_eq(argv[0], "man")) return builtin_man(argc, argv);
     if (str_eq(argv[0], "alias")) return builtin_alias(argc, argv);
     if (str_eq(argv[0], "unalias")) return builtin_unalias(argc, argv);
+    if (str_eq(argv[0], "time")) return builtin_time(argc, argv);
     if (str_eq(argv[0], ".")) {
         if (argc < 2) {
             set_color(g_color_error);
@@ -1607,22 +1825,8 @@ static int execute_argv_inner(int argc, char *argv[], int depth, bool isolated, 
 
     char full_path[256];
     int cmd_res = resolve_command(argv[0], full_path, sizeof(full_path));
-    if (cmd_res == -2) {
-        set_color(g_color_error);
-        printf("bsh: is a directory: %s\n", argv[0]);
-        reset_color();
-        return 1;
-    }
-    if (cmd_res == -3) {
-        set_color(g_color_error);
-        printf("bsh: not executable: %s\n", argv[0]);
-        reset_color();
-        return 1;
-    }
     if (cmd_res != 0) {
-        set_color(g_color_error);
-        printf("bsh: command not found: %s\n", argv[0]);
-        reset_color();
+        print_command_resolution_error("bsh", argv[0], cmd_res);
         return 1;
     }
 

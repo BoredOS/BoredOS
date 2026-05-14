@@ -38,6 +38,7 @@ int main(int argc, char **argv) {
     printf("clear          - Clear the screen\n");
     printf("exit           - Exit the terminal\n");
     printf("net            - Network tools\n");
+    printf("time <cmd>     - Measure command execution time\n");
     printf("\nHint: Use Ctrl+C to force quit any running application.\n");
     return 0;
 }

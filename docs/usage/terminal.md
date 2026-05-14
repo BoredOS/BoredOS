@@ -132,6 +132,7 @@ Below are some of the most used commands available in `/bin`:
 | `lsblk` | List block devices and partitions. |
 | `du` | Report disk usage for files and directories. |
 | `sysfetch` | Display system information and BoredOS branding. |
+| `time` |  Measure command execution time. |
 
 
 ---
