@@ -7,6 +7,7 @@
 #include "io.h"
 #include "wm.h"
 #include "ahci.h"
+#include "nvme.h"
 #include "../fs/vfs.h"
 #include "../fs/fat32.h"
 #include "../sys/spinlock.h"
@@ -652,18 +653,21 @@ void disk_manager_init(void) {
 }
 
 void disk_manager_scan(void) {
+    serial_write("[DISK] Initializing NVMe...\n");
+    nvme_init();
+
     serial_write("[DISK] Initializing AHCI (SATA DMA)...\n");
     ahci_init();
-    
-    if (ahci_get_port_count() == 0) {
-        serial_write("[DISK] No AHCI ports found, falling back to legacy IDE...\n");
+
+    if (ahci_get_port_count() == 0 && nvme_get_disk_count() == 0) {
+        serial_write("[DISK] No NVMe or AHCI disks found, falling back to legacy IDE...\n");
         try_add_ata_drive(ATA_PRIMARY_IO, false, "IDE Primary Master");
         try_add_ata_drive(ATA_PRIMARY_IO, true, "IDE Primary Slave");
         try_add_ata_drive(ATA_SECONDARY_IO, false, "IDE Secondary Master");
         try_add_ata_drive(ATA_SECONDARY_IO, true, "IDE Secondary Slave");
         log_ok("IDE probing complete");
     } else {
-        log_ok("AHCI ports initialized, skipping IDE");
+        log_ok("NVMe/AHCI initialized, skipping IDE");
     }
 }
 

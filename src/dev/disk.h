@@ -14,7 +14,8 @@ typedef enum {
     DISK_TYPE_RAM,
     DISK_TYPE_IDE,
     DISK_TYPE_SATA,
-    DISK_TYPE_USB
+    DISK_TYPE_USB,
+    DISK_TYPE_NVME
 } DiskType;
 
 typedef struct Disk {
