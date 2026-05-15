@@ -338,6 +338,19 @@ void kmain(void) {
     graphics_init(fb);
     kconsole_init();
 
+    gdt_init();
+    log_ok("GDT initialized");
+
+    idt_init();
+    idt_register_interrupts();
+
+    paging_init();
+    log_ok("Paging ready");
+
+    syscall_init();
+    log_ok("Syscalls ready");
+
+
     // Check for verbose boot flag
     if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
         const char *cmdline = kernel_file_request.response->kernel_file->cmdline;
@@ -358,17 +371,6 @@ void kmain(void) {
         hcf();
     }
 
-    gdt_init();
-    log_ok("GDT initialized");
-
-    paging_init();
-    log_ok("Paging ready");
-
-    syscall_init();
-    log_ok("Syscalls ready");
-
-    idt_init();
-    idt_register_interrupts();
     idt_load();
     log_ok("IDT ready");
     print_verbose_boot_banner();

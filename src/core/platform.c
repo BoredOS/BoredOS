@@ -45,11 +45,13 @@ void platform_init(void) {
 }
 uint64_t p2v(uint64_t phys) { return phys + hhdm_offset; }
 uint64_t v2p(uint64_t virt) {
+    if (hhdm_offset && virt >= hhdm_offset) {
+        if (!kernel_virt_base || virt < kernel_virt_base) {
+            return virt - hhdm_offset;
+        }
+    }
     if (kernel_virt_base && virt >= kernel_virt_base) {
         return virt - kernel_virt_base + kernel_phys_base;
-    }
-    if (hhdm_offset && virt >= hhdm_offset) {
-        return virt - hhdm_offset;
     }
     return virt;
 }

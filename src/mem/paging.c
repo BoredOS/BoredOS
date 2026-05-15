@@ -9,6 +9,7 @@
 #define MSR_WC  0x277
 
 static uint64_t current_pml4_phys = 0;
+static uint64_t kernel_pml4_phys = 0;
 
 // Get current CR3 value
 static uint64_t read_cr3(void) {
@@ -39,11 +40,16 @@ static uint64_t alloc_page_table_phys(void) {
 }
 
 void paging_init(void) {
-    current_pml4_phys = read_cr3() & PT_ADDR_MASK;
+    kernel_pml4_phys = read_cr3() & PT_ADDR_MASK;
+    current_pml4_phys = kernel_pml4_phys;
 }
 
 uint64_t paging_get_pml4_phys(void) {
     return current_pml4_phys;
+}
+
+uint64_t paging_get_kernel_pml4_phys(void) {
+    return kernel_pml4_phys;
 }
 
 void paging_switch_directory(uint64_t pml4_phys) {
@@ -102,14 +108,11 @@ uint64_t paging_create_user_pml4_phys(void) {
     
     page_table_t* new_pml4 = (page_table_t*)p2v(new_pml4_phys);
     
-    // 2. Clone the higher-half kernel mappings from the active PML4
+    // 2. Clone the higher-half kernel mappings from the boot kernel PML4
     // In x86_64, indices 256-511 are the higher half.
-    uint64_t kernel_pml4_phys = paging_get_pml4_phys();
-    if (kernel_pml4_phys) {
-        page_table_t* kernel_pml4 = (page_table_t*)p2v(kernel_pml4_phys);
-        for (int i = 256; i < 512; i++) {
-            new_pml4->entries[i] = kernel_pml4->entries[i];
-        }
+    page_table_t* kernel_pml4 = (page_table_t*)p2v(kernel_pml4_phys);
+    for (int i = 256; i < 512; i++) {
+        new_pml4->entries[i] = kernel_pml4->entries[i];
     }
     
     // The lower half (0-255) is left empty for the user process to use
