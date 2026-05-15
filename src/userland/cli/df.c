@@ -91,6 +91,17 @@ static void format_human_readable(uint64_t bytes, char *out, bool pow1000, bool 
     }
 }
 
+static void format_bar(double use_percent, char *out) {
+    // Produces a 10-char wide bar, e.g. "[#####     ]"
+    int filled = (int)(use_percent / 10.0 + 0.5);
+    if (filled > 10) filled = 10;
+    if (filled < 0)  filled = 0;
+    out[0] = '[';
+    for (int i = 0; i < 10; i++) out[1 + i] = (i < filled) ? '#' : ' ';
+    out[11] = ']';
+    out[12] = '\0';
+}
+
 static void format_size(uint64_t bytes, char *out) {
     uint64_t blocks = 0;
     switch (multiplier_mode) {
@@ -188,7 +199,7 @@ int main(int argc, char **argv) {
                 if (multiplier_mode == MULTIPLIER_B || multiplier_mode == MULTIPLIER_P) block_str = "512-blocks";
                 else if (multiplier_mode == MULTIPLIER_G) block_str = "1G-blocks";
                 else if (multiplier_mode == MULTIPLIER_M) block_str = "1M-blocks";
-                printf("%-16s %-8s %-10s %-10s %-10s %-5s %s\n", "Filesystem", "Type", block_str, "Used", "Available", "Use%", "Mounted on");
+                printf("%-16s %-8s %-10s %-10s %-10s %-5s %-14s %s\n", "Filesystem", "Type", block_str, "Used", "Available", "Use%", "", "Mounted on");
             }
         } else {
             if (multiplier_mode == MULTIPLIER_H_1024 || multiplier_mode == MULTIPLIER_H_1000) {
@@ -200,11 +211,11 @@ int main(int argc, char **argv) {
                 if (multiplier_mode == MULTIPLIER_B || multiplier_mode == MULTIPLIER_P) block_str = "512-blocks";
                 else if (multiplier_mode == MULTIPLIER_G) block_str = "1G-blocks";
                 else if (multiplier_mode == MULTIPLIER_M) block_str = "1M-blocks";
-                
+
                 if (multiplier_mode == MULTIPLIER_P) {
                     printf("%-16s %-10s %-10s %-10s %-5s %s\n", "Filesystem", "512-blocks", "Used", "Available", "Capacity", "Mounted on");
                 } else {
-                    printf("%-16s %-10s %-10s %-10s %-5s %s\n", "Filesystem", block_str, "Used", "Available", "Use%", "Mounted on");
+                    printf("%-16s %-10s %-10s %-10s %-5s %-14s %s\n", "Filesystem", block_str, "Used", "Available", "Use%", "", "Mounted on");
                 }
             }
         }
@@ -285,10 +296,16 @@ int main(int argc, char **argv) {
                 strcpy(dev_name, m_info.device);
             }
 
+            char bar_str[16];
+            if (!opt_inodes && !opt_export && !opt_libxo && !opt_comma)
+                format_bar(use_percent, bar_str);
+            else
+                bar_str[0] = '\0';
+
             if (opt_type) {
-                printf("%-16s %-8s %-10s %-10s %-10s %-5s %s\n", dev_name, m_info.fs_type, t_str, u_str, f_str, use_str, m_info.path);
+                printf("%-16s %-8s %-10s %-10s %-10s %-5s %-14s %s\n", dev_name, m_info.fs_type, t_str, u_str, f_str, use_str, bar_str, m_info.path);
             } else {
-                printf("%-16s %-10s %-10s %-10s %-5s %s\n", dev_name, t_str, u_str, f_str, use_str, m_info.path);
+                printf("%-16s %-10s %-10s %-10s %-5s %-14s %s\n", dev_name, t_str, u_str, f_str, use_str, bar_str, m_info.path);
             }
         }
     }
@@ -306,10 +323,12 @@ int main(int argc, char **argv) {
         char use_str[16];
         sprintf(use_str, "%.0f%%", use_percent);
 
+        char total_bar[16];
+        format_bar(use_percent, total_bar);
         if (opt_type) {
-            printf("%-16s %-8s %-10s %-10s %-10s %-5s -\n", "total", "-", t_str, u_str, f_str, use_str);
+            printf("%-16s %-8s %-10s %-10s %-10s %-5s %-14s -\n", "total", "-", t_str, u_str, f_str, use_str, total_bar);
         } else {
-            printf("%-16s %-10s %-10s %-10s %-5s -\n", "total", t_str, u_str, f_str, use_str);
+            printf("%-16s %-10s %-10s %-10s %-5s %-14s -\n", "total", t_str, u_str, f_str, use_str, total_bar);
         }
     }
 

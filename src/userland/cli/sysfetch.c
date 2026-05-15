@@ -26,6 +26,7 @@ typedef struct {
     char shell_label[32];
     char memory_label[32];
     char cpu_label[32];
+    char disk_label[32];
     char date_label[32];
 } SysfetchConfig;
 
@@ -132,6 +133,7 @@ static void set_config_defaults() {
     strcpy(config.shell_label, "Shell");
     strcpy(config.memory_label, "Memory");
     strcpy(config.cpu_label, "CPU");
+    strcpy(config.disk_label, "Disk");
     strcpy(config.date_label, "Date");
 }
 
@@ -159,6 +161,7 @@ static void parse_config(char* buffer) {
                 else if (strcmp(key, "shell_label") == 0) strcpy(config.shell_label, val);
                 else if (strcmp(key, "memory_label") == 0) strcpy(config.memory_label, val);
                 else if (strcmp(key, "cpu_label") == 0) strcpy(config.cpu_label, val);
+                else if (strcmp(key, "disk_label") == 0) strcpy(config.disk_label, val);
                 else if (strcmp(key, "date_label") == 0) strcpy(config.date_label, val);
             }
         }
@@ -384,6 +387,22 @@ int main(int argc, char **argv) {
             strcat(info_lines[info_line_count], temp_buf);
             strcat(info_lines[info_line_count], "MiB / ");
             itoa(total / 1024, temp_buf);
+            strcat(info_lines[info_line_count], temp_buf);
+            strcat(info_lines[info_line_count++], "MiB");
+        }
+    }
+    if (config.disk_label[0]) {
+        vfs_statfs_t disk_stat;
+        if (sys_fs_statfs("/", &disk_stat) == 0 && disk_stat.total_blocks > 0) {
+            uint64_t total_bytes = (uint64_t)disk_stat.total_blocks * disk_stat.block_size;
+            uint64_t free_bytes  = (uint64_t)disk_stat.free_blocks  * disk_stat.block_size;
+            uint64_t used_bytes  = total_bytes - free_bytes;
+            strcpy(info_lines[info_line_count], config.disk_label);
+            strcat(info_lines[info_line_count], ": ");
+            itoa((int)(used_bytes / (1024 * 1024)), temp_buf);
+            strcat(info_lines[info_line_count], temp_buf);
+            strcat(info_lines[info_line_count], "MiB / ");
+            itoa((int)(total_bytes / (1024 * 1024)), temp_buf);
             strcat(info_lines[info_line_count], temp_buf);
             strcat(info_lines[info_line_count++], "MiB");
         }
