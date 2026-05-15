@@ -120,6 +120,11 @@ void vfs_normalize_path(const char *cwd, const char *path, char *normalized) {
     }
 }
 
+static void vfs_normalize_process_path(const char *path, char *normalized) {
+    process_t *proc = process_get_current();
+    vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
+}
+
 static vfs_mount_t* vfs_resolve_mount(const char *path, const char **rel_path_out) {
     vfs_mount_t *best = NULL;
     int best_len = -1;
@@ -450,7 +455,7 @@ int vfs_list_directory(const char *path, vfs_dirent_t *entries, int max) {
     
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     const char *rel_path = NULL;
     vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
@@ -554,7 +559,7 @@ bool vfs_mkdir(const char *path) {
     if (!path) return false;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     const char *rel_path = NULL;
     vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
@@ -573,7 +578,7 @@ bool vfs_rmdir(const char *path) {
     if (!path) return false;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     if (normalized[0] == '/' && normalized[1] == '\0') return false;
     if (vfs_strcmp(normalized, "/dev") == 0) return false;
@@ -595,7 +600,7 @@ bool vfs_delete(const char *path) {
     if (!path) return false;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     if (normalized[0] == '/' && normalized[1] == '\0') return false;
     if (vfs_strcmp(normalized, "/dev") == 0) return false;
@@ -617,8 +622,8 @@ bool vfs_rename(const char *old_path, const char *new_path) {
     if (!old_path || !new_path) return false;
 
     char norm_old[VFS_MAX_PATH], norm_new[VFS_MAX_PATH];
-    vfs_normalize_path("/", old_path, norm_old);
-    vfs_normalize_path("/", new_path, norm_new);
+    vfs_normalize_process_path(old_path, norm_old);
+    vfs_normalize_process_path(new_path, norm_new);
 
     const char *rel_old = NULL, *rel_new = NULL;
     vfs_mount_t *mount_old = vfs_resolve_mount(norm_old, &rel_old);
@@ -637,7 +642,7 @@ bool vfs_exists(const char *path) {
     if (!path) return false;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     if (normalized[0] == '/' && normalized[1] == '\0') return true;
 
@@ -672,7 +677,7 @@ bool vfs_is_directory(const char *path) {
     if (!path) return false;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     if (normalized[0] == '/' && normalized[1] == '\0') return true;
 
@@ -714,7 +719,7 @@ int vfs_statfs(const char *path, vfs_statfs_t *stat) {
     if (!path || !stat) return -1;
     
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
     
     const char *rel_path = NULL;
     vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
@@ -734,7 +739,7 @@ int vfs_get_info(const char *path, vfs_dirent_t *info) {
     if (!path || !info) return -1;
 
     char normalized[VFS_MAX_PATH];
-    vfs_normalize_path("/", path, normalized);
+    vfs_normalize_process_path(path, normalized);
 
     if (normalized[0] == '/' && normalized[1] == '\0') {
         vfs_strcpy(info->name, "/");
