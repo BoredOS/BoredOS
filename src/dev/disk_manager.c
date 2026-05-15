@@ -395,11 +395,17 @@ void disk_register_partition(Disk *parent, uint32_t lba_offset, uint32_t sector_
     Disk *part = (Disk*)kmalloc(sizeof(Disk));
     if (!part) return;
 
-    // Build name: parent_devname + partition number (e.g. "sda1")
+    // Build name: for SATA "sda1", for NVMe "nvme0p1"
     int len = dm_strlen(parent->devname);
     for (int i = 0; i < len; i++) part->devname[i] = parent->devname[i];
-    part->devname[len] = '0' + part_num;
-    part->devname[len + 1] = 0;
+    if (parent->type == DISK_TYPE_NVME) {
+        part->devname[len]     = 'p';
+        part->devname[len + 1] = '0' + part_num;
+        part->devname[len + 2] = 0;
+    } else {
+        part->devname[len]     = '0' + part_num;
+        part->devname[len + 1] = 0;
+    }
 
     part->type = parent->type;
     part->is_fat32 = is_fat32;

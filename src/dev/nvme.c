@@ -1,4 +1,4 @@
-// Copyright (c) 2023-2026 Chris (boreddevnl)
+// Copyright (c) 2026 Keegan (RicePollution) (https://github.com/RicePollution)
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 
@@ -21,6 +21,7 @@
 #include "../mem/memory_manager.h"
 #include "../mem/paging.h"
 #include "../sys/spinlock.h"
+#include "../core/kutils.h"
 #include <stddef.h>
 
 extern void serial_write(const char *str);
@@ -109,19 +110,7 @@ typedef struct {
 static nvme_controller_t controllers[MAX_NVME_CONTROLLERS];
 static int nvme_controller_count = 0;
 static int nvme_disk_count_total = 0;
-
-// ============================================================================
-// String Helpers (no libc in kernel)
-// ============================================================================
-
-static void nvme_strcpy(char *dst, const char *src) {
-    while ((*dst++ = *src++));
-}
-
-static void nvme_memset(void *dst, int val, int len) {
-    uint8_t *p = (uint8_t *)dst;
-    while (len-- > 0) *p++ = (uint8_t)val;
-}
+static int nvme_disk_index = 0;  // For /dev/nvme0, nvme1, etc.
 
 // ============================================================================
 // Admin Command: Submit and Poll for Completion
@@ -246,7 +235,7 @@ static int nvme_disk_read_sector(Disk *disk, uint32_t sector, uint8_t *buffer) {
     if (!phys) return -1;
 
     nvme_sq_entry_t cmd;
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0  = NVME_IO_READ;
     cmd.nsid  = nsid;
     cmd.prp1  = phys;
@@ -272,7 +261,7 @@ static int nvme_disk_write_sector(Disk *disk, uint32_t sector, const uint8_t *bu
     if (!phys) return -1;
 
     nvme_sq_entry_t cmd;
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0  = NVME_IO_WRITE;
     cmd.nsid  = nsid;
     cmd.prp1  = phys;
@@ -306,7 +295,7 @@ static int nvme_disk_read_sectors(Disk *disk, uint32_t sector, uint32_t count, u
         }
 
         nvme_sq_entry_t cmd;
-        nvme_memset(&cmd, 0, sizeof(cmd));
+        memset(&cmd, 0, sizeof(cmd));
         cmd.cdw0  = NVME_IO_READ;
         cmd.nsid  = nsid;
         cmd.prp1  = phys;
@@ -340,7 +329,7 @@ static int nvme_disk_write_sectors(Disk *disk, uint32_t sector, uint32_t count, 
         }
 
         nvme_sq_entry_t cmd;
-        nvme_memset(&cmd, 0, sizeof(cmd));
+        memset(&cmd, 0, sizeof(cmd));
         cmd.cdw0  = NVME_IO_WRITE;
         cmd.nsid  = nsid;
         cmd.prp1  = phys;
@@ -368,7 +357,7 @@ static int nvme_disk_sync(Disk *disk) {
     nvme_controller_t *ctrl = &controllers[ctrl_idx];
 
     nvme_sq_entry_t cmd;
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0 = NVME_IO_FLUSH;
     cmd.nsid = 0xFFFFFFFFu;  // All namespaces
 
@@ -406,12 +395,12 @@ static int nvme_controller_enable(nvme_controller_t *ctrl) {
     // Allocate Admin Submission Queue: NVME_QUEUE_SIZE * 64 bytes = 4096 bytes
     ctrl->asq = (nvme_sq_entry_t *)kmalloc_aligned(NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t), 4096);
     if (!ctrl->asq) return -1;
-    nvme_memset(ctrl->asq, 0, NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t));
+    memset(ctrl->asq, 0, NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t));
 
     // Allocate Admin Completion Queue: NVME_QUEUE_SIZE * 16 bytes = 1024 bytes
     ctrl->acq = (nvme_cq_entry_t *)kmalloc_aligned(NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t), 4096);
     if (!ctrl->acq) return -1;
-    nvme_memset(ctrl->acq, 0, NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t));
+    memset(ctrl->acq, 0, NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t));
 
     // Initialise queue head/tail pointers and phase bits
     ctrl->asq_tail  = 0;
@@ -453,11 +442,11 @@ static int nvme_create_io_queues(nvme_controller_t *ctrl) {
     // Allocate I/O queues in physically contiguous memory (page-aligned)
     ctrl->iosq = (nvme_sq_entry_t *)kmalloc_aligned(NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t), 4096);
     if (!ctrl->iosq) return -1;
-    nvme_memset(ctrl->iosq, 0, NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t));
+    memset(ctrl->iosq, 0, NVME_QUEUE_SIZE * sizeof(nvme_sq_entry_t));
 
     ctrl->iocq = (nvme_cq_entry_t *)kmalloc_aligned(NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t), 4096);
     if (!ctrl->iocq) return -1;
-    nvme_memset(ctrl->iocq, 0, NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t));
+    memset(ctrl->iocq, 0, NVME_QUEUE_SIZE * sizeof(nvme_cq_entry_t));
 
     ctrl->iosq_tail  = 0;
     ctrl->iocq_head  = 0;
@@ -467,7 +456,7 @@ static int nvme_create_io_queues(nvme_controller_t *ctrl) {
     // CDW10: QID=1 in low 16 bits, QSIZE-1 in high 16 bits
     // CDW11: PC=1 (physically contiguous), IEN=0 (polling, no interrupt)
     nvme_sq_entry_t cmd;
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0  = NVME_ADMIN_CREATE_IOCQ;
     cmd.prp1  = v2p((uint64_t)ctrl->iocq);
     cmd.cdw10 = 1u | ((uint32_t)(NVME_QUEUE_SIZE - 1) << 16);
@@ -480,7 +469,7 @@ static int nvme_create_io_queues(nvme_controller_t *ctrl) {
 
     // Create I/O Submission Queue (admin opcode 0x01)
     // CDW11: PC=1, CQID=1 in bits[31:16]
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0  = NVME_ADMIN_CREATE_IOSQ;
     cmd.prp1  = v2p((uint64_t)ctrl->iosq);
     cmd.cdw10 = 1u | ((uint32_t)(NVME_QUEUE_SIZE - 1) << 16);
@@ -498,7 +487,7 @@ static int nvme_create_io_queues(nvme_controller_t *ctrl) {
 // buf must be physically contiguous and page-aligned (use kmalloc_aligned(4096, 4096)).
 static int nvme_identify(nvme_controller_t *ctrl, uint32_t nsid, uint32_t cns, void *buf) {
     nvme_sq_entry_t cmd;
-    nvme_memset(&cmd, 0, sizeof(cmd));
+    memset(&cmd, 0, sizeof(cmd));
     cmd.cdw0  = NVME_ADMIN_IDENTIFY;
     cmd.nsid  = nsid;
     cmd.prp1  = v2p((uint64_t)buf);
@@ -684,7 +673,7 @@ void nvme_init(void) {
     if (!ns_buf) return;
 
     for (uint32_t nsid = 1; nsid <= nn; nsid++) {
-        nvme_memset(ns_buf, 0, 4096);
+        memset(ns_buf, 0, 4096);
 
         if (nvme_identify(ctrl, nsid, NVME_IDENTIFY_CNS_NAMESPACE, ns_buf) < 0) {
             serial_write("[NVME] Identify namespace ");
@@ -728,7 +717,7 @@ void nvme_init(void) {
         // Allocate Disk and driver data structures
         Disk *disk = (Disk *)kmalloc(sizeof(Disk));
         if (!disk) continue;
-        nvme_memset(disk, 0, sizeof(Disk));
+        memset(disk, 0, sizeof(Disk));
 
         NVMeDriverData *dd = (NVMeDriverData *)kmalloc(sizeof(NVMeDriverData));
         if (!dd) { kfree(disk); continue; }
@@ -749,8 +738,14 @@ void nvme_init(void) {
         disk->is_partition = false;
         disk->is_fat32     = false;
 
+        // Assign devname: nvme0, nvme1, etc.
+        char idx_buf[4];
+        itoa(nvme_disk_index++, idx_buf);
+        strcpy(disk->devname, "nvme");
+        strcpy(disk->devname + 4, idx_buf);
+
         // Use controller model string as the disk label
-        nvme_strcpy(disk->label, model);
+        strcpy(disk->label, model);
 
         disk_register(disk);
         disk_rescan(disk);
