@@ -22,5 +22,3 @@ src/userland/bin/
 src/userland/cli/third_party/tcc/tcc.elf
 src/userland/sdk/include/*
 limine
-run-nvme.sh
-nvme.img
