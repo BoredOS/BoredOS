@@ -39,7 +39,7 @@ int main(int argc, char **argv) {
     printf("exit           - Exit the terminal\n");
     printf("net            - Network tools\n");
     printf("time <cmd>     - Measure command execution time\n");
-    printf("find           - find files or dol")
+    printf("find           - find files or dol");
     printf("rev            - Reverse a string or file\n");
     printf("head           - print lines from the top down\n");
     printf("tail           - print lines from te bottom up\n");
