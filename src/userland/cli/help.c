@@ -37,10 +37,10 @@ int main(int argc, char **argv) {
     printf("clear          - Clear the screen\n");
     printf("exit           - Exit the terminal\n");
     printf("net            - Network tools\n");
-    printf("find           - find files or folders\n");
-    printf("rev            - Reverse a string or file\n");
-    printf("head           - print lines from the top down\n");
-    printf("tail           - print lines from te bottom up\n");
+    printf("find       - find files or folders\n");
+    printf("rev        - Reverse a string or file\n");
+    printf("head       - print lines from the top down\n");
+    printf("tail       - print lines from the bottom up\n");
+    printf("time <cmd> - Measure command execution time\n");
     printf("\nHint: Use Ctrl+C to force quit any running application.\n");
     return 0;
-}
