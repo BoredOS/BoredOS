@@ -56,6 +56,7 @@ typedef struct {
 #define FS_CMD_STATFS 19
 #define FS_CMD_MOUNT_COUNT 20
 #define FS_CMD_MOUNT_INFO 21
+#define FS_CMD_RENAME 22
 
 #define SYSTEM_CMD_SET_BG_COLOR 1
 #define SYSTEM_CMD_SET_BG_PATTERN 2

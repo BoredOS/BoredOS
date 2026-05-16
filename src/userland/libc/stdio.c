@@ -278,11 +278,6 @@ int remove(const char *path) {
 }
 
 int rename(const char *oldpath, const char *newpath) {
-    FILE *src;
-    FILE *dst;
-    char buf[1024];
-    size_t nread;
-
     if (!oldpath || !newpath || oldpath[0] == '\0' || newpath[0] == '\0') {
         errno = EINVAL;
         return -1;
@@ -290,47 +285,9 @@ int rename(const char *oldpath, const char *newpath) {
     if (_b_streq(oldpath, newpath)) {
         return 0;
     }
-
-    src = fopen(oldpath, "rb");
-    if (!src) {
-        errno = ENOENT;
-        return -1;
-    }
-    dst = fopen(newpath, "wb");
-    if (!dst) {
-        fclose(src);
-        return -1;
-    }
-
-    for (;;) {
-        nread = fread(buf, 1, sizeof(buf), src);
-        if (nread == 0) {
-            break;
-        }
-        if (fwrite(buf, 1, nread, dst) != nread) {
-            fclose(src);
-            fclose(dst);
-            sys_delete(newpath);
-            errno = EIO;
-            return -1;
-        }
-    }
-
-    if (ferror(src) || ferror(dst)) {
-        fclose(src);
-        fclose(dst);
-        sys_delete(newpath);
-        errno = EIO;
-        return -1;
-    }
-
-    fclose(src);
-    fclose(dst);
-    if (sys_delete(oldpath) != 0) {
-        errno = EIO;
-        return -1;
-    }
-    return 0;
+    if (sys_rename(oldpath, newpath) == 0) return 0;
+    errno = EIO;
+    return -1;
 }
 
 FILE *tmpfile(void) {
