@@ -13,6 +13,7 @@ BoredOS libc is a compact implementation focused on the APIs used by in-tree app
 | `stdio.h` | `FILE*` and formatted I/O |
 | `unistd.h` | POSIX-like fd/process calls |
 | `fcntl.h` | open/fcntl flags, `dup`, `pipe` |
+| `poll.h` | event-driven I/O multiplexing |
 | `input.h` | keyboard keycode constants |
 | `signal.h` | signal handlers and masks |
 | `sys/stat.h` | `stat`/`fstat` and file mode bits |

@@ -46,6 +46,11 @@ Notes:
 | 16 | `FS_CMD_DUP2` | `dup2` fd |
 | 17 | `FS_CMD_PIPE` | Create pipe |
 | 18 | `FS_CMD_FCNTL` | `fcntl` flags ops |
+| 19 | `FS_CMD_STATFS` | Get filesystem statistics |
+| 20 | `FS_CMD_MOUNT_COUNT` | Get number of active mounts |
+| 21 | `FS_CMD_MOUNT_INFO` | Get mount metadata |
+| 22 | `FS_CMD_POLL` | Wait for events on multiple fds |
+| 23 | `FS_CMD_SELECT` | Multiplexed I/O (stub/alias) |
 
 ## GUI Command IDs (`SYS_GUI`)
 
@@ -184,11 +189,47 @@ Notes:
 | 108 | `SYSTEM_CMD_DISK_REPLACE_KERNEL` | Copy new kernel to ESP / boot partition |
 | 109 | `SYSTEM_CMD_DISK_SYNC` | Flush disk caches for a mountpoint |
 
+## Event-Driven I/O: `sys_poll`
+
+BoredOS supports efficient event-driven I/O via the `sys_poll` syscall. This mechanism allows a process to sleep until one or more file descriptors become "ready" (e.g., data is available to read), rather than spinning in a busy-loop.
+
+### Usage
+
+```c
+#include <syscall.h>
+
+struct pollfd fds[1];
+fds[0].fd = 0;          // stdin / tty
+fds[0].events = POLLIN; // Wait for data to read
+
+// Wait up to 1000ms. Use -1 for infinite wait.
+int ready = sys_poll(fds, 1, 1000);
+
+if (ready > 0) {
+    if (fds[0].revents & POLLIN) {
+        // Data is ready to be read from fd 0
+    }
+} else if (ready == 0) {
+    // Timeout reached
+}
+```
+
+### Wait Queues
+
+Unlike simpler systems that use periodic polling, BoredOS uses a **Wait Queue** infrastructure:
+
+1. **Registration**: When `sys_poll` is called, the kernel registers the calling process with the wait queues of all requested file descriptors (e.g., the TTY input queue or a Pipe's read queue).
+2. **Blocking**: If no events are immediately available, the kernel sets the process state to `PROC_STATE_BLOCKED` and returns a special status code `-2` to the syscall layer.
+3. **Waking**: When a hardware interrupt (like a key press) or another process (writing to a pipe) adds data, the resource calls `wait_queue_wake_all()`. This sets all registered processes back to `PROC_STATE_RUNNING`.
+4. **Resumption**: The libc wrapper for `sys_poll` detects the `-2` return code and automatically re-invokes the syscall until a final result is ready.
+
+This ensures that idle applications consume **zero CPU cycles** while waiting for input.
+
 ## Common Wrapper API (`src/userland/libc/syscall.h`)
 
 Typical wrappers used by apps:
 - Process/system: `sys_exit`, `sys_yield`, `sys_system` (with `SYSTEM_CMD_SLEEP`), `sys_spawn`, `sys_exec`, `sys_waitpid`
-- Filesystem: `sys_open`, `sys_read`, `sys_write_fs`, `sys_close`, `sys_seek`, `sys_tell`, `sys_size`, `sys_list`
+- Filesystem: `sys_open`, `sys_read`, `sys_write_fs`, `sys_close`, `sys_seek`, `sys_tell`, `sys_size`, `sys_list`, `sys_poll`
 - Network: `sys_network_init`, `sys_network_dhcp_acquire`, `sys_udp_send`, `sys_tcp_connect`, `sys_tcp_recv_nb`, `sys_dns_lookup`
 - TTY: `sys_tty_create`, `sys_tty_read_out`, `sys_tty_write_in`, `sys_tty_set_fg`
 - ELF metadata: `sys_get_elf_metadata`, `sys_get_elf_primary_image` — see [`elf_metadata.md`](elf_metadata.md) for full usage
