@@ -195,6 +195,42 @@ uint32_t utf8_decode(const char **s) {
     return codepoint;
 }
 
+static unsigned char *get_padded_glyph_bitmap(stbtt_fontinfo *info, int glyph, float scale, int pad, int *w, int *h, int *xoff, int *yoff) {
+    int x0, y0, x1, y1;
+    stbtt_GetGlyphBitmapBoxSubpixel(info, glyph, scale, scale, 0.0f, 0.0f, &x0, &y0, &x1, &y1);
+
+    *w = (x1 - x0) + pad * 2;
+    *h = (y1 - y0) + pad * 2;
+    *xoff = x0 - pad;
+    *yoff = y0 - pad;
+
+    if (*w <= 0 || *h <= 0) return NULL;
+
+    stbtt_vertex *vertices;
+    int num_verts = stbtt_GetGlyphShape(info, glyph, &vertices);
+    if (!vertices) return NULL;
+
+    unsigned char *bitmap = (unsigned char *)kmalloc(*w * *h);
+    if (!bitmap) {
+        stbtt_FreeShape(info, vertices);
+        return NULL;
+    }
+    
+    for (int i = 0; i < *w * *h; i++) bitmap[i] = 0;
+
+    stbtt__bitmap gbm;
+    gbm.pixels = bitmap;
+    gbm.w = *w;
+    gbm.h = *h;
+    gbm.stride = *w;
+
+    // shift the glyph into center
+    stbtt_Rasterize(&gbm, 0.35f, vertices, num_verts, scale, scale, 0.0f, 0.0f, *xoff, *yoff, 1, info->userdata);
+    stbtt_FreeShape(info, vertices);
+
+    return bitmap;
+}
+
 void font_manager_render_char(ttf_font_t *font, int x, int y, uint32_t codepoint, uint32_t color, void (*put_pixel_fn)(int, int, uint32_t)) {
     if (!font) font = default_font;
     if (!font) return;
@@ -205,61 +241,50 @@ void font_manager_render_char_scaled(ttf_font_t *font, int x, int y, uint32_t co
     if (!font) font = default_font;
     if (!font) return;
 
-    uint32_t hash = (codepoint * 31 + (uint32_t)scale * 73) % FONT_CACHE_SIZE;
-    
-    uint64_t fflags = spinlock_acquire_irqsave(&font_cache_lock);
-    font_cache_entry_t *entry = &font_cache[hash];
-    
-    unsigned char *bitmap = NULL;
-    int w, h, xoff, yoff;
-    
-    if (entry->bitmap && entry->codepoint == codepoint && entry->scale == scale && entry->font == font) {
-        bitmap = entry->bitmap;
-        w = entry->w; h = entry->h; xoff = entry->xoff; yoff = entry->yoff;
-    } else {
-        stbtt_fontinfo *info = (stbtt_fontinfo *)font->info;
-        float real_scale = stbtt_ScaleForPixelHeight(info, scale);
-        
-        if (stbtt_FindGlyphIndex(info, codepoint) == 0 && fallback_font) {
-            info = (stbtt_fontinfo *)fallback_font->info;
-            real_scale = stbtt_ScaleForPixelHeight(info, scale);
-        }
+    stbtt_fontinfo *info = (stbtt_fontinfo *)font->info;
+    float real_scale = stbtt_ScaleForPixelHeight(info, scale);
 
-        // Drop lock during slow decompression to avoid contention
-        spinlock_release_irqrestore(&font_cache_lock, fflags);
-        bitmap = stbtt_GetCodepointBitmap(info, 0, real_scale, codepoint, &w, &h, &xoff, &yoff);
-        fflags = spinlock_acquire_irqsave(&font_cache_lock);
+    int glyph = stbtt_FindGlyphIndex(info, codepoint);
+    if (glyph == 0 && fallback_font) {
+        info = (stbtt_fontinfo *)fallback_font->info;
+        real_scale = stbtt_ScaleForPixelHeight(info, scale);
+        glyph = stbtt_FindGlyphIndex(info, codepoint);
+    }
+
+    int out_w, out_h, xoff, yoff;
+    // pad it by like 2 pixels, which appears to be fine
+    unsigned char *bitmap = get_padded_glyph_bitmap(info, glyph, real_scale, 2, &out_w, &out_h, &xoff, &yoff);
+    if (!bitmap) return;
+
+    uint8_t r_src = (color >> 16) & 0xFF;
+    uint8_t g_src = (color >> 8) & 0xFF;
+    uint8_t b_src = color & 0xFF;
+
+    for (int byte_y = 0; byte_y < out_h; byte_y++) {
+        int screen_y = y + yoff + byte_y; 
         
-        // Check if someone else filled it while we were away
-        if (entry->bitmap && entry->codepoint == codepoint && entry->scale == scale && entry->font == font) {
-             if (bitmap) stbtt_FreeBitmap(bitmap, NULL);
-             bitmap = entry->bitmap;
-             w = entry->w; h = entry->h; xoff = entry->xoff; yoff = entry->yoff;
-        } else {
-            if (entry->bitmap) stbtt_FreeBitmap(entry->bitmap, NULL);
-            entry->codepoint = codepoint;
-            entry->scale = scale;
-            entry->font = font;
-            entry->w = w; entry->h = h; entry->xoff = xoff; entry->yoff = yoff;
-            entry->bitmap = bitmap;
+        for (int byte_x = 0; byte_x < out_w; byte_x++) {
+            uint8_t alpha = bitmap[byte_y * out_w + byte_x];
+            if (alpha == 0) continue;
+
+            int screen_x = x + xoff + byte_x;
+
+            uint32_t bg_col = graphics_get_pixel(screen_x, screen_y); 
+            uint8_t r_bg = (bg_col >> 16) & 0xFF;
+            uint8_t g_bg = (bg_col >> 8) & 0xFF;
+            uint8_t b_bg = bg_col & 0xFF;
+
+            uint8_t r_out = ((r_src * alpha) + (r_bg * (255 - alpha))) / 255;
+            uint8_t g_out = ((g_src * alpha) + (g_bg * (255 - alpha))) / 255;
+            uint8_t b_out = ((b_src * alpha) + (b_bg * (255 - alpha))) / 255;
+
+            uint32_t final_color = (0xFF000000) | (r_out << 16) | (g_out << 8) | b_out;
+
+            put_pixel_fn(screen_x, screen_y, final_color);
         }
     }
-    
-    // Hold lock while using the bitmap to prevent eviction
-    if (bitmap) {
-        for (int row = 0; row < h; row++) {
-            for (int col = 0; col < w; col++) {
-                unsigned char alpha = bitmap[row * w + col];
-                if (alpha > 0) {
-                    int px = x + col + xoff;
-                    int py = y + row + yoff;
-                    uint32_t bg = graphics_get_pixel(px, py);
-                    put_pixel_fn(px, py, alpha_blend(bg, color, alpha));
-                }
-            }
-        }
-    }
-    spinlock_release_irqrestore(&font_cache_lock, fflags);
+
+    kfree(bitmap);
 }
 
 void font_manager_render_char_sloped(ttf_font_t *font, int x, int y, uint32_t codepoint, uint32_t color, float scale, float slope, void (*put_pixel_fn)(int, int, uint32_t)) {
@@ -280,21 +305,23 @@ void font_manager_render_char_sloped(ttf_font_t *font, int x, int y, uint32_t co
         stbtt_fontinfo *info = (stbtt_fontinfo *)font->info;
         float real_scale = stbtt_ScaleForPixelHeight(info, scale);
         
-        if (stbtt_FindGlyphIndex(info, codepoint) == 0 && fallback_font) {
+        int glyph = stbtt_FindGlyphIndex(info, codepoint);
+        if (glyph == 0 && fallback_font) {
             info = (stbtt_fontinfo *)fallback_font->info;
             real_scale = stbtt_ScaleForPixelHeight(info, scale);
+            glyph = stbtt_FindGlyphIndex(info, codepoint);
         }
 
         spinlock_release_irqrestore(&font_cache_lock, fflags);
-        bitmap = stbtt_GetCodepointBitmap(info, 0, real_scale, codepoint, &w, &h, &xoff, &yoff);
+        bitmap = get_padded_glyph_bitmap(info, glyph, real_scale, 2, &w, &h, &xoff, &yoff);
         fflags = spinlock_acquire_irqsave(&font_cache_lock);
 
         if (entry->bitmap && entry->codepoint == codepoint && entry->scale == scale && entry->font == font) {
-             if (bitmap) stbtt_FreeBitmap(bitmap, NULL);
+             if (bitmap) kfree(bitmap); 
              bitmap = entry->bitmap;
              w = entry->w; h = entry->h; xoff = entry->xoff; yoff = entry->yoff;
         } else {
-            if (entry->bitmap) stbtt_FreeBitmap(entry->bitmap, NULL);
+            if (entry->bitmap) kfree(entry->bitmap);
             entry->codepoint = codepoint;
             entry->scale = scale;
             entry->font = font;
@@ -331,21 +358,21 @@ int font_manager_get_font_height_scaled(ttf_font_t *font, float scale) {
     if (!font) font = default_font;
     if (!font) return 0;
     float real_scale = stbtt_ScaleForPixelHeight((stbtt_fontinfo *)font->info, scale);
-    return (int)((font->ascent - font->descent) * real_scale);
+    return (int)((font->ascent - font->descent) * real_scale + 0.5f);
 }
 
 int font_manager_get_font_ascent_scaled(ttf_font_t *font, float scale) {
     if (!font) font = default_font;
     if (!font) return 0;
     float real_scale = stbtt_ScaleForPixelHeight((stbtt_fontinfo *)font->info, scale);
-    return (int)(font->ascent * real_scale);
+    return (int)(font->ascent * real_scale + 0.5f);
 }
 
 int font_manager_get_font_line_height_scaled(ttf_font_t *font, float scale) {
     if (!font) font = default_font;
     if (!font) return 0;
     float real_scale = stbtt_ScaleForPixelHeight((stbtt_fontinfo *)font->info, scale);
-    return (int)((font->ascent - font->descent + font->line_gap) * real_scale);
+    return (int)((font->ascent - font->descent + font->line_gap) * real_scale + 0.5f);
 }
 
 int font_manager_get_string_width_scaled(ttf_font_t *font, const char *s, float scale) {
