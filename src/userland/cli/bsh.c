@@ -2188,13 +2188,12 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
     out[0] = 0;
 
     while (1) {
+        struct pollfd pfd = { .fd = 0, .events = POLLIN, .revents = 0 };
+        sys_poll(&pfd, 1, -1); // Wait indefinitely
+
         char ch = 0;
         int got = sys_tty_read_in(&ch, 1);
-        if (got <= 0) {
-            // Throttle idle input polling to avoid pegging the CPU at 100%
-            sleep(50);
-            continue;
-        }
+        if (got <= 0) continue;
 
         if (ch == 3) { // Ctrl+C
             sys_write(1, "^C\n", 3);
@@ -2306,10 +2305,9 @@ static int read_line(char *out, int max_len, const char *prompt_tmpl) {
         if (ch == 27) {
             char seq[2];
             int g1 = 0, g2 = 0;
-            int retries = 0;
-            while (g1 <= 0 && retries < 10) { g1 = sys_tty_read_in(&seq[0], 1); if (g1 <= 0) { sleep(1); retries++; } }
-            retries = 0;
-            while (g2 <= 0 && retries < 10) { g2 = sys_tty_read_in(&seq[1], 1); if (g2 <= 0) { sleep(1); retries++; } }
+            struct pollfd pfd = { .fd = 0, .events = POLLIN, .revents = 0 };
+            if (sys_poll(&pfd, 1, 50) > 0) g1 = sys_tty_read_in(&seq[0], 1);
+            if (g1 > 0 && sys_poll(&pfd, 1, 50) > 0) g2 = sys_tty_read_in(&seq[1], 1);
             
             if (g1 > 0 && g2 > 0 && seq[0] == '[') {
                 if (seq[1] == 'A') ch = 17;

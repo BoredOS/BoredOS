@@ -13,6 +13,14 @@
 #define VFS_MAX_MOUNTS 16
 #define VFS_MAX_OPEN_FILES 64
 
+#define POLLIN     0x0001
+#define POLLOUT    0x0004
+#define POLLERR    0x0008
+#define POLLHUP    0x0010
+#define POLLNVAL   0x0020
+
+struct poll_table;
+
 // statfs structure
 typedef struct {
     uint64_t total_blocks;
@@ -59,6 +67,7 @@ typedef struct vfs_fs_ops {
     // Handle info (for backward compat with syscall position/size queries)
     uint32_t (*get_position)(void *file_handle);
     uint32_t (*get_size)(void *file_handle);
+    int      (*poll)(void *fs_private, void *file_handle, struct poll_table *pt);
 } vfs_fs_ops_t;
 
 // VFS file handle
@@ -95,6 +104,7 @@ void vfs_close(vfs_file_t *file);
 int vfs_read(vfs_file_t *file, void *buf, int size);
 int vfs_write(vfs_file_t *file, const void *buf, int size);
 int vfs_seek(vfs_file_t *file, int offset, int whence);
+int vfs_poll(vfs_file_t *file, struct poll_table *pt);
 
 // Directory operations
 int vfs_list_directory(const char *path, vfs_dirent_t *entries, int max);

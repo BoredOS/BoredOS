@@ -13,6 +13,9 @@
 #define MAX_PROCESS_FDS 16
 #define MAX_SIGNALS 32
 
+#define PROC_STATE_RUNNING 0
+#define PROC_STATE_BLOCKED 1
+
 #define PROC_FD_KIND_NONE 0
 #define PROC_FD_KIND_FILE 1
 #define PROC_FD_KIND_PIPE_READ 2
@@ -24,6 +27,8 @@ typedef struct {
     int refs;
 } process_fd_file_ref_t;
 
+#include "wait_queue.h"
+
 typedef struct {
     uint8_t data[4096];
     uint32_t read_pos;
@@ -31,6 +36,8 @@ typedef struct {
     uint32_t count;
     int readers;
     int writers;
+    wait_queue_head_t read_queue;
+    wait_queue_head_t write_queue;
 } process_fd_pipe_t;
 
 struct FAT32_FileHandle;
@@ -49,6 +56,7 @@ typedef struct process {
     uint64_t pml4_phys; 
     uint64_t kernel_stack; 
     bool is_user;
+    int state;
     
     gui_event_t gui_events[MAX_GUI_EVENTS];
     int gui_event_head;

@@ -96,11 +96,10 @@ static void sc_format_size(uint64_t bytes, char *out, size_t out_len) {
 static void read_line_blocking(char *buf, int max_len) {
     int len = 0;
     while (1) {
+        struct pollfd pfd = { .fd = 0, .events = POLLIN, .revents = 0 };
+        sys_poll(&pfd, 1, -1);
         char ch;
-        if (sys_tty_read_in(&ch, 1) <= 0) {
-            sleep(10);
-            continue;
-        }
+        if (sys_tty_read_in(&ch, 1) <= 0) continue;
         if (ch == '\r' || ch == '\n') {
             sys_write(1, "\n", 1);
             break;

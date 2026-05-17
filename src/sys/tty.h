@@ -15,4 +15,7 @@ int tty_read_input(int tty_id, char *buf, size_t max_len);
 int tty_set_foreground(int tty_id, int pid);
 int tty_get_foreground(int tty_id);
 
+struct poll_table;
+int tty_poll(int tty_id, struct poll_table *pt);
+
 #endif

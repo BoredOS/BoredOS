@@ -431,6 +431,17 @@ int vfs_seek(vfs_file_t *file, int offset, int whence) {
     return ret;
 }
 
+int vfs_poll(vfs_file_t *file, struct poll_table *pt) {
+    if (!file || !file->valid || !file->mount) return POLLNVAL;
+    if (file->is_device) {
+        return POLLIN | POLLOUT;
+    }
+    if (!file->mount->ops->poll) {
+        return POLLIN | POLLOUT;
+    }
+    return file->mount->ops->poll(file->mount->fs_private, file->fs_handle, pt);
+}
+
 uint32_t vfs_file_position(vfs_file_t *file) {
     if (!file || !file->valid || !file->mount) return 0;
     if (file->is_device) return (uint32_t)file->position;

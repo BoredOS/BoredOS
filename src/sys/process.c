@@ -40,6 +40,7 @@ static void process_release_slot(process_t *p) {
     p->exited = false;
     p->exit_status = 0;
     p->sleep_until = 0;
+    p->state = PROC_STATE_RUNNING;
     p->ui_window = NULL;
     p->is_terminal_proc = false;
     p->tty_id = -1;
@@ -109,6 +110,7 @@ void process_init(void) {
     kernel_proc->pid = next_pid++;
     kernel_proc->is_user = false;
     kernel_proc->is_idle = true;
+    kernel_proc->state = PROC_STATE_RUNNING;
     kernel_proc->tty_id = -1;
     kernel_proc->kill_pending = false;
     
@@ -161,6 +163,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
 
     new_proc->pid = next_pid++;
     new_proc->is_user = is_user;
+    new_proc->state = PROC_STATE_RUNNING;
     new_proc->tty_id = -1;
     new_proc->kill_pending = false;
     new_proc->parent_pid = parent ? parent->pid : 0;
@@ -291,6 +294,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     
     new_proc->pid = next_pid++;
     new_proc->is_user = true;
+    new_proc->state = PROC_STATE_RUNNING;
     new_proc->elf_segment_count = 0;
     spinlock_release_irqrestore(&runqueue_lock, rflags);
     
@@ -672,9 +676,8 @@ uint64_t process_schedule(uint64_t current_rsp) {
     process_t *next_proc = cur->next;
     
     while (next_proc != start) {
-        // Only consider processes assigned to our CPU and not terminated
         if (next_proc->cpu_affinity == my_cpu && next_proc->pid != 0xFFFFFFFF && !next_proc->kill_pending) {
-            if (next_proc->pid == 0 || next_proc->sleep_until == 0 || next_proc->sleep_until <= now) {
+            if (next_proc->pid == 0 || (next_proc->state == PROC_STATE_RUNNING && (next_proc->sleep_until == 0 || next_proc->sleep_until <= now))) {
                 break;
             }
         }

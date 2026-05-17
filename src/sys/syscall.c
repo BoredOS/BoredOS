@@ -12,6 +12,7 @@
 #include "paging.h"
 #include "work_queue.h"
 #include "smp.h"
+#include "wait_queue.h"
 #include "platform.h"
 #include "io.h"
 #include "pci.h"
@@ -1099,6 +1100,9 @@ static uint64_t fs_cmd_read(const syscall_args_t *args) {
             pipe->read_pos = (pipe->read_pos + 1) % sizeof(pipe->data);
             pipe->count--;
         }
+        if (n > 0) {
+            wait_queue_wake_all(&pipe->write_queue);
+        }
         return n;
     }
 
@@ -1141,6 +1145,9 @@ static uint64_t fs_cmd_write(const syscall_args_t *args) {
             pipe->data[pipe->write_pos] = in[n++];
             pipe->write_pos = (pipe->write_pos + 1) % sizeof(pipe->data);
             pipe->count++;
+        }
+        if (n > 0) {
+            wait_queue_wake_all(&pipe->read_queue);
         }
         return n;
     }
@@ -1298,6 +1305,8 @@ static uint64_t fs_cmd_pipe(const syscall_args_t *args) {
     mem_memset(pipe, 0, sizeof(*pipe));
     pipe->readers = 1;
     pipe->writers = 1;
+    wait_queue_init(&pipe->read_queue);
+    wait_queue_init(&pipe->write_queue);
 
     proc->fds[rfd] = pipe;
     proc->fd_kind[rfd] = PROC_FD_KIND_PIPE_READ;
@@ -1477,7 +1486,123 @@ static uint64_t fs_cmd_mount_info(const syscall_args_t *args) {
     return 0;
 }
 
-#define FS_CMD_TABLE_SIZE 23
+static uint64_t fs_cmd_rename(const syscall_args_t *args) {
+    process_t *proc = process_get_current();
+    const char *old_path = (const char *)args->arg2;
+    const char *new_path = (const char *)args->arg3;
+    if (!proc || !old_path || !new_path) return -1;
+
+    char norm_old[VFS_MAX_PATH];
+    char norm_new[VFS_MAX_PATH];
+    vfs_normalize_path(proc->cwd, old_path, norm_old);
+    vfs_normalize_path(proc->cwd, new_path, norm_new);
+
+    return vfs_rename(norm_old, norm_new) ? 0 : -1;
+}
+
+// --- Poll/Select Support ---
+struct pollfd {
+    int fd;
+    short events;
+    short revents;
+};
+
+#define MAX_POLL_ENTRIES 32
+
+typedef struct {
+    wait_queue_head_t *h;
+    wait_queue_entry_t entry;
+} poll_entry_t;
+
+typedef struct {
+    poll_table_t pt;
+    poll_entry_t entries[MAX_POLL_ENTRIES];
+    int count;
+} poll_wtable_t;
+
+static void poll_qproc(wait_queue_head_t *h, poll_table_t *pt) {
+    poll_wtable_t *wt = (poll_wtable_t *)pt;
+    if (wt->count < MAX_POLL_ENTRIES) {
+        poll_entry_t *pe = &wt->entries[wt->count++];
+        pe->h = h;
+        pe->entry.proc = process_get_current();
+        pe->entry.next = NULL;
+        wait_queue_add(h, &pe->entry);
+    }
+}
+
+static uint64_t fs_cmd_poll(const syscall_args_t *args) {
+    struct pollfd *fds = (struct pollfd *)args->arg2;
+    int nfds = (int)args->arg3;
+    int timeout = (int)args->arg4;
+
+    process_t *proc = process_get_current();
+    if (!proc || !fds || nfds <= 0 || nfds > 128) return -1;
+
+    poll_wtable_t wt;
+    wt.pt.qproc = poll_qproc;
+    wt.count = 0;
+
+    int ready = 0;
+    for (int i = 0; i < nfds; i++) {
+        int fd = fds[i].fd;
+        fds[i].revents = 0;
+        if (fd < 0 || fd >= MAX_PROCESS_FDS) continue;
+        if (!proc->fds[fd]) {
+            fds[i].revents = POLLNVAL;
+            ready++;
+            continue;
+        }
+
+        int mask = 0;
+        if (proc->fd_kind[fd] == PROC_FD_KIND_FILE) {
+            process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+            mask = vfs_poll(ref->file, &wt.pt);
+        } else if (proc->fd_kind[fd] == PROC_FD_KIND_PIPE_READ || proc->fd_kind[fd] == PROC_FD_KIND_PIPE_WRITE) {
+            process_fd_pipe_t *pipe = (process_fd_pipe_t *)proc->fds[fd];
+            if (proc->fd_kind[fd] == PROC_FD_KIND_PIPE_READ) {
+                if (wt.pt.qproc) wt.pt.qproc(&pipe->read_queue, &wt.pt);
+                if (pipe->count > 0) mask |= POLLIN;
+                if (pipe->writers == 0) mask |= POLLHUP;
+            } else {
+                if (wt.pt.qproc) wt.pt.qproc(&pipe->write_queue, &wt.pt);
+                if (pipe->count < sizeof(pipe->data)) mask |= POLLOUT;
+                if (pipe->readers == 0) mask |= POLLERR;
+            }
+        } else if (proc->fd_kind[fd] == PROC_FD_KIND_TTY) {
+            extern int tty_poll(int tty_id, struct poll_table *pt);
+            mask = tty_poll(proc->tty_id, &wt.pt);
+        }
+
+        fds[i].revents = mask & fds[i].events;
+        if (fds[i].revents) ready++;
+    }
+
+    if (ready > 0 || timeout == 0) {
+        for (int i = 0; i < wt.count; i++) {
+            wait_queue_remove(wt.entries[i].h, &wt.entries[i].entry);
+        }
+        return (uint64_t)ready;
+    }
+
+    if (timeout > 0) {
+        extern uint32_t wm_get_ticks(void);
+        uint32_t ticks = timeout / 16;
+        if (ticks == 0) ticks = 1;
+        proc->sleep_until = wm_get_ticks() + ticks;
+    }
+
+    proc->state = PROC_STATE_BLOCKED;
+    return (uint64_t)-2;
+}
+
+static uint64_t fs_cmd_select(const syscall_args_t *args) {
+    // Stub for now, could be implemented using poll logic
+    (void)args;
+    return 0;
+}
+
+#define FS_CMD_TABLE_SIZE 24
 static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
     [FS_CMD_OPEN]        = fs_cmd_open,      // 1
     [FS_CMD_READ]        = fs_cmd_read,      // 2
@@ -1500,7 +1625,9 @@ static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
     [FS_CMD_STATFS]      = fs_cmd_statfs,    // 19
     [FS_CMD_MOUNT_COUNT] = fs_cmd_mount_count, // 20
     [FS_CMD_MOUNT_INFO]  = fs_cmd_mount_info,  // 21
-    [FS_CMD_RENAME]      = fs_cmd_rename,    // 22
+    [FS_CMD_POLL]        = fs_cmd_poll,        // 22
+    [FS_CMD_SELECT]      = fs_cmd_select,      // 23
+    [FS_CMD_RENAME]      = fs_cmd_rename,    // 24
 };
 
 static uint64_t sys_cmd_set_bg_color(const syscall_args_t *args) {
@@ -2757,6 +2884,11 @@ uint64_t syscall_handler_c(registers_t *regs) {
 
     if (syscall_num == SYS_SYSTEM && regs->rdi == SYSTEM_CMD_WAITPID && regs->rax == (uint64_t)-2) {
         regs->rax = 0;
+        return process_schedule((uint64_t)regs);
+    }
+
+    if (syscall_num == SYS_FS && regs->rax == (uint64_t)-2) {
+        regs->rax = -2; 
         return process_schedule((uint64_t)regs);
     }
 

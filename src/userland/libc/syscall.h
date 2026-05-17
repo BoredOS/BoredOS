@@ -36,7 +36,9 @@
 #define FS_CMD_STATFS 19
 #define FS_CMD_MOUNT_COUNT 20
 #define FS_CMD_MOUNT_INFO 21
-#define FS_CMD_RENAME 22
+#define FS_CMD_POLL 22
+#define FS_CMD_SELECT 23
+#define FS_CMD_RENAME 24
 
 // System Commands (via SYS_SYSTEM)
 #define SYSTEM_CMD_SET_BG_COLOR 1
@@ -208,6 +210,20 @@ int sys_tty_get_fg(int tty_id);
 int sys_tty_kill_fg(int tty_id);
 int sys_tty_kill_all(int tty_id);
 int sys_tty_destroy(int tty_id);
+
+struct pollfd {
+    int fd;
+    short events;
+    short revents;
+};
+
+#define POLLIN     0x0001
+#define POLLOUT    0x0004
+#define POLLERR    0x0008
+#define POLLHUP    0x0010
+#define POLLNVAL   0x0020
+
+int sys_poll(struct pollfd *fds, int nfds, int timeout);
 
 typedef struct {
     char name[256];

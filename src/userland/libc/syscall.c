@@ -177,6 +177,12 @@ int sys_fs_mount_info(int index, mount_info_t *info) {
     return (int)syscall3(SYS_FS, FS_CMD_MOUNT_INFO, (uint64_t)index, (uint64_t)info);
 }
 
+int sys_poll(struct pollfd *fds, int nfds, int timeout) {
+    int rc;
+    while ((rc = (int)syscall4(SYS_FS, FS_CMD_POLL, (uint64_t)fds, (uint64_t)nfds, (uint64_t)timeout)) == -2);
+    return rc;
+}
+
 int sys_tty_create(void) {
     return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_TTY_CREATE, 0);
 }

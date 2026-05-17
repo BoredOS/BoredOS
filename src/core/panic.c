@@ -177,7 +177,7 @@ void kernel_panic(registers_t *regs, const char *error_name) {
     int y = face_top + face_h + (block * 4);
     ptext_centered(y, "*** [KERNEL PANIC] ***", COL_RED);
     y += 18;
-    ptext_centered(y, "Your Computer Encounted an Issue and to prevent damage or data loss, we stopped the machine", COL_RED);
+    ptext_centered(y, "Your computer has encountered an issue. We have stopped the machine to prevent damage or data loss.", COL_RED);
     y += 18;
 
     y += 65;

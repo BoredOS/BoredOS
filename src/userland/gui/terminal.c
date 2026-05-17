@@ -1299,7 +1299,8 @@ int main(void) {
             draw_session(&g_tabs[g_active_tab]);
             dirty = false;
         } else {
-            sys_system(SYSTEM_CMD_SLEEP, 50, 0, 0, 0);
+            struct pollfd pfd = {.fd = g_tabs[g_active_tab].tty_id, .events = POLLIN};
+            sys_poll(&pfd, 1, -1);
         }
     }
 
