@@ -1602,7 +1602,7 @@ static uint64_t fs_cmd_select(const syscall_args_t *args) {
     return 0;
 }
 
-#define FS_CMD_TABLE_SIZE 24
+#define FS_CMD_TABLE_SIZE 25
 static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
     [FS_CMD_OPEN]        = fs_cmd_open,      // 1
     [FS_CMD_READ]        = fs_cmd_read,      // 2
