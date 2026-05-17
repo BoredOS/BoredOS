@@ -1486,20 +1486,6 @@ static uint64_t fs_cmd_mount_info(const syscall_args_t *args) {
     return 0;
 }
 
-static uint64_t fs_cmd_rename(const syscall_args_t *args) {
-    process_t *proc = process_get_current();
-    const char *old_path = (const char *)args->arg2;
-    const char *new_path = (const char *)args->arg3;
-    if (!proc || !old_path || !new_path) return -1;
-
-    char norm_old[VFS_MAX_PATH];
-    char norm_new[VFS_MAX_PATH];
-    vfs_normalize_path(proc->cwd, old_path, norm_old);
-    vfs_normalize_path(proc->cwd, new_path, norm_new);
-
-    return vfs_rename(norm_old, norm_new) ? 0 : -1;
-}
-
 // --- Poll/Select Support ---
 struct pollfd {
     int fd;
