@@ -97,6 +97,11 @@ typedef struct process {
     void *elf_segments[4];
     uint32_t elf_segment_count;
 
+    // Tracking for mmap memory allocations to allow full reclamation on exit.
+    uint64_t mmap_current;
+    void *mmap_allocations[16];
+    uint32_t mmap_allocation_count;
+
     poll_wtable_t poll_table;
 } __attribute__((aligned(16))) process_t;
 

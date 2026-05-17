@@ -4,18 +4,7 @@
 
 #include "errno.h"
 #include "sys/mman.h"
-
-void *mmap(void *addr, unsigned long length, int prot, int flags, int fd, long offset) {
-    (void)addr; (void)length; (void)prot; (void)flags; (void)fd; (void)offset;
-    errno = ENOSYS;
-    return MAP_FAILED;
-}
-
-int munmap(void *addr, unsigned long length) {
-    (void)addr; (void)length;
-    errno = ENOSYS;
-    return -1;
-}
+#include "syscall.h"
 
 int mprotect(void *addr, unsigned long length, int prot) {
     (void)addr; (void)length; (void)prot;
@@ -26,7 +15,6 @@ int mprotect(void *addr, unsigned long length, int prot) {
 #include "stdlib.h"
 #include "string.h"
 #include "sys/stat.h"
-#include "syscall.h"
 #include "unistd.h"
 
 #define POSIX_MAX_FDS 256
@@ -100,6 +88,32 @@ static fd_handle_t *_b_get_handle(int fd) {
         return NULL;
     }
     return g_fd_table[fd];
+}
+
+__attribute__((weak)) void *mmap(void *addr, unsigned long length, int prot, int flags, int fd, long offset) {
+    int kfd = -1;
+    if (!(flags & MAP_ANONYMOUS)) {
+        fd_handle_t *h = _b_get_handle(fd);
+        if (!h || h->type != HANDLE_KERNEL_FD) {
+            errno = EBADF;
+            return MAP_FAILED;
+        }
+        kfd = h->kernel_fd;
+    }
+    void *ret = sys_mmap(addr, length, prot, flags, kfd, offset);
+    if (ret == MAP_FAILED) {
+        errno = EINVAL;
+    }
+    return ret;
+}
+
+__attribute__((weak)) int munmap(void *addr, unsigned long length) {
+    int ret = sys_munmap(addr, length);
+    if (ret < 0) {
+        errno = EINVAL;
+        return -1;
+    }
+    return 0;
 }
 
 static void _b_reset_stat_common(struct stat *st) {

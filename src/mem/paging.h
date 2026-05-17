@@ -41,5 +41,6 @@ uint64_t paging_get_kernel_pml4_phys(void);
 
 void paging_init(void);
 uint64_t paging_virt2phys(uint64_t pml4_phys, uint64_t virtual_addr);
+void paging_unmap_page(uint64_t pml4_phys, uint64_t virtual_addr);
 
 #endif // PAGING_H

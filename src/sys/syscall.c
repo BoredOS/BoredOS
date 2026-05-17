@@ -117,6 +117,7 @@ typedef struct {
     uint64_t arg3;
     uint64_t arg4;
     uint64_t arg5;
+    uint64_t arg6;
 } syscall_args_t;
 
 typedef uint64_t (*syscall_handler_fn)(const syscall_args_t *args);
@@ -1825,12 +1826,100 @@ static uint64_t handle_sys_sbrk(const syscall_args_t *args) {
     return old_end;
 }
 
+#define PROT_READ 0x1
+#define PROT_WRITE 0x2
+#define MAP_SHARED 0x01
+#define MAP_PRIVATE 0x02
+#define MAP_FIXED 0x10
+#define MAP_ANONYMOUS 0x20
+#define MAP_FAILED ((void *)-1)
+
 static uint64_t handle_sys_kill(const syscall_args_t *args) {
     (void)args;
     return 0;
 }
 
-#define SYSCALL_TABLE_SIZE 11
+static uint64_t handle_sys_mmap(const syscall_args_t *args) {
+    process_t *proc = process_get_current();
+    if (!proc || !proc->is_user) return (uint64_t)MAP_FAILED;
+
+    uint64_t addr = args->arg1;
+    uint64_t length = args->arg2;
+    int prot = (int)args->arg3;
+    int flags = (int)args->arg4;
+    int fd = (int)args->arg5;
+    uint64_t offset = args->arg6;
+    (void)offset;
+
+    if (length == 0) return (uint64_t)MAP_FAILED;
+    uint64_t aligned_len = (length + 4095) & ~4095ULL;
+
+    uint64_t virt_addr = addr;
+    if (virt_addr == 0) {
+        virt_addr = proc->mmap_current;
+        proc->mmap_current += aligned_len;
+    }
+
+    uint64_t pt_flags = PT_PRESENT | PT_USER;
+    if (prot & PROT_WRITE) pt_flags |= PT_RW;
+
+    if (flags & MAP_ANONYMOUS) {
+        // Allocate physical memory for anonymous mapping
+        void *phys_block = kmalloc_aligned(aligned_len, 4096);
+        if (!phys_block) return (uint64_t)MAP_FAILED;
+        memset(phys_block, 0, aligned_len);
+
+        // Track the allocation in proc
+        if (proc->mmap_allocation_count < 16) {
+            proc->mmap_allocations[proc->mmap_allocation_count++] = phys_block;
+        }
+
+        uint64_t phys_addr = v2p((uint64_t)phys_block);
+        for (uint64_t off = 0; off < aligned_len; off += 4096) {
+            paging_map_page(proc->pml4_phys, virt_addr + off, phys_addr + off, pt_flags);
+        }
+        return virt_addr;
+    }
+
+    // File-backed mapping
+    if (fd < 0 || fd >= MAX_PROCESS_FDS || !proc->fds[fd]) return (uint64_t)MAP_FAILED;
+    if (proc->fd_kind[fd] != PROC_FD_KIND_FILE) return (uint64_t)MAP_FAILED;
+
+    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+    if (!ref || !ref->file) return (uint64_t)MAP_FAILED;
+    vfs_file_t *file = ref->file;
+
+    if (file->is_device && file->device_type == DEVICE_TYPE_FRAMEBUFFER) {
+        framebuffer_info_t fb = graphics_get_fb_params();
+        if (!fb.address) return (uint64_t)MAP_FAILED;
+
+        uint64_t phys_addr = v2p((uint64_t)fb.address);
+        for (uint64_t off = 0; off < aligned_len; off += 4096) {
+            paging_map_page(proc->pml4_phys, virt_addr + off, phys_addr + off, pt_flags);
+        }
+        return virt_addr;
+    }
+
+    return (uint64_t)MAP_FAILED;
+}
+
+static uint64_t handle_sys_munmap(const syscall_args_t *args) {
+    process_t *proc = process_get_current();
+    if (!proc || !proc->is_user) return (uint64_t)-1;
+
+    uint64_t addr = args->arg1;
+    uint64_t length = args->arg2;
+
+    if (length == 0) return 0;
+    uint64_t aligned_len = (length + 4095) & ~4095ULL;
+
+    for (uint64_t off = 0; off < aligned_len; off += 4096) {
+        paging_unmap_page(proc->pml4_phys, addr + off);
+    }
+    return 0;
+}
+
+#define SYSCALL_TABLE_SIZE 13
 static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [SYS_WRITE] = handle_sys_write,          
     [SYS_GUI]   = NULL,            
@@ -1839,6 +1928,8 @@ static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [8]         = handle_debug_serial_write, 
     [9]         = handle_sys_sbrk,            
     [10]        = handle_sys_kill,            
+    [SYS_MMAP]  = handle_sys_mmap,
+    [SYS_MUNMAP] = handle_sys_munmap,
 };
 
 static uint64_t syscall_handler_inner(registers_t *regs) {
@@ -1851,6 +1942,7 @@ static uint64_t syscall_handler_inner(registers_t *regs) {
         .arg3 = regs->rdx,
         .arg4 = regs->r10,
         .arg5 = regs->r8,
+        .arg6 = regs->r9,
     };
 
     if (syscall_num < SYSCALL_TABLE_SIZE && syscall_table[syscall_num]) {

@@ -407,3 +407,11 @@ int sys_disk_rescan(const char *devname) {
 int sys_disk_replace_kernel(const char *src_path, const char *esp_mountpoint) {
     return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DISK_REPLACE_KERNEL, (uint64_t)src_path, (uint64_t)esp_mountpoint);
 }
+
+void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, int64_t offset) {
+    return (void *)syscall6(SYS_MMAP, (uint64_t)addr, (uint64_t)length, (uint64_t)prot, (uint64_t)flags, (uint64_t)fd, (uint64_t)offset);
+}
+
+int sys_munmap(void *addr, size_t length) {
+    return (int)syscall2(SYS_MUNMAP, (uint64_t)addr, (uint64_t)length);
+}

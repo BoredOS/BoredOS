@@ -182,3 +182,26 @@ uint64_t paging_virt2phys(uint64_t pml4_phys, uint64_t virtual_addr) {
     
     return (pt->entries[pt_index] & PT_ADDR_MASK) | (virtual_addr & 0xFFF);
 }
+
+void paging_unmap_page(uint64_t pml4_phys, uint64_t virtual_addr) {
+    if (!pml4_phys) return;
+    
+    page_table_t* pml4 = (page_table_t*)p2v(pml4_phys);
+    uint64_t pml4_index = (virtual_addr >> 39) & 0x1FF;
+    if (!(pml4->entries[pml4_index] & PT_PRESENT)) return;
+    
+    page_table_t* pdpt = (page_table_t*)p2v(pml4->entries[pml4_index] & PT_ADDR_MASK);
+    uint64_t pdpt_index = (virtual_addr >> 30) & 0x1FF;
+    if (!(pdpt->entries[pdpt_index] & PT_PRESENT)) return;
+    
+    page_table_t* pd = (page_table_t*)p2v(pdpt->entries[pdpt_index] & PT_ADDR_MASK);
+    uint64_t pd_index = (virtual_addr >> 21) & 0x1FF;
+    if (!(pd->entries[pd_index] & PT_PRESENT)) return;
+    
+    page_table_t* pt = (page_table_t*)p2v(pd->entries[pd_index] & PT_ADDR_MASK);
+    uint64_t pt_index = (virtual_addr >> 12) & 0x1FF;
+    if (!(pt->entries[pt_index] & PT_PRESENT)) return;
+    
+    pt->entries[pt_index] = 0;
+    asm volatile("invlpg (%0)" : : "r"(virtual_addr) : "memory");
+}

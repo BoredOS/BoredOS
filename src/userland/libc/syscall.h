@@ -13,6 +13,8 @@
 #define SYS_SYSTEM 5
 #define SYS_KILL   10
 #define SYS_SBRK  9
+#define SYS_MMAP  11
+#define SYS_MUNMAP 12
 
 // FS Commands
 #define FS_CMD_OPEN 1
@@ -140,6 +142,7 @@ extern uint64_t syscall2(uint64_t sys_num, uint64_t arg1, uint64_t arg2);
 extern uint64_t syscall3(uint64_t sys_num, uint64_t arg1, uint64_t arg2, uint64_t arg3);
 extern uint64_t syscall4(uint64_t sys_num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4);
 extern uint64_t syscall5(uint64_t sys_num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5);
+extern uint64_t syscall6(uint64_t sys_num, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4, uint64_t arg5, uint64_t arg6);
 
 // Public API
 void sys_exit(int status);
@@ -147,6 +150,8 @@ int sys_write(int fd, const char *buf, int len);
 void *sys_sbrk(int incr);
 void sys_kill(int pid);
 int sys_system(int cmd, uint64_t arg1, uint64_t arg2, uint64_t arg3, uint64_t arg4);
+void *sys_mmap(void *addr, size_t length, int prot, int flags, int fd, int64_t offset);
+int sys_munmap(void *addr, size_t length);
 
 typedef struct {
     char os_name[64];

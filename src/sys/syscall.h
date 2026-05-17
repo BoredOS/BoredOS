@@ -33,6 +33,8 @@ typedef struct {
 #define SYS_FS    4
 #define SYS_SYSTEM 5
 #define SYS_EXIT  60
+#define SYS_MMAP  11
+#define SYS_MUNMAP 12
 
 // FS Commands
 #define FS_CMD_OPEN 1

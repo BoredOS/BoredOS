@@ -362,6 +362,9 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
 
     new_proc->heap_start = 0x20000000; // 512MB mark
     new_proc->heap_end = 0x20000000;
+    new_proc->mmap_current = 0x50000000;
+    new_proc->mmap_allocation_count = 0;
+    for (int i = 0; i < 16; i++) new_proc->mmap_allocations[i] = NULL;
     new_proc->is_terminal_proc = terminal_proc;
     new_proc->tty_id = tty_id;
     new_proc->kill_pending = false;
@@ -776,6 +779,18 @@ static void process_cleanup_inner(process_t *proc) {
         process_close_fd_inner(proc, i);
     }
 
+    // Cleanup mmap allocations
+    for (uint32_t i = 0; i < proc->mmap_allocation_count; i++) {
+        if (proc->mmap_allocations[i]) {
+            kfree(proc->mmap_allocations[i]);
+            proc->mmap_allocations[i] = NULL;
+        }
+    }
+    proc->mmap_allocation_count = 0;
+
+    extern void tty_set_blit_enabled(bool enabled);
+    tty_set_blit_enabled(true);
+
     for (int i = 0; i < MAX_PROCESSES; i++) {
         if (processes[i].parent_pid == proc->pid) {
             processes[i].parent_pid = 0;
@@ -1129,6 +1144,9 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     proc->used_memory = elf_load_size + user_stack_size + 65536;
     proc->heap_start = 0x20000000;
     proc->heap_end = 0x20000000;
+    proc->mmap_current = 0x50000000;
+    proc->mmap_allocation_count = 0;
+    for (int i = 0; i < 16; i++) proc->mmap_allocations[i] = NULL;
     proc->sleep_until = 0;
     process_init_signal_state(proc);
 
