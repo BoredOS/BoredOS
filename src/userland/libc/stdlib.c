@@ -136,15 +136,56 @@ void *realloc(void *ptr, size_t size) {
 }
 
 void *memset(void *s, int c, size_t n) {
+    uint64_t *d64 = (uint64_t *)s;
+    uint64_t val8 = (unsigned char)c;
+    uint64_t val64 = val8 | (val8 << 8) | (val8 << 16) | (val8 << 24) |
+                     (val8 << 32) | (val8 << 40) | (val8 << 48) | (val8 << 56);
+                     
+    if (((uintptr_t)s & 7) == 0) {
+        size_t words = n / 8;
+        for (size_t i = 0; i < words; i++) {
+            d64[i] = val64;
+        }
+        
+        unsigned char *d8 = (unsigned char *)(d64 + words);
+        size_t rem = n % 8;
+        for (size_t i = 0; i < rem; i++) {
+            d8[i] = (unsigned char)c;
+        }
+        return s;
+    }
+    
     unsigned char *p = (unsigned char *)s;
-    while (n--) *p++ = (unsigned char)c;
+    for (size_t i = 0; i < n; i++) {
+        p[i] = (unsigned char)c;
+    }
     return s;
 }
 
 void *memcpy(void *dest, const void *src, size_t n) {
+    uint64_t *d64 = (uint64_t *)dest;
+    const uint64_t *s64 = (const uint64_t *)src;
+    
+    if (((uintptr_t)dest & 7) == 0 && ((uintptr_t)src & 7) == 0) {
+        size_t words = n / 8;
+        for (size_t i = 0; i < words; i++) {
+            d64[i] = s64[i];
+        }
+        
+        unsigned char *d8 = (unsigned char *)(d64 + words);
+        const unsigned char *s8 = (const unsigned char *)(s64 + words);
+        size_t rem = n % 8;
+        for (size_t i = 0; i < rem; i++) {
+            d8[i] = s8[i];
+        }
+        return dest;
+    }
+    
     unsigned char *d = (unsigned char *)dest;
     const unsigned char *s = (const unsigned char *)src;
-    while (n--) *d++ = *s++;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
     return dest;
 }
 

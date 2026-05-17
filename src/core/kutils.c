@@ -7,15 +7,56 @@
 #include "../drivers/ACPI/acpi.h"
 
 void *memset(void *dest, int val, size_t len) {
+    uint64_t *d64 = (uint64_t *)dest;
+    uint64_t val8 = (unsigned char)val;
+    uint64_t val64 = val8 | (val8 << 8) | (val8 << 16) | (val8 << 24) |
+                     (val8 << 32) | (val8 << 40) | (val8 << 48) | (val8 << 56);
+                     
+    if (((uintptr_t)dest & 7) == 0) {
+        size_t words = len / 8;
+        for (size_t i = 0; i < words; i++) {
+            d64[i] = val64;
+        }
+        
+        unsigned char *d8 = (unsigned char *)(d64 + words);
+        size_t rem = len % 8;
+        for (size_t i = 0; i < rem; i++) {
+            d8[i] = (unsigned char)val;
+        }
+        return dest;
+    }
+    
     unsigned char *ptr = (unsigned char *)dest;
-    while (len-- > 0) *ptr++ = (unsigned char)val;
+    for (size_t i = 0; i < len; i++) {
+        ptr[i] = (unsigned char)val;
+    }
     return dest;
 }
 
 void *memcpy(void *dest, const void *src, size_t len) {
+    uint64_t *d64 = (uint64_t *)dest;
+    const uint64_t *s64 = (const uint64_t *)src;
+    
+    if (((uintptr_t)dest & 7) == 0 && ((uintptr_t)src & 7) == 0) {
+        size_t words = len / 8;
+        for (size_t i = 0; i < words; i++) {
+            d64[i] = s64[i];
+        }
+        
+        unsigned char *d8 = (unsigned char *)(d64 + words);
+        const unsigned char *s8 = (const unsigned char *)(s64 + words);
+        size_t rem = len % 8;
+        for (size_t i = 0; i < rem; i++) {
+            d8[i] = s8[i];
+        }
+        return dest;
+    }
+    
     unsigned char *d = (unsigned char *)dest;
     const unsigned char *s = (const unsigned char *)src;
-    while (len-- > 0) *d++ = *s++;
+    for (size_t i = 0; i < len; i++) {
+        d[i] = s[i];
+    }
     return dest;
 }
 
