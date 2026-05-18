@@ -44,23 +44,29 @@ For all other Linux distributions (Debian, Ubuntu, Fedora, openSUSE, etc.), you 
 To build the x86_64-ELF GCC cross-compiler:
 
 1.  **Download prerequisites**:
-    -   GNU Binutils source
-    -   GCC source
+    -   GNU Binutils source:
+    ```bash
+    curl -O https://ftp.gnu.org/gnu/binutils/binutils-2.42.tar.gz
+    ```
+    -   GCC source:
+    ```bash
+    curl -O https://ftp.gnu.org/gnu/gcc/gcc-13.2.0/gcc-13.2.0.tar.gz
+    ```
 
-2.  **Configure and build Binutils**:
+3.  **Configure and build Binutils**:
     ```bash
     ../binutils-*/configure --target=x86_64-elf --prefix=/usr/local/cross
     make && make install
     ```
 
-3.  **Configure and build GCC**:
+4.  **Configure and build GCC**:
     ```bash
     ../gcc-*/configure --target=x86_64-elf --prefix=/usr/local/cross \
         --without-headers --enable-languages=c
     make all-gcc && make install-gcc
     ```
 
-4.  **Add to PATH**:
+5.  **Add to PATH**:
     ```bash
     export PATH="/usr/local/cross/bin:$PATH"
     ```
