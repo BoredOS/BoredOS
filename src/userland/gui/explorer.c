@@ -4,10 +4,8 @@
 // BOREDOS_APP_DESC: modern minimal userland file manager
 // BOREDOS_APP_ICONS: /Library/images/icons/colloid/file-manager.png;/Library/images/icons/colloid/folder.png
 
-// todo: refresh desktop when the FS moves
 // todo: add image preview
 // todo: add an option to search file
-// todo: add hidden file
 
 #include "stb_image.h"
 #include "libc/input.h"
@@ -17,6 +15,7 @@
 #include "libc/string.h"
 #include "libc/syscall.h"
 #include "libc/syscall_user.h"
+#include "libwidget.h"
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -42,6 +41,10 @@
 #define ICON_SIZE 48
 #define SIDE_ICON_SIZE 24
 #define FOLDER_ICON_CACHE_SIZE 16
+#define HIDDEN_TOGGLE_W 120
+#define HIDDEN_TOGGLE_H 22
+#define HIDDEN_TOGGLE_GAP 12
+#define EXPLORER_MOD_CTRL 0x0002u
 
 #define COLOR_BG        0xFF1B1D21
 #define COLOR_HEADER    0xFF24262B
@@ -179,6 +182,9 @@ typedef struct {
     char path_input[EXPLORER_MAX_PATH];
     int path_cursor;
     bool path_focused;
+    bool show_hidden;
+    widget_context_t widget_ctx;
+    widget_checkbox_t show_hidden_cb;
 
     bool archive_mode;
     char archive_path[EXPLORER_MAX_PATH];
@@ -254,6 +260,27 @@ struct tar_header {
 } __attribute__((packed));
 
 static ExplorerState g;
+
+static void explorer_widget_draw_rect(void *user_data, int x, int y, int w, int h, uint32_t color) {
+    ui_draw_rect((ui_window_t)(uintptr_t)user_data, x, y, w, h, color);
+}
+
+static void explorer_widget_draw_round(void *user_data, int x, int y, int w, int h, int r, uint32_t color) {
+    ui_draw_rounded_rect_filled((ui_window_t)(uintptr_t)user_data, x, y, w, h, r, color);
+}
+
+static void explorer_widget_draw_string(void *user_data, int x, int y, const char *str, uint32_t color) {
+    ui_draw_string((ui_window_t)(uintptr_t)user_data, x, y, str, color);
+}
+
+static int explorer_widget_measure(void *user_data, const char *str) {
+    (void)user_data;
+    return (int)ui_get_string_width(str);
+}
+
+static void explorer_widget_mark_dirty(void *user_data, int x, int y, int w, int h) {
+    ui_mark_dirty((ui_window_t)(uintptr_t)user_data, x, y, w, h);
+}
 
 // shared fs/tar buffer, avoids malloc spam
 static uint8_t g_io_buf[4096];
@@ -398,6 +425,19 @@ static bool str_eq_ci(const char *a, const char *b) {
     return strcasecmp(a, b) == 0;
 }
 
+static bool is_dot_entry(const char *name) {
+    return str_eq(name, ".") || str_eq(name, "..");
+}
+
+static bool is_hidden_name(const char *name) {
+    return name && name[0] == '.' && !is_dot_entry(name);
+}
+
+static const char *icon_rule_name(const char *name) {
+    if (is_hidden_name(name)) return name + 1;
+    return name ? name : "";
+}
+
 static bool starts_with(const char *s, const char *prefix) {
     if (!s || !prefix) return false;
     while (*prefix) {
@@ -458,15 +498,16 @@ static bool folder_key_matches(const char *folder_name, const char *key) {
 }
 
 static int folder_icon_index_for_name(const char *name) {
-    if (!name || !name[0]) return -1;
+    const char *match_name = icon_rule_name(name);
+    if (!match_name[0]) return -1;
 
-    if (folder_key_matches(name, "pictures") || folder_key_matches(name, "photos") ||
-        folder_key_matches(name, "images")) {
+    if (folder_key_matches(match_name, "pictures") || folder_key_matches(match_name, "photos") ||
+        folder_key_matches(match_name, "images")) {
         return -1;
     }
 
     for (int i = 0; i < (int)(sizeof(g_folder_icon_rules) / sizeof(g_folder_icon_rules[0])); i++) {
-        if (folder_key_matches(name, g_folder_icon_rules[i].key)) return i;
+        if (folder_key_matches(match_name, g_folder_icon_rules[i].key)) return i;
     }
     return -1;
 }
@@ -910,7 +951,7 @@ static void draw_folder_rule_icon_cached(int index, int x, int y, bool small) {
 }
 
 static void draw_item_icon(const ExplorerItem *it, int x, int y) {
-    if (it && it->is_dir && it->folder_icon_index >= 0) {
+    if (it && it->folder_icon_index >= 0) {
         draw_folder_rule_icon_cached(it->folder_icon_index, x, y, false);
         return;
     }
@@ -1134,7 +1175,9 @@ static bool parse_archive_display_path(const char *path, char *archive_path, int
 
 static bool archive_add_child(const char *name, bool is_dir, const char *entry_path,
                               uint32_t size, char typeflag) {
-    if (!name || !name[0] || g.item_count >= EXPLORER_MAX_ITEMS) return false;
+    if (!name || !name[0]) return false;
+    if (is_dot_entry(name) || (!g.show_hidden && is_hidden_name(name))) return true;
+    if (g.item_count >= EXPLORER_MAX_ITEMS) return false;
     for (int i = 0; i < g.item_count; i++) {
         if (str_eq(g.items[i].name, name)) {
             if (is_dir) {
@@ -1158,7 +1201,7 @@ static bool archive_add_child(const char *name, bool is_dir, const char *entry_p
     it->is_archive_item = true;
     it->archive_virtual_dir = is_dir || typeflag == '5';
     it->type = item_type_for(name, is_dir);
-    if (it->is_dir) it->folder_icon_index = folder_icon_index_for_name(it->name);
+    if (it->is_dir || is_hidden_name(it->name)) it->folder_icon_index = folder_icon_index_for_name(it->name);
     return true;
 }
 
@@ -1171,6 +1214,7 @@ static bool archive_consider_entry(const char *entry_name, bool entry_is_dir, ui
         if (!starts_with(entry_name, g.archive_dir)) return true;
         remaining = entry_name + dir_len;
     }
+    while (starts_with(remaining, "./")) remaining += 2;
     if (!remaining[0]) return true;
 
     int slash = -1;
@@ -1225,16 +1269,19 @@ static bool load_directory(const char *path, bool push_history) {
     g.archive_mode = false;
     g.archive_path[0] = 0;
     g.archive_dir[0] = 0;
-    g.item_count = min_i(count, EXPLORER_MAX_ITEMS);
-    for (int i = 0; i < g.item_count; i++) {
-        memset(&g.items[i], 0, sizeof(g.items[i]));
-        g.items[i].folder_icon_index = -1;
-        str_copy(g.items[i].name, g_dir_entries[i].name, EXPLORER_MAX_NAME);
-        path_join(g.items[i].path, target, g_dir_entries[i].name, EXPLORER_MAX_PATH);
-        g.items[i].is_dir = g_dir_entries[i].is_directory != 0;
-        g.items[i].size = g_dir_entries[i].size;
-        g.items[i].type = item_type_for(g.items[i].name, g.items[i].is_dir);
-        if (g.items[i].is_dir) g.items[i].folder_icon_index = folder_icon_index_for_name(g.items[i].name);
+    g.item_count = 0;
+    for (int i = 0; i < count && g.item_count < EXPLORER_MAX_ITEMS; i++) {
+        const char *name = g_dir_entries[i].name;
+        if (is_dot_entry(name) || (!g.show_hidden && is_hidden_name(name))) continue;
+        ExplorerItem *it = &g.items[g.item_count++];
+        memset(it, 0, sizeof(*it));
+        it->folder_icon_index = -1;
+        str_copy(it->name, name, EXPLORER_MAX_NAME);
+        path_join(it->path, target, name, EXPLORER_MAX_PATH);
+        it->is_dir = g_dir_entries[i].is_directory != 0;
+        it->size = g_dir_entries[i].size;
+        it->type = item_type_for(it->name, it->is_dir);
+        if (it->is_dir || is_hidden_name(it->name)) it->folder_icon_index = folder_icon_index_for_name(it->name);
     }
     sort_items();
 
@@ -1332,6 +1379,24 @@ static void refresh_directory(void) {
     }
 }
 
+static void set_show_hidden(bool show) {
+    if (g.show_hidden == show && g.show_hidden_cb.checked == show) return;
+    g.show_hidden = show;
+    g.show_hidden_cb.checked = show;
+    g.menu_kind = MENU_NONE;
+    g.menu_hovered = -1;
+    refresh_directory();
+}
+
+static void toggle_hidden(void) {
+    set_show_hidden(!g.show_hidden);
+}
+
+static void show_hidden_toggled(void *user_data, bool new_state) {
+    (void)user_data;
+    set_show_hidden(new_state);
+}
+
 static void navigate_back(void) {
     char path[EXPLORER_MAX_PATH];
     if (g.history_count <= 0) return;
@@ -1382,8 +1447,18 @@ static bool hit_header_back(int x, int y) { return rect_contains(14, 14, 34, 34,
 static bool hit_header_up(int x, int y) { return rect_contains(54, 14, 34, 34, x, y); }
 static bool hit_header_menu(int x, int y) { return rect_contains(g.win_w - 48, 14, 34, 34, x, y); }
 static int path_field_x(void) { return 102; }
-static int path_field_w(void) { return max_i(80, g.win_w - path_field_x() - 62); }
+static int hidden_toggle_x(void) { return g.win_w - 48 - HIDDEN_TOGGLE_GAP - HIDDEN_TOGGLE_W; }
+static int path_field_w(void) { return max_i(80, hidden_toggle_x() - HIDDEN_TOGGLE_GAP - path_field_x()); }
 static bool hit_path_field(int x, int y) { return rect_contains(path_field_x(), 14, path_field_w(), 34, x, y); }
+
+static void sync_hidden_checkbox_geometry(void) {
+    g.show_hidden_cb.x = hidden_toggle_x();
+    g.show_hidden_cb.y = 21;
+    g.show_hidden_cb.w = HIDDEN_TOGGLE_W;
+    g.show_hidden_cb.h = HIDDEN_TOGGLE_H;
+    g.show_hidden_cb.text = "Show hidden";
+    g.show_hidden_cb.checked = g.show_hidden;
+}
 
 static void open_file(const char *path) {
     const char *program = "/bin/txtedit.elf";
@@ -1980,6 +2055,7 @@ static void draw_header(void) {
 
     draw_button_rect(14, 14, 34, 34, "<", rect_contains(14, 14, 34, 34, g.mouse_x, g.mouse_y), false);
     draw_button_rect(54, 14, 34, 34, "^", rect_contains(54, 14, 34, 34, g.mouse_x, g.mouse_y), false);
+    sync_hidden_checkbox_geometry();
 
     draw_round_rect(px, 14, pw, 34, 10, g.path_focused ? COLOR_ACCENT_2 : COLOR_BORDER);
     draw_round_rect(px + 1, 15, pw - 2, 32, 9, COLOR_FIELD);
@@ -1994,6 +2070,7 @@ static void draw_header(void) {
         ui_draw_string(g.win, px + 12, 25, path_buf, COLOR_TEXT);
     }
 
+    widget_checkbox_draw(&g.widget_ctx, &g.show_hidden_cb);
     draw_button_rect(g.win_w - 48, 14, 34, 34, "...",
                      rect_contains(g.win_w - 48, 14, 34, 34, g.mouse_x, g.mouse_y),
                      g.menu_kind != MENU_NONE);
@@ -2298,6 +2375,11 @@ static void path_key(int legacy, uint32_t cp) {
 static void handle_key(gui_event_t *ev) {
     int legacy = ev->arg1;
     uint32_t cp = (uint32_t)ev->arg4;
+    bool ctrl = (ev->arg3 & EXPLORER_MOD_CTRL) != 0;
+    if (ctrl && (legacy == 'h' || legacy == 'H' || cp == 'h' || cp == 'H')) {
+        toggle_hidden();
+        return;
+    }
     if (g.dialog != DIALOG_NONE) {
         dialog_key(legacy, cp);
         return;
@@ -2394,6 +2476,12 @@ static void mouse_down(int x, int y) {
     }
     if (hit_header_up(x, y)) {
         navigate_up();
+        return;
+    }
+    sync_hidden_checkbox_geometry();
+    if (widget_checkbox_handle_mouse(&g.show_hidden_cb, x, y, true, NULL)) {
+        g.path_focused = false;
+        g.menu_kind = MENU_NONE;
         return;
     }
     if (hit_header_menu(x, y)) {
@@ -2493,6 +2581,21 @@ static void handle_right_click(int x, int y) {
     }
 }
 
+static void init_widgets(void) {
+    g.widget_ctx.user_data = (void *)(uintptr_t)g.win;
+    g.widget_ctx.draw_rect = explorer_widget_draw_rect;
+    g.widget_ctx.draw_rounded_rect_filled = explorer_widget_draw_round;
+    g.widget_ctx.draw_string = explorer_widget_draw_string;
+    g.widget_ctx.measure_string_width = explorer_widget_measure;
+    g.widget_ctx.mark_dirty = explorer_widget_mark_dirty;
+    g.widget_ctx.use_light_theme = false;
+
+    widget_checkbox_init(&g.show_hidden_cb, hidden_toggle_x(), 21,
+                         HIDDEN_TOGGLE_W, HIDDEN_TOGGLE_H, "Show hidden", false);
+    g.show_hidden_cb.checked = g.show_hidden;
+    g.show_hidden_cb.on_toggle = show_hidden_toggled;
+}
+
 static void init_state(void) {
     memset(&g, 0, sizeof(g));
     g.win_w = WIN_DEFAULT_W;
@@ -2520,6 +2623,7 @@ int main(int argc, char **argv) {
     g.win = ui_window_create("Files", 90, 70, g.win_w, g.win_h);
     if (!g.win) return 1;
     ui_window_set_resizable(g.win, true);
+    init_widgets();
 
     if (!load_location(g.current_path, false)) {
         load_directory("/", false);
