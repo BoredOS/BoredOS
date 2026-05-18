@@ -631,6 +631,70 @@ static void fit_text_tail(const char *src, char *out, int cap, int max_w) {
     str_copy(out, "..", cap);
 }
 
+static void copy_text_range(const char *src, int start, int end, char *out, int cap) {
+    int pos = 0;
+    if (!out || cap <= 0) return;
+    if (!src) src = "";
+    if (start < 0) start = 0;
+    if (end < start) end = start;
+    for (int i = start; src[i] && i < end && pos < cap - 1; i++) {
+        out[pos++] = src[i];
+    }
+    out[pos] = 0;
+}
+
+static int text_range_width(const char *src, int start, int end) {
+    char tmp[EXPLORER_MAX_PATH];
+    copy_text_range(src, start, end, tmp, (int)sizeof(tmp));
+    return (int)ui_get_string_width(tmp);
+}
+
+static void fit_input_around_cursor(const char *src, int cursor, char *out, int cap,
+                                    int max_w, int *cursor_px) {
+    int len = (int)strlen(src ? src : "");
+    int start = 0;
+    int end;
+    int prefix_w = 0;
+    int avail = max_i(8, max_w);
+    char visible[EXPLORER_MAX_PATH];
+
+    if (cursor < 0) cursor = 0;
+    if (cursor > len) cursor = len;
+
+    while (start < cursor && text_range_width(src, start, cursor) > avail) start++;
+    if (start > 0) {
+        prefix_w = (int)ui_get_string_width("..");
+        avail = max_i(8, max_w - prefix_w);
+        while (start < cursor && text_range_width(src, start, cursor) > avail) start++;
+    }
+
+    end = cursor;
+    while (end < len && text_range_width(src, start, end + 1) <= avail) end++;
+
+    out[0] = 0;
+    if (start > 0) str_append(out, "..", cap);
+    copy_text_range(src, start, end, visible, (int)sizeof(visible));
+    str_append(out, visible, cap);
+    if (cursor_px) *cursor_px = prefix_w + text_range_width(src, start, cursor);
+}
+
+static bool name_has_space(const char *name) {
+    if (!name) return false;
+    for (int i = 0; name[i]; i++) {
+        if (name[i] == ' ' || name[i] == '\t' || name[i] == '\n' || name[i] == '\r') return true;
+    }
+    return false;
+}
+
+static bool validate_dialog_name(const char *name) {
+    if (!name || !name[0]) return false;
+    if (name_has_space(name)) {
+        set_error("Names cannot contain spaces.");
+        return false;
+    }
+    return true;
+}
+
 static void draw_round_rect(int x, int y, int w, int h, int radius, uint32_t color) {
     if (w <= 0 || h <= 0) return;
     ui_draw_rounded_rect_filled(g.win, x, y, w, h, radius, color);
@@ -1533,6 +1597,31 @@ static bool add_path_to_tar(int out_fd, const char *fs_path, const char *tar_pat
     return tar_write_padding(out_fd, info.size);
 }
 
+static bool add_folder_contents_to_tar(int out_fd, const char *folder_path) {
+    FAT32_FileInfo *entries = alloc_dir_entries();
+    if (!entries) return false;
+    int count = sys_list(folder_path, entries, EXPLORER_MAX_ITEMS);
+    if (count < 0) {
+        free(entries);
+        return false;
+    }
+
+    for (int i = 0; i < count; i++) {
+        char child_fs[EXPLORER_MAX_PATH];
+        char child_tar[EXPLORER_MAX_PATH];
+        if (str_eq(entries[i].name, ".") || str_eq(entries[i].name, "..")) continue;
+        path_join(child_fs, folder_path, entries[i].name, (int)sizeof(child_fs));
+        str_copy(child_tar, entries[i].name, (int)sizeof(child_tar));
+        if (!add_path_to_tar(out_fd, child_fs, child_tar)) {
+            free(entries);
+            return false;
+        }
+    }
+
+    free(entries);
+    return true;
+}
+
 static bool create_archive_from_folder(const char *folder_path) {
     char parent[EXPLORER_MAX_PATH];
     char archive_name[EXPLORER_MAX_NAME];
@@ -1558,7 +1647,7 @@ static bool create_archive_from_folder(const char *folder_path) {
         set_error("Cannot create archive.");
         return false;
     }
-    bool ok = add_path_to_tar(out_fd, folder_path, path_basename(folder_path));
+    bool ok = add_folder_contents_to_tar(out_fd, folder_path);
     // two empty blocks mark tar end
     if (ok) ok = sys_write_fs(out_fd, g_zero_block, 512) == 512 &&
                  sys_write_fs(out_fd, g_zero_block, 512) == 512;
@@ -1652,7 +1741,7 @@ static bool extract_tar_archive(const char *archive_path) {
 
 static void open_new_folder_dialog(void) {
     g.dialog = DIALOG_NEW_FOLDER;
-    str_copy(g.dialog_input, "New Folder", (int)sizeof(g.dialog_input));
+    str_copy(g.dialog_input, "NewFolder", (int)sizeof(g.dialog_input));
     g.dialog_cursor = (int)strlen(g.dialog_input);
     g.menu_kind = MENU_NONE;
     request_full_repaint();
@@ -1660,7 +1749,7 @@ static void open_new_folder_dialog(void) {
 
 static void open_new_file_dialog(void) {
     g.dialog = DIALOG_NEW_FILE;
-    str_copy(g.dialog_input, "New File.txt", (int)sizeof(g.dialog_input));
+    str_copy(g.dialog_input, "NewFile.txt", (int)sizeof(g.dialog_input));
     g.dialog_cursor = (int)strlen(g.dialog_input);
     g.menu_kind = MENU_NONE;
     request_full_repaint();
@@ -1732,7 +1821,7 @@ static void confirm_new_folder(void) {
         set_error("Archive contents are read-only.");
         return;
     }
-    if (!g.dialog_input[0]) return;
+    if (!validate_dialog_name(g.dialog_input)) return;
     path_join(path, g.current_path, g.dialog_input, (int)sizeof(path));
     if (sys_exists(path)) {
         set_error("A file with this name already exists.");
@@ -1752,7 +1841,7 @@ static void confirm_new_file(void) {
         set_error("Archive contents are read-only.");
         return;
     }
-    if (!g.dialog_input[0]) return;
+    if (!validate_dialog_name(g.dialog_input)) return;
     path_join(path, g.current_path, g.dialog_input, (int)sizeof(path));
     if (sys_exists(path)) {
         set_error("A file with this name already exists.");
@@ -1771,7 +1860,7 @@ static void confirm_new_file(void) {
 static void confirm_rename(void) {
     char parent[EXPLORER_MAX_PATH];
     char dest[EXPLORER_MAX_PATH];
-    if (!g.dialog_input[0]) return;
+    if (!validate_dialog_name(g.dialog_input)) return;
     path_parent(g.dialog_target, parent, (int)sizeof(parent));
     path_join(dest, parent, g.dialog_input, (int)sizeof(dest));
     if (str_eq(g.dialog_target, dest)) {
@@ -1894,11 +1983,15 @@ static void draw_header(void) {
 
     draw_round_rect(px, 14, pw, 34, 10, g.path_focused ? COLOR_ACCENT_2 : COLOR_BORDER);
     draw_round_rect(px + 1, 15, pw - 2, 32, 9, COLOR_FIELD);
-    fit_text_tail(g.path_input, path_buf, (int)sizeof(path_buf), pw - 24);
-    ui_draw_string(g.win, px + 12, 25, path_buf, COLOR_TEXT);
     if (g.path_focused) {
-        int cx = px + 12 + min_i((int)ui_get_string_width(path_buf), pw - 28);
+        int cursor_px = 0;
+        fit_input_around_cursor(g.path_input, g.path_cursor, path_buf, (int)sizeof(path_buf), pw - 24, &cursor_px);
+        ui_draw_string(g.win, px + 12, 25, path_buf, COLOR_TEXT);
+        int cx = px + 12 + min_i(cursor_px, pw - 28);
         ui_draw_rect(g.win, cx, 23, 2, 17, COLOR_ACCENT);
+    } else {
+        fit_text_tail(g.path_input, path_buf, (int)sizeof(path_buf), pw - 24);
+        ui_draw_string(g.win, px + 12, 25, path_buf, COLOR_TEXT);
     }
 
     draw_button_rect(g.win_w - 48, 14, 34, 34, "...",
@@ -2054,11 +2147,12 @@ static void draw_dialog(void) {
     ui_draw_string(g.win, x + 20, y + 18, title, COLOR_TEXT);
 
     if (input) {
+        int cursor_px = 0;
         draw_round_rect(x + 20, y + 58, w - 40, 34, 8, COLOR_BORDER);
         draw_round_rect(x + 21, y + 59, w - 42, 32, 7, COLOR_FIELD);
-        fit_text_tail(g.dialog_input, input_fit, (int)sizeof(input_fit), w - 64);
+        fit_input_around_cursor(g.dialog_input, g.dialog_cursor, input_fit, (int)sizeof(input_fit), w - 64, &cursor_px);
         ui_draw_string(g.win, x + 32, y + 68, input_fit, COLOR_TEXT);
-        ui_draw_rect(g.win, x + 32 + min_i((int)ui_get_string_width(input_fit), w - 68), y + 66, 2, 17, COLOR_ACCENT);
+        ui_draw_rect(g.win, x + 32 + min_i(cursor_px, w - 68), y + 66, 2, 17, COLOR_ACCENT);
     } else if (g.dialog == DIALOG_DELETE) {
         char msg[EXPLORER_MAX_NAME + 32];
         str_copy(msg, "Delete ", (int)sizeof(msg));
@@ -2162,8 +2256,8 @@ static void dialog_key(int legacy, uint32_t cp) {
             for (int i = *cursor; i <= len; i++) buf[i - 1] = buf[i];
             (*cursor)--;
         }
-    } else if (cp >= 32 && cp < 127 && len < max_len - 1 && cp != '/') {
-        // no slash in names made by dialogs
+    } else if (cp >= 32 && cp < 127 && len < max_len - 1 && cp != '/' && cp != ' ') {
+        // dialog names stay single path components with no spaces
         for (int i = len; i >= *cursor; i--) buf[i + 1] = buf[i];
         buf[*cursor] = (char)cp;
         (*cursor)++;
