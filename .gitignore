@@ -1,6 +1,7 @@
 # Build artifacts
 /build/
 iso_root/
+limine/
 boredos.iso
 disk.img
 disk.qcow2
@@ -21,4 +22,3 @@ src/userland/bin/
 .gitignore
 src/userland/cli/third_party/tcc/tcc.elf
 src/userland/sdk/include/*
-limine

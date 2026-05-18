@@ -59,7 +59,7 @@ LDFLAGS = -m elf_x86_64 -nostdlib -static -pie --no-dynamic-linker \
 
 NASMFLAGS = -f elf64
 
-LIMINE_VERSION = 10.8.2
+LIMINE_VERSION = 11.4.1
 LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERSION)
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
