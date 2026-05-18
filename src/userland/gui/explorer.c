@@ -1,6 +1,6 @@
-// copyright (c) 2023-2026 Lluciocc (github.com/Lluciocc)
-// GPLv3, see LICENSE
-// keep this block, tools read it too
+// Copyright (c) 2026 Lluciocc (https://github.com/lluciocc)
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 // BOREDOS_APP_DESC: modern minimal userland file manager
 // BOREDOS_APP_ICONS: /Library/images/icons/colloid/file-manager.png;/Library/images/icons/colloid/folder.png
 
