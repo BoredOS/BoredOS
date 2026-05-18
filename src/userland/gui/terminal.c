@@ -1110,7 +1110,7 @@ static void update_input_color(TerminalSession *s) {
 static void handle_key(gui_event_t *ev) {
     TerminalSession *s = &g_tabs[g_active_tab];
     int legacy = ev->arg1;
-    bool ctrl = ev->arg3 != 0;
+    bool ctrl = (((uint32_t)ev->arg3) & KEY_MOD_CTRL) != 0;
     uint32_t codepoint = (uint32_t)ev->arg4;
 
     if (ctrl && (legacy == 'c' || legacy == 'C')) {
