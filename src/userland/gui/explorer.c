@@ -38,6 +38,7 @@
 #define ITEM_H 104
 #define ICON_SIZE 48
 #define SIDE_ICON_SIZE 24
+#define FOLDER_ICON_CACHE_SIZE 16
 
 #define COLOR_BG        0xFF1B1D21
 #define COLOR_HEADER    0xFF24262B
@@ -82,6 +83,7 @@ typedef struct {
     bool is_archive_item;
     bool archive_virtual_dir;
     item_type_t type;
+    int folder_icon_index;
     int x;
     int y;
     int w;
@@ -161,6 +163,11 @@ typedef struct {
 } IconCacheEntry;
 
 typedef struct {
+    const char *key;
+    const char *filename;
+} FolderIconRule;
+
+typedef struct {
     ui_window_t win;
     int win_w;
     int win_h;
@@ -196,6 +203,7 @@ typedef struct {
     int menu_w;
     int menu_h;
     int menu_target;
+    int menu_hovered;
 
     bool mouse_down;
     int mouse_x;
@@ -247,6 +255,9 @@ static ExplorerState g;
 // shared fs/tar buffer, avoids malloc spam
 static uint8_t g_io_buf[4096];
 
+// shared directory list for non-recursive reads; keeps large buffers off user stack
+static FAT32_FileInfo g_dir_entries[EXPLORER_MAX_ITEMS];
+
 // zero blocks for padding and tar end
 static uint8_t g_zero_block[512];
 
@@ -268,6 +279,81 @@ static IconCacheEntry g_icons[ICON_COUNT] = {
     [ICON_ELF] = {"terminal.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_FILE] = {"application-default-icon.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
 };
+
+#define FOLDER_ICON_RULE(key_, filename_) { key_, filename_ }
+
+static FolderIconRule g_folder_icon_rules[] = {
+    FOLDER_ICON_RULE("activities", "folder-activities.png"),
+    FOLDER_ICON_RULE("android", "folder-android.png"),
+    FOLDER_ICON_RULE("appimage", "folder-appimage.png"),
+    FOLDER_ICON_RULE("black", "folder-black.png"),
+    FOLDER_ICON_RULE("blender", "folder-blender.png"),
+    FOLDER_ICON_RULE("blue", "folder-blue.png"),
+    FOLDER_ICON_RULE("book", "folder-book.png"),
+    FOLDER_ICON_RULE("bookmark", "folder-bookmark.png"),
+    FOLDER_ICON_RULE("brown", "folder-brown.png"),
+    FOLDER_ICON_RULE("build", "folder-build.png"),
+    FOLDER_ICON_RULE("calculate", "folder-calculate.png"),
+    FOLDER_ICON_RULE("chart", "folder-chart.png"),
+    FOLDER_ICON_RULE("cloud", "folder-cloud.png"),
+    FOLDER_ICON_RULE("code", "folder-code.png"),
+    FOLDER_ICON_RULE("comic", "folder-comic.png"),
+    FOLDER_ICON_RULE("crash", "folder-crash.png"),
+    FOLDER_ICON_RULE("cyan", "folder-cyan.png"),
+    FOLDER_ICON_RULE("database", "folder-database.png"),
+    FOLDER_ICON_RULE("deb", "folder-deb.png"),
+    FOLDER_ICON_RULE("decrypted", "folder-decrypted.png"),
+    FOLDER_ICON_RULE("design", "folder-design.png"),
+    FOLDER_ICON_RULE("development", "folder-development.png"),
+    FOLDER_ICON_RULE("docker", "folder-docker.png"),
+    FOLDER_ICON_RULE("drawing", "folder-drawing.png"),
+    FOLDER_ICON_RULE("dropbox", "folder-dropbox.png"),
+    FOLDER_ICON_RULE("encrypted", "folder-encrypted.png"),
+    FOLDER_ICON_RULE("extension", "folder-extension.png"),
+    FOLDER_ICON_RULE("flatpak", "folder-flatpak.png"),
+    FOLDER_ICON_RULE("games", "folder-games.png"),
+    FOLDER_ICON_RULE("gdrive", "folder-gdrive.png"),
+    FOLDER_ICON_RULE("git", "folder-git.png"),
+    FOLDER_ICON_RULE("github", "folder-github.png"),
+    FOLDER_ICON_RULE("godot", "folder-godot.png"),
+    FOLDER_ICON_RULE("html", "folder-html.png"),
+    FOLDER_ICON_RULE("important", "folder-important.png"),
+    FOLDER_ICON_RULE("java", "folder-java.png"),
+    FOLDER_ICON_RULE("language", "folder-language.png"),
+    FOLDER_ICON_RULE("library", "folder-library.png"),
+    FOLDER_ICON_RULE("locked", "folder-locked.png"),
+    FOLDER_ICON_RULE("log", "folder-log.png"),
+    FOLDER_ICON_RULE("mac", "folder-mac.png"),
+    FOLDER_ICON_RULE("mail", "folder-mail.png"),
+    FOLDER_ICON_RULE("notes", "folder-notes.png"),
+    FOLDER_ICON_RULE("open", "folder-open.png"),
+    FOLDER_ICON_RULE("paint", "folder-paint.png"),
+    FOLDER_ICON_RULE("podcast", "folder-podcast.png"),
+    FOLDER_ICON_RULE("presentation", "folder-presentation.png"),
+    FOLDER_ICON_RULE("print", "folder-print.png"),
+    FOLDER_ICON_RULE("projects", "folder-projects.png"),
+    FOLDER_ICON_RULE("public", "folder-public.png"),
+    FOLDER_ICON_RULE("rpm", "folder-rpm.png"),
+    FOLDER_ICON_RULE("script", "folder-script.png"),
+    FOLDER_ICON_RULE("sign", "folder-sign.png"),
+    FOLDER_ICON_RULE("snap", "folder-snap.png"),
+    FOLDER_ICON_RULE("steam", "folder-steam.png"),
+    FOLDER_ICON_RULE("table", "folder-table.png"),
+    FOLDER_ICON_RULE("tar", "folder-tar.png"),
+    FOLDER_ICON_RULE("temp", "folder-temp.png"),
+    FOLDER_ICON_RULE("templates", "folder-templates.png"),
+    FOLDER_ICON_RULE("torrent", "folder-torrent.png"),
+    FOLDER_ICON_RULE("trash", "folder-trash.png"),
+    FOLDER_ICON_RULE("unlocked", "folder-unlocked.png"),
+    FOLDER_ICON_RULE("vbox", "folder-vbox.png"),
+    FOLDER_ICON_RULE("windows", "folder-windows.png"),
+    FOLDER_ICON_RULE("wine", "folder-wine.png"),
+};
+
+#undef FOLDER_ICON_RULE
+
+static IconCacheEntry g_folder_icon_cache[FOLDER_ICON_CACHE_SIZE];
+static int g_folder_icon_cache_next;
 
 static int min_i(int a, int b) { return a < b ? a : b; }
 static int max_i(int a, int b) { return a > b ? a : b; }
@@ -304,6 +390,11 @@ static bool str_eq(const char *a, const char *b) {
     return strcmp(a, b) == 0;
 }
 
+static bool str_eq_ci(const char *a, const char *b) {
+    if (!a || !b) return false;
+    return strcasecmp(a, b) == 0;
+}
+
 static bool starts_with(const char *s, const char *prefix) {
     if (!s || !prefix) return false;
     while (*prefix) {
@@ -320,6 +411,61 @@ static bool ends_with_ci(const char *s, const char *suffix) {
     tlen = (int)strlen(suffix);
     if (tlen > slen) return false;
     return strcasecmp(s + slen - tlen, suffix) == 0;
+}
+
+static char lower_ascii(char c) {
+    if (c >= 'A' && c <= 'Z') return (char)(c + ('a' - 'A'));
+    return c;
+}
+
+static bool is_alnum_ascii(char c) {
+    return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9');
+}
+
+static void normalize_folder_key(const char *src, char *out, int cap) {
+    int pos = 0;
+    if (!out || cap <= 0) return;
+    if (!src) src = "";
+    for (int i = 0; src[i] && pos < cap - 1; i++) {
+        if (is_alnum_ascii(src[i])) out[pos++] = lower_ascii(src[i]);
+    }
+    out[pos] = 0;
+}
+
+static bool folder_key_matches(const char *folder_name, const char *key) {
+    char normalized[64];
+    int nlen;
+    int klen;
+    normalize_folder_key(folder_name, normalized, (int)sizeof(normalized));
+    if (str_eq(normalized, key)) return true;
+
+    nlen = (int)strlen(normalized);
+    klen = (int)strlen(key);
+    if (nlen == klen + 1 && normalized[nlen - 1] == 's' &&
+        strncmp(normalized, key, (size_t)klen) == 0) {
+        return true;
+    }
+    if (klen > 1 && key[klen - 1] == 'y' && nlen == klen + 2 &&
+        normalized[nlen - 3] == 'i' && normalized[nlen - 2] == 'e' &&
+        normalized[nlen - 1] == 's' &&
+        strncmp(normalized, key, (size_t)(klen - 1)) == 0) {
+        return true;
+    }
+    return false;
+}
+
+static int folder_icon_index_for_name(const char *name) {
+    if (!name || !name[0]) return -1;
+
+    if (folder_key_matches(name, "pictures") || folder_key_matches(name, "photos") ||
+        folder_key_matches(name, "images")) {
+        return -1;
+    }
+
+    for (int i = 0; i < (int)(sizeof(g_folder_icon_rules) / sizeof(g_folder_icon_rules[0])); i++) {
+        if (folder_key_matches(name, g_folder_icon_rules[i].key)) return i;
+    }
+    return -1;
 }
 
 static const char *path_basename(const char *path) {
@@ -529,17 +675,15 @@ static void scale_rgba_to_argb(const unsigned char *rgba, int src_w, int src_h,
     }
 }
 
-static bool load_icon_variant(icon_id_t id, bool small) {
-    if (id < 0 || id >= ICON_COUNT) return false;
-    IconCacheEntry *entry = &g_icons[id];
+static bool load_icon_cache_entry(IconCacheEntry *entry, bool small) {
+    if (!entry || !entry->filename) return false;
     icon_state_t *state = small ? &entry->small_state : &entry->large_state;
-    uint32_t *dst = small ? entry->small : entry->large;
-    int dst_size = small ? SIDE_ICON_SIZE : ICON_SIZE;
     if (*state == ICON_LOADED) return true;
     if (*state == ICON_FAILED) return false;
 
-    // mark failed before decode, avoids disk spam
-    *state = ICON_FAILED;
+    // mark failed before decode, avoids disk spam if decoding aborts
+    entry->large_state = ICON_FAILED;
+    entry->small_state = ICON_FAILED;
 
     char path[160];
     str_copy(path, "/Library/images/icons/colloid/", (int)sizeof(path));
@@ -573,10 +717,35 @@ static bool load_icon_variant(icon_id_t id, bool small) {
         if (rgba) stbi_image_free(rgba);
         return false;
     }
-    scale_rgba_to_argb(rgba, w, h, dst, dst_size, dst_size);
+    scale_rgba_to_argb(rgba, w, h, entry->large, ICON_SIZE, ICON_SIZE);
+    scale_rgba_to_argb(rgba, w, h, entry->small, SIDE_ICON_SIZE, SIDE_ICON_SIZE);
     stbi_image_free(rgba);
-    *state = ICON_LOADED;
+    entry->large_state = ICON_LOADED;
+    entry->small_state = ICON_LOADED;
     return true;
+}
+
+static bool load_icon_variant(icon_id_t id, bool small) {
+    if (id < 0 || id >= ICON_COUNT) return false;
+    return load_icon_cache_entry(&g_icons[id], small);
+}
+
+static IconCacheEntry *folder_icon_cache_entry(const char *filename) {
+    int slot = -1;
+    if (!filename || !filename[0]) return NULL;
+    for (int i = 0; i < FOLDER_ICON_CACHE_SIZE; i++) {
+        if (g_folder_icon_cache[i].filename && str_eq(g_folder_icon_cache[i].filename, filename)) {
+            return &g_folder_icon_cache[i];
+        }
+        if (slot < 0 && !g_folder_icon_cache[i].filename) slot = i;
+    }
+    if (slot < 0) {
+        slot = g_folder_icon_cache_next++ % FOLDER_ICON_CACHE_SIZE;
+    }
+    g_folder_icon_cache[slot].filename = filename;
+    g_folder_icon_cache[slot].large_state = ICON_UNTRIED;
+    g_folder_icon_cache[slot].small_state = ICON_UNTRIED;
+    return &g_folder_icon_cache[slot];
 }
 
 static void draw_file_glyph(int x, int y, item_type_t type, bool small) {
@@ -620,12 +789,13 @@ static void draw_file_glyph(int x, int y, item_type_t type, bool small) {
 static icon_id_t icon_for_item(const ExplorerItem *it) {
     if (!it) return ICON_FILE;
     if (it->is_dir) {
-        if (str_eq(it->name, "Documents")) return ICON_FOLDER_DOCUMENTS;
-        if (str_eq(it->name, "Downloads")) return ICON_FOLDER_DOWNLOADS;
-        if (str_eq(it->name, "Pictures")) return ICON_FOLDER_IMAGES;
-        if (str_eq(it->name, "Music")) return ICON_FOLDER_MUSIC;
-        if (str_eq(it->name, "Videos")) return ICON_FOLDER_VIDEOS;
-        if (str_eq(it->name, "Recycle Bin")) return ICON_TRASH;
+        if (str_eq_ci(it->name, "Documents")) return ICON_FOLDER_DOCUMENTS;
+        if (str_eq_ci(it->name, "Downloads") || str_eq_ci(it->name, "Download")) return ICON_FOLDER_DOWNLOADS;
+        if (str_eq_ci(it->name, "Pictures") || str_eq_ci(it->name, "Images") || str_eq_ci(it->name, "Photos")) return ICON_FOLDER_IMAGES;
+        if (str_eq_ci(it->name, "Music")) return ICON_FOLDER_MUSIC;
+        if (str_eq_ci(it->name, "Videos")) return ICON_FOLDER_VIDEOS;
+        if (str_eq_ci(it->name, "Root")) return ICON_FOLDER_ROOT;
+        if (str_eq_ci(it->name, "Recycle Bin")) return ICON_TRASH;
         return ICON_FOLDER;
     }
     if (it->type == ITEM_ARCHIVE || it->type == ITEM_UNSUPPORTED_ARCHIVE) return ICON_ARCHIVE;
@@ -657,6 +827,27 @@ static void draw_icon_cached(icon_id_t id, item_type_t fallback, int x, int y, b
         return;
     }
     draw_file_glyph(x, y, fallback, small);
+}
+
+static void draw_folder_rule_icon_cached(int index, int x, int y, bool small) {
+    if (index >= 0 && index < (int)(sizeof(g_folder_icon_rules) / sizeof(g_folder_icon_rules[0]))) {
+        IconCacheEntry *entry = folder_icon_cache_entry(g_folder_icon_rules[index].filename);
+        if (entry && load_icon_cache_entry(entry, small)) {
+            uint32_t *pixels = small ? entry->small : entry->large;
+            int size = small ? SIDE_ICON_SIZE : ICON_SIZE;
+            ui_draw_image(g.win, x, y, size, size, pixels);
+            return;
+        }
+    }
+    draw_file_glyph(x, y, ITEM_DIR, small);
+}
+
+static void draw_item_icon(const ExplorerItem *it, int x, int y) {
+    if (it && it->is_dir && it->folder_icon_index >= 0) {
+        draw_folder_rule_icon_cached(it->folder_icon_index, x, y, false);
+        return;
+    }
+    draw_icon_cached(icon_for_item(it), it ? it->type : ITEM_FILE, x, y, false);
 }
 
 static void build_sidebar(void) {
@@ -884,12 +1075,14 @@ static bool archive_add_child(const char *name, bool is_dir, const char *entry_p
                 g.items[i].is_dir = true;
                 g.items[i].archive_virtual_dir = true;
                 g.items[i].type = ITEM_DIR;
+                g.items[i].folder_icon_index = folder_icon_index_for_name(g.items[i].name);
             }
             return true;
         }
     }
     ExplorerItem *it = &g.items[g.item_count++];
     memset(it, 0, sizeof(*it));
+    it->folder_icon_index = -1;
     str_copy(it->name, name, EXPLORER_MAX_NAME);
     archive_display_path(g.archive_path, entry_path, it->path, EXPLORER_MAX_PATH);
     str_copy(it->archive_entry, entry_path, EXPLORER_MAX_PATH);
@@ -898,6 +1091,7 @@ static bool archive_add_child(const char *name, bool is_dir, const char *entry_p
     it->is_archive_item = true;
     it->archive_virtual_dir = is_dir || typeflag == '5';
     it->type = item_type_for(name, is_dir);
+    if (it->is_dir) it->folder_icon_index = folder_icon_index_for_name(it->name);
     return true;
 }
 
@@ -945,7 +1139,6 @@ static bool load_archive_directory(const char *archive_path, const char *dir, bo
 static bool load_location(const char *path, bool push_history);
 
 static bool load_directory(const char *path, bool push_history) {
-    FAT32_FileInfo entries[EXPLORER_MAX_ITEMS];
     int count;
     char target[EXPLORER_MAX_PATH];
     make_absolute(path, target, (int)sizeof(target));
@@ -955,7 +1148,7 @@ static bool load_directory(const char *path, bool push_history) {
         return false;
     }
 
-    count = sys_list(target, entries, EXPLORER_MAX_ITEMS);
+    count = sys_list(target, g_dir_entries, EXPLORER_MAX_ITEMS);
     if (count < 0) {
         set_error("Cannot read folder.");
         return false;
@@ -968,11 +1161,13 @@ static bool load_directory(const char *path, bool push_history) {
     g.item_count = min_i(count, EXPLORER_MAX_ITEMS);
     for (int i = 0; i < g.item_count; i++) {
         memset(&g.items[i], 0, sizeof(g.items[i]));
-        str_copy(g.items[i].name, entries[i].name, EXPLORER_MAX_NAME);
-        path_join(g.items[i].path, target, entries[i].name, EXPLORER_MAX_PATH);
-        g.items[i].is_dir = entries[i].is_directory != 0;
-        g.items[i].size = entries[i].size;
+        g.items[i].folder_icon_index = -1;
+        str_copy(g.items[i].name, g_dir_entries[i].name, EXPLORER_MAX_NAME);
+        path_join(g.items[i].path, target, g_dir_entries[i].name, EXPLORER_MAX_PATH);
+        g.items[i].is_dir = g_dir_entries[i].is_directory != 0;
+        g.items[i].size = g_dir_entries[i].size;
         g.items[i].type = item_type_for(g.items[i].name, g.items[i].is_dir);
+        if (g.items[i].is_dir) g.items[i].folder_icon_index = folder_icon_index_for_name(g.items[i].name);
     }
     sort_items();
 
@@ -1160,20 +1355,33 @@ static void open_item(int index) {
     else open_file(it->path);
 }
 
+static FAT32_FileInfo *alloc_dir_entries(void) {
+    return (FAT32_FileInfo *)malloc(sizeof(FAT32_FileInfo) * EXPLORER_MAX_ITEMS);
+}
+
 static bool delete_recursive(const char *path) {
     FAT32_FileInfo info;
 
     // dumb but useful guard rail
     if (!path || !path[0] || str_eq(path, "/")) return false;
     if (sys_get_file_info(path, &info) == 0 && info.is_directory) {
-        FAT32_FileInfo entries[EXPLORER_MAX_ITEMS];
+        FAT32_FileInfo *entries = alloc_dir_entries();
+        if (!entries) return false;
         int count = sys_list(path, entries, EXPLORER_MAX_ITEMS);
-        if (count < 0) return false;
+        if (count < 0) {
+            free(entries);
+            return false;
+        }
         for (int i = 0; i < count; i++) {
             char child[EXPLORER_MAX_PATH];
+            if (str_eq(entries[i].name, ".") || str_eq(entries[i].name, "..")) continue;
             path_join(child, path, entries[i].name, (int)sizeof(child));
-            if (!delete_recursive(child)) return false;
+            if (!delete_recursive(child)) {
+                free(entries);
+                return false;
+            }
         }
+        free(entries);
     }
     return sys_delete(path) == 0;
 }
@@ -1278,17 +1486,26 @@ static bool add_path_to_tar(int out_fd, const char *fs_path, const char *tar_pat
         int len = (int)strlen(dir_name);
         if (len > 0 && dir_name[len - 1] != '/') str_append(dir_name, "/", (int)sizeof(dir_name));
         if (!tar_write_header(out_fd, dir_name, 0, '5')) return false;
-        FAT32_FileInfo entries[EXPLORER_MAX_ITEMS];
+        FAT32_FileInfo *entries = alloc_dir_entries();
+        if (!entries) return false;
         int count = sys_list(fs_path, entries, EXPLORER_MAX_ITEMS);
-        if (count < 0) return false;
+        if (count < 0) {
+            free(entries);
+            return false;
+        }
         for (int i = 0; i < count; i++) {
             char child_fs[EXPLORER_MAX_PATH];
             char child_tar[EXPLORER_MAX_PATH];
+            if (str_eq(entries[i].name, ".") || str_eq(entries[i].name, "..")) continue;
             path_join(child_fs, fs_path, entries[i].name, (int)sizeof(child_fs));
             str_copy(child_tar, dir_name, (int)sizeof(child_tar));
             str_append(child_tar, entries[i].name, (int)sizeof(child_tar));
-            if (!add_path_to_tar(out_fd, child_fs, child_tar)) return false;
+            if (!add_path_to_tar(out_fd, child_fs, child_tar)) {
+                free(entries);
+                return false;
+            }
         }
+        free(entries);
         return true;
     }
 
@@ -1317,6 +1534,14 @@ static bool create_archive_from_folder(const char *folder_path) {
     char parent[EXPLORER_MAX_PATH];
     char archive_name[EXPLORER_MAX_NAME];
     char archive_path[EXPLORER_MAX_PATH];
+    if (!folder_path || !folder_path[0] || str_eq(folder_path, "/")) {
+        set_error("Cannot archive root folder.");
+        return false;
+    }
+    if (!path_is_dir(folder_path)) {
+        set_error("Select a folder first.");
+        return false;
+    }
     path_parent(folder_path, parent, (int)sizeof(parent));
     str_copy(archive_name, path_basename(folder_path), (int)sizeof(archive_name));
     str_append(archive_name, ".tar", (int)sizeof(archive_name));
@@ -1593,10 +1818,22 @@ static const char **menu_labels(menu_kind_t kind, int *count) {
     return empty_items;
 }
 
+static int menu_row_at(int x, int y) {
+    int count = 0;
+    if (g.menu_kind == MENU_NONE) return -1;
+    menu_labels(g.menu_kind, &count);
+    for (int i = 0; i < count; i++) {
+        int row_y = g.menu_y + 8 + i * 31;
+        if (rect_contains(g.menu_x + 8, row_y, g.menu_w - 16, 28, x, y)) return i;
+    }
+    return -1;
+}
+
 static void menu_action(int idx) {
     menu_kind_t kind = g.menu_kind;
     int target = g.menu_target;
     g.menu_kind = MENU_NONE;
+    g.menu_hovered = -1;
     if (target >= 0 && target < g.item_count) g.selected_item = target;
 
     if (kind == MENU_EMPTY) {
@@ -1627,6 +1864,7 @@ static void menu_action(int idx) {
 static void open_context_menu(menu_kind_t kind, int target, int x, int y) {
     g.menu_kind = kind;
     g.menu_target = target;
+    g.menu_hovered = -1;
     g.menu_x = x;
     g.menu_y = y;
     if (g.menu_x + 168 > g.win_w) g.menu_x = g.win_w - 176;
@@ -1637,6 +1875,7 @@ static void open_context_menu(menu_kind_t kind, int target, int x, int y) {
     g.menu_h = 16 + count * 31;
     if (g.menu_y + g.menu_h > g.win_h) g.menu_y = g.win_h - g.menu_h - 8;
     if (g.menu_y < HEADER_H + 8) g.menu_y = HEADER_H + 8;
+    g.menu_hovered = menu_row_at(x, y);
     request_full_repaint();
 }
 
@@ -1704,7 +1943,7 @@ static void draw_item_cell(int i) {
         draw_round_rect(it->x, it->y, it->w, it->h, 10, i == g.selected_item ? COLOR_SELECTED : COLOR_HOVER);
     }
     int icon_x = it->x + (it->w - ICON_SIZE) / 2;
-    draw_icon_cached(icon_for_item(it), it->type, icon_x, it->y + 14, false);
+    draw_item_icon(it, icon_x, it->y + 14);
     draw_text_fit(it->x + 8, it->y + 72, it->name, COLOR_TEXT, it->w - 16);
 }
 
@@ -1737,8 +1976,7 @@ static void draw_menu(void) {
     draw_round_rect(g.menu_x + 1, g.menu_y + 1, g.menu_w - 2, g.menu_h - 2, 9, COLOR_PANEL);
     for (int i = 0; i < count; i++) {
         int y = g.menu_y + 8 + i * 31;
-        bool hover = rect_contains(g.menu_x + 8, y, g.menu_w - 16, 28, g.mouse_x, g.mouse_y);
-        if (hover) draw_round_rect(g.menu_x + 8, y, g.menu_w - 16, 28, 7, COLOR_HOVER);
+        if (i == g.menu_hovered) draw_round_rect(g.menu_x + 8, y, g.menu_w - 16, 28, 7, COLOR_HOVER);
         uint32_t color = (str_eq(items[i], "Delete")) ? COLOR_DANGER : COLOR_TEXT;
         ui_draw_string(g.win, g.menu_x + 18, y + 8, items[i], color);
     }
@@ -1975,6 +2213,7 @@ static void handle_key(gui_event_t *ev) {
     else if (legacy == KEY_ENTER && g.selected_item >= 0) open_item(g.selected_item);
     else if (legacy == KEY_ESCAPE) {
         g.menu_kind = MENU_NONE;
+        g.menu_hovered = -1;
         int old = g.selected_item;
         g.selected_item = -1;
         request_item_repaint(old);
@@ -2014,17 +2253,14 @@ static bool handle_menu_click(int x, int y) {
     if (g.menu_kind == MENU_NONE) return false;
     if (!rect_contains(g.menu_x, g.menu_y, g.menu_w, g.menu_h, x, y)) {
         g.menu_kind = MENU_NONE;
+        g.menu_hovered = -1;
         request_full_repaint();
         return false;
     }
-    int count = 0;
-    menu_labels(g.menu_kind, &count);
-    for (int i = 0; i < count; i++) {
-        int row_y = g.menu_y + 8 + i * 31;
-        if (rect_contains(g.menu_x + 8, row_y, g.menu_w - 16, 28, x, y)) {
-            menu_action(i);
-            return true;
-        }
+    int row = menu_row_at(x, y);
+    if (row >= 0) {
+        menu_action(row);
+        return true;
     }
     return true;
 }
@@ -2106,9 +2342,13 @@ static void mouse_move(int x, int y) {
     int old_side = g.sidebar_hovered;
     g.mouse_x = x;
     g.mouse_y = y;
-    if (g.dialog != DIALOG_NONE || g.menu_kind != MENU_NONE || g.path_focused) {
-        // overlays leave marks fast with partial repaint
-        request_full_repaint();
+    if (g.dialog != DIALOG_NONE || g.path_focused) {
+        return;
+    }
+    if (g.menu_kind != MENU_NONE) {
+        int old_menu_hover = g.menu_hovered;
+        g.menu_hovered = menu_row_at(x, y);
+        if (old_menu_hover != g.menu_hovered) request_full_repaint();
         return;
     }
     g.hovered_item = hit_item(x, y);
@@ -2164,6 +2404,7 @@ static void init_state(void) {
     g.hovered_item = -1;
     g.sidebar_hovered = -1;
     g.menu_target = -1;
+    g.menu_hovered = -1;
     g.last_clicked_item = -1;
     g.repaint_all = true;
     g.layout_dirty = true;
