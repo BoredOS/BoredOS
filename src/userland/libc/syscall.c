@@ -133,6 +133,10 @@ int sys_mkdir(const char *path) {
     return (int)syscall2(SYS_FS, FS_CMD_MKDIR, (uint64_t)path);
 }
 
+int sys_rename(const char *old_path, const char *new_path) {
+    return (int)syscall3(SYS_FS, FS_CMD_RENAME, (uint64_t)old_path, (uint64_t)new_path);
+}
+
 int sys_exists(const char *path) {
     return (int)syscall2(SYS_FS, FS_CMD_EXISTS, (uint64_t)path);
 }

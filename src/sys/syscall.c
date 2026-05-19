@@ -1405,6 +1405,20 @@ static uint64_t fs_cmd_get_info(const syscall_args_t *args) {
     return (uint64_t)res;
 }
 
+static uint64_t fs_cmd_rename(const syscall_args_t *args) {
+    process_t *proc = process_get_current();
+    const char *old_path = (const char *)args->arg2;
+    const char *new_path = (const char *)args->arg3;
+    if (!proc || !old_path || !new_path) return -1;
+
+    char norm_old[VFS_MAX_PATH];
+    char norm_new[VFS_MAX_PATH];
+    vfs_normalize_path(proc->cwd, old_path, norm_old);
+    vfs_normalize_path(proc->cwd, new_path, norm_new);
+
+    return vfs_rename(norm_old, norm_new) ? 0 : -1;
+}
+
 static uint64_t fs_cmd_mkdir(const syscall_args_t *args) {
     const char *path = (const char *)args->arg2;
     if (!path) return -1;
@@ -1577,7 +1591,7 @@ static uint64_t fs_cmd_select(const syscall_args_t *args) {
     return 0;
 }
 
-#define FS_CMD_TABLE_SIZE 24
+#define FS_CMD_TABLE_SIZE 25
 static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
     [FS_CMD_OPEN]        = fs_cmd_open,      // 1
     [FS_CMD_READ]        = fs_cmd_read,      // 2
@@ -1602,6 +1616,7 @@ static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
     [FS_CMD_MOUNT_INFO]  = fs_cmd_mount_info,  // 21
     [FS_CMD_POLL]        = fs_cmd_poll,        // 22
     [FS_CMD_SELECT]      = fs_cmd_select,      // 23
+    [FS_CMD_RENAME]      = fs_cmd_rename,    // 24
 };
 
 static uint64_t sys_cmd_set_bg_color(const syscall_args_t *args) {

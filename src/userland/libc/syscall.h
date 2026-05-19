@@ -38,6 +38,7 @@
 #define FS_CMD_MOUNT_INFO 21
 #define FS_CMD_POLL 22
 #define FS_CMD_SELECT 23
+#define FS_CMD_RENAME 24
 
 // System Commands (via SYS_SYSTEM)
 #define SYSTEM_CMD_SET_BG_COLOR 1
@@ -181,6 +182,7 @@ uint32_t sys_tell(int fd);
 uint32_t sys_size(int fd);
 int sys_delete(const char *path);
 int sys_mkdir(const char *path);
+int sys_rename(const char *old_path, const char *new_path);
 int sys_exists(const char *path);
 int sys_getcwd(char *buf, int size);
 int sys_chdir(const char *path);

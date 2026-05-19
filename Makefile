@@ -139,6 +139,9 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/root/Pictures
 	mkdir -p $(BUILD_DIR)/initrd/root/Documents
 	mkdir -p $(BUILD_DIR)/initrd/root/Downloads
+	mkdir -p $(BUILD_DIR)/initrd/root/Music
+	mkdir -p $(BUILD_DIR)/initrd/root/Videos
+	mkdir -p $(BUILD_DIR)/initrd/RecycleBin
 	mkdir -p $(BUILD_DIR)/initrd/etc
 	mkdir -p $(BUILD_DIR)/initrd/usr/lib/tcc/include
 	mkdir -p $(BUILD_DIR)/initrd/usr/local/include
