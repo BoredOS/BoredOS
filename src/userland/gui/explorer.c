@@ -4,6 +4,9 @@
 // BOREDOS_APP_DESC: modern minimal userland file manager
 // BOREDOS_APP_ICONS: /Library/images/icons/colloid/file-manager.png;/Library/images/icons/colloid/folder.png
 
+// CREDITS FOR ARTISTS
+// Thanks to Artem (https://github.com/artemix1508) for the markdown icon ! 
+
 // todo: add image preview
 // todo: add an option to search file
 
