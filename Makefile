@@ -241,6 +241,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 
 	@printf "$(YELLOW)[COPY]$(RESET) ASCII art...\n"
 	@if [ -f $(SRC_DIR)/library/art/boredos.txt ]; then printf "  -> boredos.txt\n"; cp $(SRC_DIR)/library/art/boredos.txt $(BUILD_DIR)/initrd/Library/art/; fi
+	@if [ -f $(SRC_DIR)/library/art/boredos_small.txt ]; then printf "  -> boredos_small.txt\n"; cp $(SRC_DIR)/library/art/boredos_small.txt $(BUILD_DIR)/initrd/Library/art/; fi
 
 	@printf "$(YELLOW)[COPY]$(RESET) Documentation...\n"
 	@for f in $$(find docs -name '*.md' 2>/dev/null); do \
