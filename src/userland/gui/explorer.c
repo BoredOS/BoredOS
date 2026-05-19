@@ -976,6 +976,7 @@ static void build_sidebar(void) {
     };
     int count = 0;
     for (int i = 0; i < (int)(sizeof(base) / sizeof(base[0])) && count < EXPLORER_MAX_SIDEBAR; i++) {
+        if (!str_eq(base[i].path, "/") && !path_is_dir(base[i].path)) continue;
         g.sidebar[count].kind = base[i].kind;
         str_copy(g.sidebar[count].label, base[i].label, (int)sizeof(g.sidebar[count].label));
         str_copy(g.sidebar[count].path, base[i].path, (int)sizeof(g.sidebar[count].path));
