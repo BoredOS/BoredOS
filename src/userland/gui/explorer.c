@@ -2269,25 +2269,38 @@ static void paint(void) {
     if (g.layout_dirty || g.repaint_all) layout_items();
     if (g.repaint_all) {
         ui_draw_rect(g.win, 0, 0, g.win_w, g.win_h, COLOR_BG);
-        draw_header();
-        draw_sidebar();
         draw_grid();
+        draw_sidebar();
+        draw_header();
         draw_menu();
         draw_dialog();
         ui_mark_dirty(g.win, 0, 0, g.win_w, g.win_h);
     } else {
         bool did_partial = false;
+        bool redraw_header = false;
         if (g.sidebar_dirty) {
             draw_sidebar();
             ui_mark_dirty(g.win, 0, HEADER_H, SIDEBAR_W, g.win_h - HEADER_H);
+            redraw_header = true;
             did_partial = true;
         }
         for (int i = 0; i < g.dirty_item_count; i++) {
             int idx = g.dirty_items[i];
             draw_item_cell(idx);
             ExplorerItem *it = &g.items[idx];
-            ui_mark_dirty(g.win, it->x - 4, it->y - 4, it->w + 8, it->h + 8);
+            int dirty_y = it->y - 4;
+            int dirty_h = it->h + 8;
+            if (dirty_y < HEADER_H) {
+                dirty_h -= HEADER_H - dirty_y;
+                dirty_y = HEADER_H;
+                redraw_header = true;
+            }
+            if (dirty_h > 0) ui_mark_dirty(g.win, it->x - 4, dirty_y, it->w + 8, dirty_h);
             did_partial = true;
+        }
+        if (redraw_header) {
+            draw_header();
+            ui_mark_dirty(g.win, 0, 0, g.win_w, HEADER_H);
         }
         if (!did_partial) {
             // weird state, repaint wide
