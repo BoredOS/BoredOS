@@ -1622,7 +1622,9 @@ static const syscall_handler_fn fs_cmd_table[FS_CMD_TABLE_SIZE] = {
 static uint64_t sys_cmd_set_bg_color(const syscall_args_t *args) {
     uint32_t color = (uint32_t)args->arg2;
     extern void graphics_set_bg_color(uint32_t color);
+    extern void wm_refresh(void);
     graphics_set_bg_color(color);
+    wm_refresh();
     return 0;
 }
 
