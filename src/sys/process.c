@@ -44,6 +44,9 @@ static void process_release_slot(process_t *p) {
     p->ui_window = NULL;
     p->is_terminal_proc = false;
     p->tty_id = -1;
+    p->poll_wait_queue = NULL;
+    p->poll_wait_entry.proc = NULL;
+    p->poll_wait_entry.next = NULL;
     p->kill_pending = false;
     p->used_memory = 0;
     p->ticks = 0;
@@ -780,6 +783,10 @@ static void process_cleanup_inner(process_t *proc) {
     extern void network_cleanup_pcb(void *pcb);
     // TODO: We need per-process PCB tracking to call this safely
     // For now, let's NOT call global network_cleanup
+    if (proc->poll_wait_queue) {
+        wait_queue_remove(proc->poll_wait_queue, &proc->poll_wait_entry);
+        proc->poll_wait_queue = NULL;
+  }
 }
 
 void process_terminate(process_t *to_delete) {

@@ -1493,14 +1493,16 @@ typedef struct {
 } poll_wtable_t;
 
 static void poll_qproc(wait_queue_head_t *h, poll_table_t *pt) {
-    poll_wtable_t *wt = (poll_wtable_t *)pt;
-    if (wt->count < MAX_POLL_ENTRIES) {
-        poll_entry_t *pe = &wt->entries[wt->count++];
-        pe->h = h;
-        pe->entry.proc = process_get_current();
-        pe->entry.next = NULL;
-        wait_queue_add(h, &pe->entry);
-    }
+    (void)pt;
+    process_t *proc = process_get_current();
+    if (!proc) return;
+    if (proc->poll_wait_queue) {
+        wait_queue_remove(proc->poll_wait_queue, &proc->poll_wait_entry);
+  }
+  proc->poll_wait_entry.proc = proc;
+  proc->poll_wait_entry.next = NULL;
+  proc->poll_wait_queue = h;
+  wait_queue_add(h, &proc->poll_wait_entry);
 }
 
 static uint64_t fs_cmd_poll(const syscall_args_t *args) {
@@ -1551,9 +1553,10 @@ static uint64_t fs_cmd_poll(const syscall_args_t *args) {
     }
 
     if (ready > 0 || timeout == 0) {
-        for (int i = 0; i < wt.count; i++) {
-            wait_queue_remove(wt.entries[i].h, &wt.entries[i].entry);
-        }
+        if (proc->poll_wait_queue) {
+            wait_queue_remove(proc->poll_wait_queue, &proc->poll_wait_entry);
+            proc->poll_wait_queue = NULL;
+    }
         return (uint64_t)ready;
     }
 

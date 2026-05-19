@@ -103,6 +103,13 @@ typedef struct process {
     // Tracking for ELF executable segments to allow full memory reclamation on exit.
     void *elf_segments[4];
     uint32_t elf_segment_count;
+    
+/* Stable wait queue entry for poll() - lives here to outlive any syscall
+       * stack frame, preventing a self-referential wait queue on retry.
+       * Note: supports blocking on one fd at a time. Multi-fd blocking poll
+       * would require an array of entries here. */
+    wait_queue_entry_t poll_wait_entry;
+    wait_queue_head_t *poll_wait_queue;
 } __attribute__((aligned(16))) process_t;
 
 // Loads the ELF executable at 'path' using fat32 into the pagemap given by user_pml4.
