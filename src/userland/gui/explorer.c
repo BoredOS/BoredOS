@@ -6,6 +6,7 @@
 
 // CREDITS FOR ARTISTS
 // Thanks to Artem (https://github.com/artemix1508) for the markdown icon ! 
+// Thanks to QWR (https://github.com/qwroffc) for the tar icon !
 
 // todo: add image preview
 // todo: add an option to search file
@@ -304,7 +305,7 @@ static IconCacheEntry g_icons[ICON_COUNT] = {
     [ICON_FOLDER_ROOT] = {"colloid/folder-root.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_TRASH] = {"colloid/user-trash.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_DEVICE] = {"colloid/drive-harddisk.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
-    [ICON_ARCHIVE] = {"colloid/file-roller.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
+    [ICON_ARCHIVE] = {"boredos/tar.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_TEXT] = {"colloid/text-editor.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_MARKDOWN] = {"boredos/markdown.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
     [ICON_PDF] = {"colloid/wps-office2023-pdfmain.png", ICON_UNTRIED, ICON_UNTRIED, {0}, {0}},
