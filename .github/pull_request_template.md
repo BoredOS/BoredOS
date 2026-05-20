@@ -22,8 +22,6 @@ Examples:
 Notes:
  Add anything relevant about testing -->
 
----
-
 ## Additional Notes
 
 <!-- Anything reviewers should know -->
