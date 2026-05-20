@@ -7,37 +7,31 @@ NOTE: YOU MUST HAVE READ OUR AI POLICY BEFORE USING AI TOOLS IN THIS PR. FAILURE
 
 ## Description
 
-Describe the changes made in this PR.
+<!-- Provide a brief description of the changes made in this pull request. -->
 
----
-
-## Testing
-
-- [ ] Code has been tested
-- [ ] Existing tests pass
 
 ### Platform / Environment
+<!--
 What platform and environment were used for development and testing?
 
 Examples:
 - Windows 11 / macOS / Linux
 - MSYS2 / WSL2 / Debian 
 
+<!--
 Notes:
-<!-- Add anything relevant about testing -->
-
----
-
-## Documentation
-- [ ] Code contains appropriate comments (REQUIRED for medium to large PR's.)
-
-- [ ] Documentation updated if needed
-
-Notes:
-<!-- Add anything relevant about documentation -->
+ Add anything relevant about testing -->
 
 ---
 
 ## Additional Notes
 
 <!-- Anything reviewers should know -->
+
+## Checklist
+- [ ] I have read and understand the AI Policy.
+- [ ] My code follows the style guidelines of this project.
+- [ ] I have performed a self-review of my code.
+- [ ] I have commented my code, particularly in hard-to-understand areas.
+- [ ] I have made corresponding changes to the documentation if necessary.
+- [ ] I have tested my code and verified that it works as expected.
