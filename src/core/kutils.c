@@ -8,15 +8,27 @@
 #include "../drivers/ACPI/acpi.h"
 
 void *memset(void *dest, int val, size_t len) {
-    unsigned char *ptr = (unsigned char *)dest;
-    while (len-- > 0) *ptr++ = (unsigned char)val;
+    void *d = dest;
+    uint8_t byte = (uint8_t)val;
+    uint64_t pattern = byte;
+    pattern |= pattern << 8;
+    pattern |= pattern << 16;
+    pattern |= pattern << 32;
+
+    size_t qwords = len / 8;
+    size_t bytes = len % 8;
+    asm volatile("cld\nrep stosq" : "+D"(d), "+c"(qwords) : "a"(pattern) : "memory");
+    asm volatile("rep stosb" : "+D"(d), "+c"(bytes) : "a"(byte) : "memory");
     return dest;
 }
 
 void *memcpy(void *dest, const void *src, size_t len) {
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
-    while (len-- > 0) *d++ = *s++;
+    void *d = dest;
+    const void *s = src;
+    size_t qwords = len / 8;
+    size_t bytes = len % 8;
+    asm volatile("cld\nrep movsq" : "+D"(d), "+S"(s), "+c"(qwords) : : "memory");
+    asm volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(bytes) : : "memory");
     return dest;
 }
 
@@ -35,15 +47,23 @@ void *memmove(void *dest, const void *src, uint64_t n) {
     uint8_t *pdest = (uint8_t *)dest;
     const uint8_t *psrc = (const uint8_t *)src;
 
-    if (src > dest) {
-        for (uint64_t i = 0; i < n; i++) {
-            pdest[i] = psrc[i];
-        }
-    } else if (src < dest) {
-        for (uint64_t i = n; i > 0; i--) {
-            pdest[i-1] = psrc[i-1];
-        }
+    if (pdest == psrc || n == 0) {
+        return dest;
     }
+    if (pdest < psrc || pdest >= psrc + n) {
+        return memcpy(dest, src, n);
+    }
+
+    pdest += n - 1;
+    psrc += n - 1;
+    asm volatile(
+        "std\n"
+        "rep movsb\n"
+        "cld"
+        : "+D"(pdest), "+S"(psrc), "+c"(n)
+        :
+        : "memory"
+    );
 
     return dest;
 }
@@ -212,4 +232,3 @@ char *k_strstr(const char *haystack, const char *needle) {
     }
     return NULL;
 }
-

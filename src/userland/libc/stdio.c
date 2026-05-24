@@ -764,6 +764,13 @@ long filelength(FILE *f) {
     return (long)sys_size(f->fd);
 }
 
+int fileno(FILE *stream) {
+    if (!stream) {
+        return -1;
+    }
+    return stream->fd;
+}
+
 static const char *_b_skip_spaces(const char *p) {
     while (*p && _b_is_space_char((unsigned char)*p)) {
         p++;

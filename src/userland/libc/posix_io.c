@@ -451,6 +451,14 @@ __attribute__((weak)) int isatty(int fd) {
     return (h->type == HANDLE_KERNEL_FD && _b_is_stdio_handle(h)) ? 1 : 0;
 }
 
+__attribute__((weak)) long sysconf(int name) {
+    if (name == _SC_PAGESIZE || name == _SC_PAGE_SIZE) {
+        return 4096;
+    }
+    errno = EINVAL;
+    return -1;
+}
+
 __attribute__((weak)) int fstat(int fd, struct stat *statbuf) {
     fd_handle_t *h;
     _b_fd_init();

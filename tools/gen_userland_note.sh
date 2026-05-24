@@ -40,10 +40,14 @@ fi
 
 app_desc="$DEFAULT_DESC"
 image_spec="$DEFAULT_ICON_PATH"
+source_name=$(sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_NAME:[[:space:]]*@@p' "$SOURCE_PATH" | head -n 1)
 
 source_desc=$(sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_DESC:[[:space:]]*@@p' "$SOURCE_PATH" | head -n 1)
 source_icons=$(sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' "$SOURCE_PATH" | head -n 1)
 
+if [ -n "$source_name" ]; then
+    APP_NAME="$source_name"
+fi
 if [ -n "$source_desc" ]; then
     app_desc="$source_desc"
 fi
@@ -54,6 +58,11 @@ fi
 app_desc=$(trim_spaces "$app_desc")
 if [ -z "$app_desc" ]; then
     app_desc="$DEFAULT_DESC"
+fi
+
+APP_NAME=$(trim_spaces "$APP_NAME")
+if [ -z "$APP_NAME" ]; then
+    APP_NAME="$1"
 fi
 
 image_spec=$(trim_spaces "$image_spec")

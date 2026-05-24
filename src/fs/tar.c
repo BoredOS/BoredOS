@@ -5,6 +5,8 @@
 #include "fat32.h"
 #include "bootfs.h"
 
+extern void serial_write(const char *str);
+
 // The standard TAR header block is 512 bytes.
 struct tar_header {
     char filename[100];
@@ -38,15 +40,25 @@ static uint64_t tar_parse_octal(const char *str, int size) {
     return result;
 }
 
+static void tar_copy_part(char *dest, int *pos, const char *src, int max_src, int dest_cap) {
+    int i = 0;
+    while (i < max_src && src[i] != '\0' && *pos < dest_cap - 1) {
+        dest[*pos] = src[i];
+        (*pos)++;
+        i++;
+    }
+    dest[*pos] = '\0';
+}
+
 // Helper: Make directories sequentially for nested paths
 static void tar_mkdir_recursive(const char *path) {
-    char temp[256];
+    char temp[FAT32_MAX_PATH];
     int i = 0;
     if (path[0] == '/') {
         temp[0] = '/';
         i = 1;
     }
-    while (path[i] && i < 255) {
+    while (path[i] && i < FAT32_MAX_PATH - 1) {
         temp[i] = path[i];
         if (path[i] == '/') {
             temp[i] = '\0';
@@ -75,23 +87,21 @@ void tar_parse(void *archive, uint64_t archive_size) {
 
         uint64_t file_size = tar_parse_octal(header->size, 11);
         
-        char full_path[256];
-        // Ensure path starts with a '/' for VFS consistency
-        if (header->filename[0] != '/') {
+        char full_path[FAT32_MAX_PATH];
+        int full_pos = 0;
+        if (header->filename[0] != '/') full_path[full_pos++] = '/';
+        full_path[full_pos] = '\0';
+        if (header->prefix[0] != '\0') {
+            tar_copy_part(full_path, &full_pos, header->prefix, 155, FAT32_MAX_PATH);
+            if (full_pos < FAT32_MAX_PATH - 1 && full_pos > 0 && full_path[full_pos - 1] != '/') {
+                full_path[full_pos++] = '/';
+                full_path[full_pos] = '\0';
+            }
+        }
+        tar_copy_part(full_path, &full_pos, header->filename, 100, FAT32_MAX_PATH);
+        if (full_path[0] == '\0') {
             full_path[0] = '/';
-            int j = 0;
-            while (header->filename[j] && j < 254) {
-                full_path[j + 1] = header->filename[j];
-                j++;
-            }
-            full_path[j + 1] = '\0';
-        } else {
-            int j = 0;
-            while (header->filename[j] && j < 255) {
-                full_path[j] = header->filename[j];
-                j++;
-            }
-            full_path[j] = '\0';
+            full_path[1] = '\0';
         }
 
         if (header->typeflag == '5') {
@@ -100,9 +110,9 @@ void tar_parse(void *archive, uint64_t archive_size) {
         } else if (header->typeflag == '0' || header->typeflag == '\0') {
             // It's a normal file
             // First ensure the parent directory exists
-            char parent_path[256];
+            char parent_path[FAT32_MAX_PATH];
             int last_slash = -1;
-            for (int j = 0; full_path[j]; j++) {
+            for (int j = 0; full_path[j] && j < FAT32_MAX_PATH - 1; j++) {
                 parent_path[j] = full_path[j];
                 if (full_path[j] == '/') {
                     last_slash = j;
@@ -120,8 +130,17 @@ void tar_parse(void *archive, uint64_t archive_size) {
             
             FAT32_FileHandle *fh = fat32_open(full_path, "w");
             if (fh && fh->valid) {
-                fat32_write(fh, ptr + 512, file_size);
+                int written = fat32_write(fh, ptr + 512, (int)file_size);
+                if (written != (int)file_size) {
+                    serial_write("[TAR] ERROR: partial extract ");
+                    serial_write(full_path);
+                    serial_write("\n");
+                }
                 fat32_close(fh);
+            } else {
+                serial_write("[TAR] ERROR: failed to create ");
+                serial_write(full_path);
+                serial_write("\n");
             }
         }
         

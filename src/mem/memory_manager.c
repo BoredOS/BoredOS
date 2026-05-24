@@ -61,21 +61,49 @@ extern void serial_write(const char *str);
 extern void serial_write_num(uint32_t n);
 
 void mem_memset(void *dest, int val, size_t len) {
-    uint8_t *p = (uint8_t *)dest;
-    while (len--) *p++ = (uint8_t)val;
+    void *d = dest;
+    uint8_t byte = (uint8_t)val;
+    uint64_t pattern = byte;
+    pattern |= pattern << 8;
+    pattern |= pattern << 16;
+    pattern |= pattern << 32;
+
+    size_t qwords = len / 8;
+    size_t bytes = len % 8;
+    asm volatile("cld\nrep stosq" : "+D"(d), "+c"(qwords) : "a"(pattern) : "memory");
+    asm volatile("rep stosb" : "+D"(d), "+c"(bytes) : "a"(byte) : "memory");
 }
 
 void mem_memcpy(void *dest, const void *src, size_t len) {
-    uint8_t *d = (uint8_t *)dest;
-    const uint8_t *s = (const uint8_t *)src;
-    while (len--) *d++ = *s++;
+    void *d = dest;
+    const void *s = src;
+    size_t qwords = len / 8;
+    size_t bytes = len % 8;
+    asm volatile("cld\nrep movsq" : "+D"(d), "+S"(s), "+c"(qwords) : : "memory");
+    asm volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(bytes) : : "memory");
 }
 
 static void mem_memmove(void *dest, const void *src, size_t len) {
-    uint8_t       *d = (uint8_t *)dest;
+    uint8_t *d = (uint8_t *)dest;
     const uint8_t *s = (const uint8_t *)src;
-    if (d < s) { while (len--) *d++ = *s++; }
-    else        { d += len; s += len; while (len--) *(--d) = *(--s); }
+    if (d == s || len == 0) {
+        return;
+    }
+    if (d < s || d >= s + len) {
+        mem_memcpy(dest, src, len);
+        return;
+    }
+
+    d += len - 1;
+    s += len - 1;
+    asm volatile(
+        "std\n"
+        "rep movsb\n"
+        "cld"
+        : "+D"(d), "+S"(s), "+c"(len)
+        :
+        : "memory"
+    );
 }
 
 static void  *_kmalloc_locked(size_t size, size_t alignment);
@@ -223,8 +251,10 @@ static void sort_block_list(void) {
     for (int i = 1; i < block_count; i++) {
         MemBlock key = block_list[i];
         int j = i - 1;
-        while (j >= 0 && (uintptr_t)block_list[j].address > (uintptr_t)key.address)
-            block_list[j + 1] = block_list[j--];
+        while (j >= 0 && (uintptr_t)block_list[j].address > (uintptr_t)key.address) {
+            block_list[j + 1] = block_list[j];
+            j--;
+        }
         block_list[j + 1] = key;
     }
 }

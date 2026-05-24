@@ -1,6 +1,8 @@
 #!/bin/bash
-CC=x86_64-elf-gcc
-AR=x86_64-elf-ar
+set -e
+
+CC=${CC:-x86_64-elf-gcc}
+AR=${AR:-x86_64-elf-ar}
 CFLAGS="-O2 -m64 -march=x86-64 -fno-stack-protector -ffreestanding -nostdlib -I. -I./include -I../../../sdk/include"
 
 echo "Building libtcc1.a..."

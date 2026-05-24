@@ -11,12 +11,14 @@
 #include "wm.h"
 #include "spinlock.h"
 
+extern void serial_write(const char *str);
+
 // Locks for FAT32 operations (SMP safety)
 static spinlock_t ramfs_lock = SPINLOCK_INIT; // Protects the RAM-based filesystem (/)
 
 
-#define MAX_CLUSTERS 32768
-#define MAX_OPEN_HANDLES 32
+#define MAX_CLUSTERS 131072
+#define MAX_OPEN_HANDLES 2048
 
 // In-memory FAT table
 static uint32_t fat_table[MAX_CLUSTERS];
@@ -39,6 +41,7 @@ static FAT32_FileHandle open_handles[MAX_OPEN_HANDLES];
 static char current_dir[FAT32_MAX_PATH] = "/";
 static char current_drive = 'A';  // Backward compat only
 static int desktop_file_limit = -1;
+static bool ramfs_full_reported = false;
 
 // === RealFS Definitions ===
 
@@ -304,6 +307,7 @@ static FAT32_FileHandle* ramfs_find_free_handle(void) {
     for (int i = 0; i < MAX_OPEN_HANDLES; i++) {
         if (!open_handles[i].valid) return &open_handles[i];
     }
+    serial_write("[FAT32] ERROR: open handle pool exhausted\n");
     return NULL;
 }
 
@@ -325,6 +329,10 @@ static uint32_t ramfs_allocate_cluster(void) {
         }
     }
 
+    if (!ramfs_full_reported) {
+        serial_write("[FAT32] ERROR: RAMFS cluster pool exhausted\n");
+        ramfs_full_reported = true;
+    }
     return 0;
 }
 

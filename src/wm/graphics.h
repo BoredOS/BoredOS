@@ -34,6 +34,7 @@ void graphics_set_bg_pattern(const uint32_t *pattern);  // 128x128 pattern
 void graphics_set_bg_image(uint32_t *pixels, int w, int h);  // Full-screen wallpaper image
 void graphics_set_render_target(uint32_t *buffer, int w, int h);
 void graphics_blit_buffer(uint32_t *src, int dst_x, int dst_y, int w, int h);
+void graphics_blit_buffer_opaque(uint32_t *src, int dst_x, int dst_y, int w, int h);
 void graphics_copy_screenbuffer(uint32_t *dest);
 
 

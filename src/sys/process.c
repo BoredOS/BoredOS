@@ -234,6 +234,11 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
         new_proc->rsp = (uint64_t)stack_ptr;
     } else {
         // Kernel thread
+        if (entry_point == NULL) {
+            extern void work_queue_drain_loop(void);
+            entry_point = work_queue_drain_loop;
+        }
+
         uint64_t* stack_ptr = (uint64_t*)((uint64_t)kernel_stack + 32768);
         *(--stack_ptr) = 0x10;          // SS (Kernel Data)
         stack_ptr--;
@@ -261,7 +266,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
     asm volatile("fninit");
     new_proc->fpu_initialized = true;
     
-    new_proc->cpu_affinity = 0; // Non-ELF processes stay on BSP
+    new_proc->cpu_affinity = is_user ? 0 : smp_this_cpu_id();
     
     // Add to linked list
     new_proc->next = current_process[0]->next;

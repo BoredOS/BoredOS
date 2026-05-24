@@ -20,11 +20,20 @@ struct tm {
     int tm_isdst;
 };
 
+struct timespec {
+    time_t tv_sec;
+    long tv_nsec;
+};
+
 time_t time(time_t *out);
 clock_t clock(void);
+double difftime(time_t end, time_t beginning);
+char *asctime(const struct tm *tm);
+char *ctime(const time_t *timer);
 struct tm *localtime(const time_t *timer);
 struct tm *gmtime(const time_t *timer);
 size_t strftime(char *s, size_t max, const char *fmt, const struct tm *tm);
 time_t mktime(struct tm *tm);
+int timespec_get(struct timespec *ts, int base);
 
 #endif

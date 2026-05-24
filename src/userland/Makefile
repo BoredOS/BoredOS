@@ -1,42 +1,75 @@
 # Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
 # This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 # This header needs to maintain in any file it is present in, as per the GPL license terms.
-CC = x86_64-elf-gcc
+CROSS_BIN := $(firstword $(dir $(shell command -v x86_64-elf-gcc 2>/dev/null)) $(if $(wildcard /home/linuxbrew/.linuxbrew/bin/x86_64-elf-gcc),/home/linuxbrew/.linuxbrew/bin/))
+CC = $(CROSS_BIN)x86_64-elf-gcc
+CXX = $(CROSS_BIN)x86_64-elf-g++
 AS = nasm
-LD = x86_64-elf-ld
+LD = $(CROSS_BIN)x86_64-elf-ld
+AR := $(if $(wildcard $(CROSS_BIN)x86_64-elf-ar),$(CROSS_BIN)x86_64-elf-ar,ar)
 
-CFLAGS = -Wall -Wextra -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -I. -Ilibc -I../sys -I../wm
+CFLAGS = -Wall -Wextra -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -Wa,--noexecstack -I. -Ilibc -I../sys -I../wm
+CXXFLAGS = -Wall -Wextra -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -fno-exceptions -fno-rtti -Wa,--noexecstack -I. -Ilibc -I../sys -I../wm
 LDFLAGS = -m elf_x86_64 -nostdlib -static -no-pie -Ttext=0x40000000 --no-dynamic-linker -z text -z max-page-size=0x1000 -e _start
 
+.PHONY: all clean sdk
+
 BIN_DIR = bin
+REPO_ROOT = ../..
+OPENTTD_UPSTREAM_DIR ?= $(REPO_ROOT)/src/userland/games/openttd/upstream-15.3
+OPENTTD_UPSTREAM_BUILD ?= $(REPO_ROOT)/build/openttd-boredos-upstream-15.3
+OPENTTD_UPSTREAM_BIN = $(OPENTTD_UPSTREAM_BUILD)/openttd
 APP_METADATA_TOOL = ../../tools/gen_userland_note.sh
 APP_ICON_SOURCE_DIR = ../images/icons/colloid
 APP_METADATA_SOURCE_DOOM = games/doom/doomgeneric_boredos.c
 APP_METADATA_SOURCE_LUA = cli/third_party/lua/boredos_onelua.c
+APP_METADATA_SOURCE_OPENTTD = games/openttd/openttd_boredos_main.cpp
 APP_SOURCE_DIRS = . cli gui sys games net cli/third_party
 
 define app_source_for
-$(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_METADATA_SOURCE_LUA),$(if $(filter tcc,$1),cli/third_party/tcc/tcc.c,$(firstword $(foreach d,$(APP_SOURCE_DIRS),$(wildcard $(d)/$1.c))))))
+$(if $(filter doom,$1),$(APP_METADATA_SOURCE_DOOM),$(if $(filter lua,$1),$(APP_METADATA_SOURCE_LUA),$(if $(filter openttd,$1),$(APP_METADATA_SOURCE_OPENTTD),$(if $(filter tcc,$1),cli/third_party/tcc/tcc.c,$(firstword $(foreach d,$(APP_SOURCE_DIRS),$(wildcard $(d)/$1.c)) $(wildcard games/$1.cpp))))))
 endef
 
 LIBC_SOURCES = $(wildcard libc/*.c)
-LIBC_OBJS = $(patsubst libc/%.c, $(BIN_DIR)/libc_%.o, $(LIBC_SOURCES)) $(BIN_DIR)/crt0.o $(BIN_DIR)/libwidget.o $(BIN_DIR)/stb_image.o
+LIBC_CXX_SOURCES = $(wildcard libc/*.cpp)
+LIBC_OBJS = $(patsubst libc/%.c, $(BIN_DIR)/libc_%.o, $(LIBC_SOURCES)) $(patsubst libc/%.cpp, $(BIN_DIR)/libc_%.o, $(LIBC_CXX_SOURCES)) $(BIN_DIR)/crt0.o $(BIN_DIR)/libwidget.o $(BIN_DIR)/stb_image.o
 
 VPATH = cli gui sys games libc net cli/third_party
 vpath %.c cli gui sys games libc net cli/third_party
+vpath %.cpp games
 
-APP_SOURCES_FULL = $(wildcard cli/*.c gui/*.c sys/*.c games/*.c *.c net/*.c cli/third_party/*.c)
-APP_SOURCES = $(filter-out stb_image.c, $(APP_SOURCES_FULL))
-APP_ELFS = $(patsubst %.c, $(BIN_DIR)/%.elf, $(notdir $(APP_SOURCES)))
-APP_NAMES = $(sort $(basename $(notdir $(APP_SOURCES))) doom lua)
+APP_C_SOURCES_FULL = $(wildcard cli/*.c gui/*.c sys/*.c games/*.c *.c net/*.c cli/third_party/*.c)
+APP_C_SOURCES = $(filter-out stb_image.c, $(APP_C_SOURCES_FULL))
+APP_C_NAMES = $(basename $(notdir $(APP_C_SOURCES)))
+APP_CPP_SOURCES_FULL = $(wildcard games/*.cpp)
+APP_CPP_SOURCES = $(filter-out $(foreach n,$(APP_C_NAMES),games/$(n).cpp),$(APP_CPP_SOURCES_FULL))
+APP_CPP_NAMES = $(basename $(notdir $(APP_CPP_SOURCES)))
+APP_ELFS = $(patsubst %, $(BIN_DIR)/%.elf, $(APP_C_NAMES) $(APP_CPP_NAMES))
+APP_NAMES = $(sort $(APP_C_NAMES) $(APP_CPP_NAMES) doom lua)
 APP_NOTE_CSOURCES = $(patsubst %, $(BIN_DIR)/%.note.c, $(APP_NAMES))
 APP_NOTE_OBJS = $(patsubst %, $(BIN_DIR)/%.note.o, $(APP_NAMES))
 
 DOOM_SOURCES = $(wildcard games/doom/*.c)
 DOOM_OBJS = $(patsubst games/doom/%.c, $(BIN_DIR)/%.o, $(DOOM_SOURCES))
 
+OPENTTD_UPSTREAM_PORT_SOURCES = \
+	games/openttd/boredos_platform.cpp \
+	games/openttd/boredos_cxx_runtime.cpp \
+	games/openttd/boredos_video.cpp \
+	games/openttd/boredos_input.cpp \
+	games/openttd/boredos_timer.cpp \
+	games/openttd/boredos_files.cpp \
+	games/openttd/boredos_sound_null.cpp \
+	games/openttd/boredos_upstream_bridge.cpp \
+	games/openttd/cmake/boredos-toolchain.cmake \
+	$(OPENTTD_UPSTREAM_DIR)/src/os/boredos/boredos_main.cpp \
+	$(OPENTTD_UPSTREAM_DIR)/src/video/boredos_v.cpp \
+	$(OPENTTD_UPSTREAM_DIR)/src/video/boredos_v.h \
+	$(OPENTTD_UPSTREAM_DIR)/src/openttd.cpp \
+	$(REPO_ROOT)/tools/build_openttd_boredos_upstream.sh
+
 LUA_DIR = cli/third_party/lua
-LUA_CFLAGS = -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -isystem $(LUA_DIR)/sysinclude -I. -Ilibc -I$(LUA_DIR) -DLUA_USE_C89 -Wno-conversion -Wno-sign-conversion -Wno-double-promotion -Wno-unused-parameter -Wno-missing-declarations -Wno-shadow -Wno-undef -Wno-redundant-decls -Wno-old-style-definition -Wno-missing-prototypes -Wno-implicit-fallthrough -Wno-type-limits
+LUA_CFLAGS = -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -m64 -march=x86-64 -mno-red-zone -Wa,--noexecstack -isystem $(LUA_DIR)/sysinclude -I. -Ilibc -I$(LUA_DIR) -DLUA_USE_C89 -Wno-conversion -Wno-sign-conversion -Wno-double-promotion -Wno-unused-parameter -Wno-missing-declarations -Wno-shadow -Wno-undef -Wno-redundant-decls -Wno-old-style-definition -Wno-missing-prototypes -Wno-implicit-fallthrough -Wno-type-limits
 
 all: $(BIN_DIR) $(APP_ELFS) $(BIN_DIR)/doom.elf $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o
 
@@ -48,6 +81,9 @@ $(BIN_DIR)/crt0.o: crt0.asm
 
 $(BIN_DIR)/libc_%.o: libc/%.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
+
+$(BIN_DIR)/libc_%.o: libc/%.cpp | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 $(BIN_DIR)/libwidget.o: ../wm/libwidget.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -74,6 +110,9 @@ $(BIN_DIR)/%.note.o: $(BIN_DIR)/%.note.c
 $(BIN_DIR)/%.o: %.c | $(BIN_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
+$(BIN_DIR)/%.o: %.cpp | $(BIN_DIR)
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
 $(BIN_DIR)/viewer.elf: $(LIBC_OBJS) $(BIN_DIR)/viewer.o $(BIN_DIR)/viewer.note.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
@@ -95,6 +134,10 @@ $(BIN_DIR)/%.o: games/doom/%.c | $(BIN_DIR)
 $(BIN_DIR)/doom.elf: $(LIBC_OBJS) $(DOOM_OBJS) $(BIN_DIR)/doom.note.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
+$(BIN_DIR)/openttd.elf: $(OPENTTD_UPSTREAM_PORT_SOURCES) | $(BIN_DIR)
+	cd $(REPO_ROOT) && sh tools/build_openttd_boredos_upstream.sh
+	cp $(OPENTTD_UPSTREAM_BIN) $@
+
 $(BIN_DIR)/%.elf: $(LIBC_OBJS) $(BIN_DIR)/%.o $(BIN_DIR)/%.note.o
 	$(LD) $(LDFLAGS) $^ -o $@
 
@@ -108,9 +151,9 @@ $(BIN_DIR)/lua.elf: $(LIBC_OBJS) $(BIN_DIR)/lua_onelua.o $(BIN_DIR)/lua.note.o
 # TCC - Tiny C Compiler
 TCC_DIR = cli/third_party/tcc
 $(BIN_DIR)/tcc.elf: $(LIBC_OBJS) $(BIN_DIR)/tcc.note.o sdk $(TCC_DIR)/tcc.c $(TCC_DIR)/config.h $(TCC_DIR)/tcc.h
-	cd $(TCC_DIR) && x86_64-elf-gcc -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie -DONE_SOURCE=1 -DTARGETOS_BoredOS=1 -I. -I../../../sdk/include -Ttext=0x40000000 tcc.c -o tcc.elf ../../../sdk/lib/libboredos.a
+	cd $(TCC_DIR) && $(CC) -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie -Wa,--noexecstack -Wno-return-type -DONE_SOURCE=1 -DTARGETOS_BoredOS=1 -I. -I../../../sdk/include -Ttext=0x40000000 tcc.c -o tcc.elf ../../../sdk/lib/libboredos.a
 	cp $(TCC_DIR)/tcc.elf $(BIN_DIR)/tcc.elf
-	cd $(TCC_DIR) && sh build_libtcc1.sh
+	cd $(TCC_DIR) && CC="$(CC)" AR="$(AR)" sh build_libtcc1.sh
 
 # SDK target
 SDK_DIR = sdk
@@ -118,10 +161,10 @@ sdk: $(LIBC_OBJS) $(BIN_DIR)/libui.o
 	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include/sys
 	cp libc/*.h $(SDK_DIR)/include/
 	cp libc/sys/*.h $(SDK_DIR)/include/sys/
-	x86_64-elf-ar rcs $(SDK_DIR)/lib/libboredos.a $(LIBC_OBJS)
+	$(AR) rcs $(SDK_DIR)/lib/libboredos.a $(LIBC_OBJS)
 	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libc.a
 	cp $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libm.a
-	x86_64-elf-ar rcs $(SDK_DIR)/lib/libui.a $(BIN_DIR)/libui.o
+	$(AR) rcs $(SDK_DIR)/lib/libui.a $(BIN_DIR)/libui.o
 
 clean:
 	rm -rf $(BIN_DIR) $(SDK_DIR)

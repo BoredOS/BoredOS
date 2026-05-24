@@ -123,6 +123,7 @@ static void update_proc_list(void) {
     for (int i = 0; i < count; i++) {
         if (entries[i].is_directory) {
             // Check if name is numeric (PID)
+            if (entries[i].name[0] == 0) continue;
             bool numeric = true;
             for (int j = 0; entries[i].name[j]; j++) {
                 if (entries[i].name[j] < '0' || entries[i].name[j] > '9') {
@@ -151,8 +152,10 @@ static void update_proc_list(void) {
                     total_ticks_now += ticks;
 
                     if (proc_count < 64 && !is_idle) {
-                        proc_list[proc_count].pid = pid;
+                        int status_pid = find_value(buf, "PID");
+                        proc_list[proc_count].pid = status_pid > 0 ? status_pid : pid;
                         find_string(buf, "Name", proc_list[proc_count].name, 64);
+                        if (proc_list[proc_count].name[0] == 0) strcpy(proc_list[proc_count].name, entries[i].name);
                         proc_list[proc_count].used_memory = (size_t)find_value(buf, "Memory") * 1024;
                         proc_list[proc_count].ticks = ticks;
                         proc_list[proc_count].is_idle = is_idle;

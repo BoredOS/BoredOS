@@ -337,6 +337,46 @@ int sys_tcp_close(void) {
     return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_TCP_CLOSE, 0);
 }
 
+int sys_socket_create(int type) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_SOCKET_CREATE, (uint64_t)type);
+}
+
+int sys_socket_connect(int fd, const net_ipv4_address_t *ip, uint16_t port) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_SOCKET_CONNECT, (uint64_t)fd, (uint64_t)ip, (uint64_t)port);
+}
+
+int sys_socket_connect_start(int fd, const net_ipv4_address_t *ip, uint16_t port) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_SOCKET_CONNECT_START, (uint64_t)fd, (uint64_t)ip, (uint64_t)port);
+}
+
+int sys_socket_send(int fd, const void *data, size_t len) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_SOCKET_SEND, (uint64_t)fd, (uint64_t)data, (uint64_t)len);
+}
+
+int sys_socket_recv(int fd, void *buf, size_t max_len) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_SOCKET_RECV, (uint64_t)fd, (uint64_t)buf, (uint64_t)max_len);
+}
+
+int sys_socket_recv_nb(int fd, void *buf, size_t max_len) {
+    return (int)syscall4(SYS_SYSTEM, SYSTEM_CMD_SOCKET_RECV_NB, (uint64_t)fd, (uint64_t)buf, (uint64_t)max_len);
+}
+
+int sys_socket_close(int fd) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_SOCKET_CLOSE, (uint64_t)fd);
+}
+
+int sys_socket_poll(int fd) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_SOCKET_POLL, (uint64_t)fd);
+}
+
+int sys_socket_error(int fd) {
+    return (int)syscall2(SYS_SYSTEM, SYSTEM_CMD_SOCKET_ERROR, (uint64_t)fd);
+}
+
+void sys_network_poll(void) {
+    syscall2(SYS_SYSTEM, SYSTEM_CMD_NETWORK_POLL, 0);
+}
+
 int sys_dns_lookup(const char *name, net_ipv4_address_t *out_ip) {
     return (int)syscall3(SYS_SYSTEM, SYSTEM_CMD_DNS_LOOKUP, (uint64_t)name, (uint64_t)out_ip);
 }

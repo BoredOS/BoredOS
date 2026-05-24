@@ -75,6 +75,12 @@
 #define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 51
 #define SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE 52
 #define SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE 53
+#define SYSTEM_CMD_SOCKET_CREATE 54
+#define SYSTEM_CMD_SOCKET_CONNECT 55
+#define SYSTEM_CMD_SOCKET_SEND 56
+#define SYSTEM_CMD_SOCKET_RECV 57
+#define SYSTEM_CMD_SOCKET_RECV_NB 58
+#define SYSTEM_CMD_SOCKET_CLOSE 59
 #define SYSTEM_CMD_SET_TEXT_COLOR 29
 #define SYSTEM_CMD_SET_WALLPAPER_PATH 31
 #define SYSTEM_CMD_RTC_SET 32
@@ -110,6 +116,10 @@
 #define SYSTEM_CMD_SIGPENDING 75
 #define SYSTEM_CMD_GET_ELF_METADATA 76
 #define SYSTEM_CMD_GET_ELF_PRIMARY_IMAGE 77
+#define SYSTEM_CMD_SOCKET_POLL 78
+#define SYSTEM_CMD_NETWORK_POLL 79
+#define SYSTEM_CMD_SOCKET_CONNECT_START 80
+#define SYSTEM_CMD_SOCKET_ERROR 81
 
 #define SPAWN_FLAG_TERMINAL 0x1
 #define SPAWN_FLAG_INHERIT_TTY 0x2
@@ -271,6 +281,16 @@ int sys_tcp_send(const void *data, size_t len);
 int sys_tcp_recv(void *buf, size_t max_len);
 int sys_tcp_recv_nb(void *buf, size_t max_len);
 int sys_tcp_close(void);
+int sys_socket_create(int type);
+int sys_socket_connect(int fd, const net_ipv4_address_t *ip, uint16_t port);
+int sys_socket_connect_start(int fd, const net_ipv4_address_t *ip, uint16_t port);
+int sys_socket_send(int fd, const void *data, size_t len);
+int sys_socket_recv(int fd, void *buf, size_t max_len);
+int sys_socket_recv_nb(int fd, void *buf, size_t max_len);
+int sys_socket_close(int fd);
+int sys_socket_poll(int fd);
+int sys_socket_error(int fd);
+void sys_network_poll(void);
 int sys_dns_lookup(const char *name, net_ipv4_address_t *out_ip);
 int sys_set_dns_server(const net_ipv4_address_t *ip);
 void sys_network_force_unlock(void);

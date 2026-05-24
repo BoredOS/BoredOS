@@ -56,13 +56,22 @@ static int g_rt_height[MAX_RENDER_CPUS] = {0};
 
 static ttf_font_t *g_current_ttf = NULL;
 
+static inline void graphics_fill32(uint32_t *dest, uint32_t color, size_t count) {
+    if (count == 0) return;
+    asm volatile(
+        "cld\n"
+        "rep stosl"
+        : "+D"(dest), "+c"(count)
+        : "a"(color)
+        : "memory"
+    );
+}
+
 void graphics_init(struct limine_framebuffer *fb) {
     g_fb = fb;
     g_dirty.active = false;
     // Initialize back buffer to black
-    for (int i = 0; i < MAX_FB_WIDTH * MAX_FB_HEIGHT; i++) {
-        g_back_buffer[i] = 0;
-    }
+    graphics_fill32(g_back_buffer, 0, MAX_FB_WIDTH * MAX_FB_HEIGHT);
 }
 
 void graphics_init_fonts(void) {
@@ -88,9 +97,7 @@ void graphics_update_resolution(int width, int height, int bpp, void* fb_addr, i
     g_color_mode = color_mode;
     
     // Clear back buffer
-    for (int i = 0; i < MAX_FB_WIDTH * MAX_FB_HEIGHT; i++) {
-        g_back_buffer[i] = 0;
-    }
+    graphics_fill32(g_back_buffer, 0, MAX_FB_WIDTH * MAX_FB_HEIGHT);
     
     // Clear dirty rect
     g_dirty.active = false;
@@ -272,9 +279,7 @@ void draw_rect(int x, int y, int w, int h, uint32_t color) {
         for (int i = y1; i < y2; i++) {
             uint32_t *row = &g_render_target[cpu][i * g_rt_width[cpu] + x1];
             int len = x2 - x1;
-            for (int j = 0; j < len; j++) {
-                row[j] = color;
-            }
+            graphics_fill32(row, color, (size_t)len);
         }
         return;
     }
@@ -299,9 +304,7 @@ void draw_rect(int x, int y, int w, int h, uint32_t color) {
     for (int i = y1; i < y2; i++) {
         uint32_t *row = &g_back_buffer[i * g_fb->width + x1];
         int len = x2 - x1;
-        for (int j = 0; j < len; j++) {
-            row[j] = color;
-        }
+        graphics_fill32(row, color, (size_t)len);
     }
 }
 
@@ -846,10 +849,7 @@ void draw_boredos_logo(int x, int y, int scale) {
 // Double buffering functions
 void graphics_clear_back_buffer(uint32_t color) {
     if (!g_fb) return;
-    uint32_t *buf = g_back_buffer;
-    for (int i = 0; i < (int)g_fb->width * (int)g_fb->height; i++) {
-        *buf++ = color;
-    }
+    graphics_fill32(g_back_buffer, color, (size_t)g_fb->width * (size_t)g_fb->height);
 }
 
 void graphics_flip_buffer(void) {
@@ -1088,6 +1088,38 @@ void graphics_blit_buffer(uint32_t *src, int dst_x, int dst_y, int w, int h) {
         }
     }
 }
+
+void graphics_blit_buffer_opaque(uint32_t *src, int dst_x, int dst_y, int w, int h) {
+    if (!g_fb || !src) return;
+    int sw = get_screen_width();
+    int sh = get_screen_height();
+
+    uint32_t cpu = smp_this_cpu_id();
+    int cx1 = 0, cy1 = 0, cx2 = sw, cy2 = sh;
+    if (g_clip_enabled[cpu]) {
+        int ptr = g_clip_stack_ptr[cpu];
+        cx1 = g_clip_stack_x[cpu][ptr];
+        cy1 = g_clip_stack_y[cpu][ptr];
+        cx2 = cx1 + g_clip_stack_w[cpu][ptr];
+        cy2 = cy1 + g_clip_stack_h[cpu][ptr];
+    }
+
+    int x1 = dst_x, y1 = dst_y, x2 = dst_x + w, y2 = dst_y + h;
+    if (x1 < cx1) x1 = cx1;
+    if (y1 < cy1) y1 = cy1;
+    if (x2 > cx2) x2 = cx2;
+    if (y2 > cy2) y2 = cy2;
+
+    if (x1 >= x2 || y1 >= y2) return;
+
+    extern void mem_memcpy(void *dest, const void *src, size_t len);
+    int len = x2 - x1;
+    for (int y = y1; y < y2; y++) {
+        uint32_t *dst_row = &g_back_buffer[y * sw + x1];
+        uint32_t *src_row = &src[(y - dst_y) * w + (x1 - dst_x)];
+        mem_memcpy(dst_row, src_row, (size_t)len * sizeof(uint32_t));
+    }
+}
 void graphics_scroll_back_buffer(int lines) {
     if (!g_fb || lines <= 0 || lines >= (int)g_fb->height) return;
     
@@ -1097,16 +1129,17 @@ void graphics_scroll_back_buffer(int lines) {
 
     int sw = (int)g_fb->width;
     int sh = (int)g_fb->height;
+    extern void mem_memcpy(void *dest, const void *src, size_t len);
     
     for (int y = 0; y < sh - lines; y++) {
         uint32_t *dst = &g_back_buffer[y * sw];
         uint32_t *src = &g_back_buffer[(y + lines) * sw];
-        for (int x = 0; x < sw; x++) dst[x] = src[x];
+        mem_memcpy(dst, src, (size_t)sw * sizeof(uint32_t));
     }
     
     for (int y = sh - lines; y < sh; y++) {
         uint32_t *dst = &g_back_buffer[y * sw];
-        for (int x = 0; x < sw; x++) dst[x] = 0;
+        graphics_fill32(dst, 0, (size_t)sw);
     }
 
     wm_lock_release(rflags);

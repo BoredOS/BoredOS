@@ -109,6 +109,7 @@ __attribute__((weak)) char *getenv(const char *name) {
 }
 
 __attribute__((weak)) void abort(void) {
+    syscall2(8, 0, (uint64_t)"[libc] abort()\n");
     sys_exit(1);
     while (1) {}
 }

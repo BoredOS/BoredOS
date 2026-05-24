@@ -2,8 +2,7 @@
 #define BOREDOS_LIBC_SYS_STAT_H
 
 #include "types.h"
-
-typedef long time_t;
+#include <time.h>
 
 struct stat {
     unsigned long st_dev;

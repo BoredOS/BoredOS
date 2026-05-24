@@ -89,3 +89,27 @@ __attribute__((weak)) double acos(double x) {
     }
     return M_PI / 2.0 - asin(x);
 }
+
+__attribute__((weak)) float sinf(float x) { return (float)sin((double)x); }
+__attribute__((weak)) float cosf(float x) { return (float)cos((double)x); }
+__attribute__((weak)) float tanf(float x) { return (float)tan((double)x); }
+__attribute__((weak)) float sqrtf(float x) { return (float)sqrt((double)x); }
+__attribute__((weak)) float logf(float x) { return (float)log((double)x); }
+__attribute__((weak)) float log2f(float x) { return (float)log2((double)x); }
+__attribute__((weak)) float log10f(float x) { return (float)log10((double)x); }
+__attribute__((weak)) float expf(float x) { return (float)exp((double)x); }
+__attribute__((weak)) float powf(float base, float exponent) { return (float)pow((double)base, (double)exponent); }
+__attribute__((weak)) float atan2f(float y, float x) { return (float)atan2((double)y, (double)x); }
+__attribute__((weak)) float asinf(float x) { return (float)asin((double)x); }
+__attribute__((weak)) float acosf(float x) { return (float)acos((double)x); }
+__attribute__((weak)) double atan(double x) { return atan2(x, 1.0); }
+__attribute__((weak)) float atanf(float x) { return (float)atan((double)x); }
+__attribute__((weak)) float fabsf(float x) { return x < 0.0f ? -x : x; }
+__attribute__((weak)) float fmodf(float x, float y) { return (float)fmod((double)x, (double)y); }
+__attribute__((weak)) float floorf(float x) { return (float)floor((double)x); }
+__attribute__((weak)) float ceilf(float x) { return (float)ceil((double)x); }
+
+__attribute__((weak)) int abs(int x)
+{
+    return x < 0 ? -x : x;
+}

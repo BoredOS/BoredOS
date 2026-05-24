@@ -406,7 +406,7 @@ int procfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entries, in
 
         extern process_t processes[];
         for (int i = 0; i < 16 && out < max; i++) {
-            if (processes[i].pid != 0xFFFFFFFF) {
+            if (processes[i].pid != 0xFFFFFFFF && !processes[i].exited && !processes[i].kill_pending) {
                 itoa(processes[i].pid, entries[out].name);
                 entries[out].is_directory = 1;
                 entries[out].size = 0;

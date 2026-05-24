@@ -11,16 +11,21 @@ typedef struct BlockMeta {
 
 #define META_SIZE sizeof(BlockMeta)
 #define MIN_SPLIT_SIZE 64
-#define ALIGN8(x) (((x) + 7) & ~(size_t)7)
+#define MALLOC_ALIGNMENT 16
+#define ALIGN_UP(x, a) (((x) + ((a) - 1)) & ~(size_t)((a) - 1))
+#define ALIGN_MALLOC(x) ALIGN_UP((x), MALLOC_ALIGNMENT)
 
 static BlockMeta *heap_head = NULL;
 static BlockMeta *heap_tail = NULL;
 
 static BlockMeta *request_space(size_t size) {
-    BlockMeta *block = (BlockMeta *)sys_sbrk(0);
-    void *request = sys_sbrk(size + META_SIZE);
+    uintptr_t current_break = (uintptr_t)sys_sbrk(0);
+    uintptr_t aligned_break = ALIGN_UP(current_break, MALLOC_ALIGNMENT);
+    size_t padding = aligned_break - current_break;
+    void *request = sys_sbrk(padding + size + META_SIZE);
     if (request == (void*)-1) return NULL;
 
+    BlockMeta *block = (BlockMeta *)aligned_break;
     block->size = size;
     block->free = 0;
     block->next = NULL;
@@ -53,7 +58,7 @@ static void split_block(BlockMeta *block, size_t size) {
 void *malloc(size_t size) {
     if (size == 0) return NULL;
 
-    size = ALIGN8(size);
+    size = ALIGN_MALLOC(size);
 
     // First-fit search (faster than best-fit for large heaps)
     BlockMeta *current = heap_head;
@@ -136,28 +141,50 @@ void *realloc(void *ptr, size_t size) {
 }
 
 void *memset(void *s, int c, size_t n) {
-    unsigned char *p = (unsigned char *)s;
-    while (n--) *p++ = (unsigned char)c;
+    void *d = s;
+    unsigned char byte = (unsigned char)c;
+    unsigned long pattern = byte;
+    pattern |= pattern << 8;
+    pattern |= pattern << 16;
+    pattern |= pattern << 32;
+
+    size_t qwords = n / 8;
+    size_t bytes = n % 8;
+    asm volatile("cld\nrep stosq" : "+D"(d), "+c"(qwords) : "a"(pattern) : "memory");
+    asm volatile("rep stosb" : "+D"(d), "+c"(bytes) : "a"(byte) : "memory");
     return s;
 }
 
 void *memcpy(void *dest, const void *src, size_t n) {
-    unsigned char *d = (unsigned char *)dest;
-    const unsigned char *s = (const unsigned char *)src;
-    while (n--) *d++ = *s++;
+    void *d = dest;
+    const void *s = src;
+    size_t qwords = n / 8;
+    size_t bytes = n % 8;
+    asm volatile("cld\nrep movsq" : "+D"(d), "+S"(s), "+c"(qwords) : : "memory");
+    asm volatile("rep movsb" : "+D"(d), "+S"(s), "+c"(bytes) : : "memory");
     return dest;
 }
 
 void *memmove(void *dest, const void *src, size_t n) {
     unsigned char *d = (unsigned char *)dest;
     const unsigned char *s = (const unsigned char *)src;
-    if (d < s) {
-        while (n--) *d++ = *s++;
-    } else {
-        d += n;
-        s += n;
-        while (n--) *--d = *--s;
+    if (d == s || n == 0) {
+        return dest;
     }
+    if (d < s || d >= s + n) {
+        return memcpy(dest, src, n);
+    }
+
+    d += n - 1;
+    s += n - 1;
+    asm volatile(
+        "std\n"
+        "rep movsb\n"
+        "cld"
+        : "+D"(d), "+S"(s), "+c"(n)
+        :
+        : "memory"
+    );
     return dest;
 }
 
@@ -340,6 +367,9 @@ void sleep(int ms) {
     sys_system(SYSTEM_CMD_SLEEP, ms, 0, 0, 0);
 }
 
+void __cxa_finalize(void *dso_handle);
+
 void exit(int status) {
+    __cxa_finalize(0);
     sys_exit(status);
 }

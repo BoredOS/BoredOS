@@ -10,7 +10,7 @@
 #include "gui_ipc.h"
 
 #define MAX_GUI_EVENTS 32
-#define MAX_PROCESS_FDS 16
+#define MAX_PROCESS_FDS 128
 #define MAX_SIGNALS 32
 
 #define PROC_STATE_RUNNING 0
@@ -153,4 +153,3 @@ void process_push_gui_event(process_t *proc, gui_event_t *ev);
 process_t* process_get_by_ui_window(void* win);
 
 #endif
-

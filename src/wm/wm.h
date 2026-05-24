@@ -55,6 +55,7 @@ struct Window {
     void *data;   
     uint32_t *pixels; 
     uint32_t *comp_pixels; 
+    bool client_opaque;
     void *font;
     spinlock_t lock;
     

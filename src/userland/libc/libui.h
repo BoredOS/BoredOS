@@ -12,6 +12,9 @@
 #define GUI_CMD_GET_EVENT     5
 #define GUI_CMD_DRAW_ROUNDED_RECT_FILLED 6
 #define GUI_CMD_DRAW_IMAGE    7
+#define GUI_CMD_DRAW_IMAGE_OPAQUE 54
+#define GUI_CMD_DRAW_IMAGE_OPAQUE_STRIDED 55
+#define GUI_CMD_PRESENT_IMAGE_OPAQUE_STRIDED 56
 #define GUI_CMD_GET_STRING_WIDTH 8
 #define GUI_CMD_GET_FONT_HEIGHT  9
 #define GUI_CMD_WINDOW_SET_RESIZABLE 14
@@ -62,6 +65,9 @@ void ui_draw_rounded_rect_filled(ui_window_t win, int x, int y, int w, int h, in
 void ui_draw_string(ui_window_t win, int x, int y, const char *str, uint32_t color);
 void ui_mark_dirty(ui_window_t win, int x, int y, int w, int h);
 void ui_draw_image(ui_window_t win, int x, int y, int w, int h, uint32_t *image_data);
+void ui_draw_image_opaque(ui_window_t win, int x, int y, int w, int h, const uint32_t *image_data);
+void ui_draw_image_opaque_strided(ui_window_t win, int x, int y, int w, int h, int stride, const uint32_t *image_data);
+void ui_present_image_opaque_strided(ui_window_t win, int x, int y, int w, int h, int stride, const uint32_t *image_data);
 uint32_t ui_get_string_width(const char *str);
 uint32_t ui_get_font_height(void);
 void ui_get_screen_size(uint64_t *out_w, uint64_t *out_h);

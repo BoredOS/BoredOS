@@ -293,8 +293,6 @@ static void lumos_update_search(void) {
     
     int sw = get_screen_width();
     int sh = get_screen_height();
-    int modal_height = LUMOS_SEARCH_HEIGHT + (lumos_state.result_count * LUMOS_RESULT_HEIGHT) + 10;
-    int modal_y = (sh * 2 / 5) - (modal_height / 2);
     
     graphics_mark_dirty(0, 0, sw, sh);
     force_redraw = true;
@@ -861,7 +859,7 @@ static uint32_t* thumb_cache_decode(const char *path);
 #define DOCK_HEIGHT 60
 #define DOCK_VERTICAL_MARGIN 6
 #define DOCK_BG_PADDING 12
-#define DOCK_ICON_COUNT 12
+#define DOCK_ICON_COUNT 13
 #define DOCK_ICON_SIZE 48
 #define DOCK_ICON_PIXELS (DOCK_ICON_SIZE * DOCK_ICON_SIZE)
 #define DOCK_ICON_BASE_PATH "/Library/images/icons/colloid/"
@@ -882,6 +880,7 @@ enum {
     DOCK_SLOT_TASKMAN = 9,
     DOCK_SLOT_CLOCK = 10,
     DOCK_SLOT_WORD = 11,
+    DOCK_SLOT_OPENTTD = 12,
 };
 
 typedef struct {
@@ -908,6 +907,7 @@ static const dock_default_item_t dock_default_items[] = {
     {"Grapher", "/bin/grapher.elf", DOCK_SLOT_GRAPHER},
     {"Terminal", "/bin/terminal.elf", DOCK_SLOT_TERMINAL},
     {"Minesweeper", "/bin/minesweeper.elf", DOCK_SLOT_MINESWEEPER},
+    {"OpenTTD", "/bin/openttd.elf", DOCK_SLOT_OPENTTD},
     {"Paint", "/bin/paint.elf", DOCK_SLOT_PAINT},
     {"Task Manager", "/bin/taskman.elf", DOCK_SLOT_TASKMAN},
     {"Clock", "/bin/clock.elf", DOCK_SLOT_CLOCK},
@@ -940,6 +940,7 @@ static dock_icon_entry_t dock_icons[DOCK_ICON_COUNT] = {
     {"utilities-system-monitor.png", DOCK_ICON_UNTRIED, {0}},
     {"preferences-system-time.png", DOCK_ICON_UNTRIED, {0}},
     {"libreoffice-writer.png", DOCK_ICON_UNTRIED, {0}},
+    {"applications-games.png", DOCK_ICON_UNTRIED, {0}},
 };
 
 uint32_t blend_src_over_dst(uint32_t dst, uint32_t src) {
@@ -1242,6 +1243,7 @@ static int dock_icon_slot_for_target(const char *target, const char *label) {
     (void)label;
     if (!target || !target[0]) return DOCK_SLOT_FILES;
 
+    if (str_eq(target, "/bin/openttd.elf") != 0) return DOCK_SLOT_OPENTTD;
     if (str_eq(target, "/") != 0 || str_eq(target, "/root") != 0 || fat32_is_directory(target)) {
         return DOCK_SLOT_FILES;
     }
@@ -1383,6 +1385,16 @@ static void dock_seed_defaults(void) {
     }
 }
 
+static void dock_ensure_default_pins(void) {
+    if (dock_find_item_by_target("/bin/openttd.elf") < 0) {
+        int insert_index = dock_find_item_by_target("/bin/minesweeper.elf");
+        if (insert_index < 0) insert_index = dock_item_count;
+        else insert_index++;
+        dock_insert_item(insert_index, "OpenTTD", "/bin/openttd.elf", DOCK_SLOT_OPENTTD);
+        dock_save_config();
+    }
+}
+
 static void dock_load_config(void) {
     dock_item_count = 0;
 
@@ -1457,6 +1469,8 @@ static void dock_load_config(void) {
         dock_seed_defaults();
         dock_save_config();
     }
+
+    dock_ensure_default_pins();
 }
 
 static bool dock_can_pin_path(const char *path) {
@@ -2293,8 +2307,12 @@ void draw_window(Window *win) {
     draw_rounded_rect_filled(win->x, win->y + 20, win->w, win->h - 20, 8, COLOR_DARK_BG);
     draw_rect(win->x, win->y + 20, win->w, 8, COLOR_DARK_BG);
     
-    if (win->comp_pixels) {
+    if (win->client_opaque && win->comp_pixels) {
+        graphics_blit_buffer_opaque(win->comp_pixels, win->x, win->y + 20, win->w, win->h - 20);
+    } else if (win->comp_pixels) {
         graphics_blit_buffer(win->comp_pixels, win->x, win->y + 20, win->w, win->h - 20);
+    } else if (win->client_opaque && win->pixels) {
+        graphics_blit_buffer_opaque(win->pixels, win->x, win->y + 20, win->w, win->h - 20);
     } else if (win->pixels) {
         graphics_blit_buffer(win->pixels, win->x, win->y + 20, win->w, win->h - 20);
     }
@@ -2373,26 +2391,6 @@ void draw_cursor(int x, int y) {
     }
 }
 
-// Erase cursor by redrawing the background in that area
-static void erase_cursor(int x, int y) {
-    int sw = get_screen_width();
-    int sh = get_screen_height();
-    
-    // Clamp to screen
-    int x1 = x < 0 ? 0 : x;
-    int y1 = y < 0 ? 0 : y;
-    int x2 = x + cursor_current_width() > sw ? sw : x + cursor_current_width();
-    int y2 = y + cursor_current_height() > sh ? sh : y + cursor_current_height();
-    int w = x2 - x1;
-    int h = y2 - y1;
-    
-    if (y1 < sh - 28) {
-        draw_rect(x1, y1, w, h, COLOR_TEAL);
-    } else {
-        draw_rect(x1, y1, w, h, COLOR_GRAY);
-    }
-}
-
 // --- Clock ---
 
 static uint8_t rtc_read(uint8_t reg) {
@@ -2434,6 +2432,7 @@ bool rect_contains(int x, int y, int w, int h, int px, int py) {
 }
 
 static void wm_render_lumos(int y_start, int y_end, DirtyRect dirty) {
+    (void)dirty;
     if (!lumos_state.visible) {
         return;
     }
@@ -2574,6 +2573,28 @@ static void wm_render_lumos(int y_start, int y_end, DirtyRect dirty) {
 static Window *sorted_windows_cache[32];
 static int sorted_window_count_cache = 0;
 
+static Window *wm_top_opaque_client_covering_region(int x, int y, int w, int h) {
+    if (w <= 0 || h <= 0 || sorted_window_count_cache <= 0) return NULL;
+
+    for (int i = sorted_window_count_cache - 1; i >= 0; i--) {
+        Window *win = sorted_windows_cache[i];
+        if (!win || !win->visible) continue;
+        if (!win->client_opaque || (!win->comp_pixels && !win->pixels)) return NULL;
+
+        int client_x1 = win->x;
+        int client_y1 = win->y + 20;
+        int client_x2 = win->x + win->w;
+        int client_y2 = win->y + win->h;
+        if (x >= client_x1 && y >= client_y1 &&
+            x + w <= client_x2 && y + h <= client_y2) {
+            return win;
+        }
+        return NULL;
+    }
+
+    return NULL;
+}
+
 static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
     int sw = get_screen_width();
     int sh = get_screen_height();
@@ -2591,6 +2612,14 @@ static void wm_paint_region(int y_start, int y_end, DirtyRect dirty, int pass) {
     graphics_set_clipping(cx, cy, cw, ch);
 
     if (pass == 1) {
+        Window *opaque_cover = wm_top_opaque_client_covering_region(cx, cy, cw, ch);
+        if (opaque_cover) {
+            uint32_t *pixels = opaque_cover->comp_pixels ? opaque_cover->comp_pixels : opaque_cover->pixels;
+            graphics_blit_buffer_opaque(pixels, opaque_cover->x, opaque_cover->y + 20,
+                                        opaque_cover->w, opaque_cover->h - 20);
+            return;
+        }
+
         draw_desktop_background();
         
         for (int i = 0; i < desktop_icon_count; i++) {
@@ -2823,14 +2852,33 @@ void wm_paint(void) {
     if (cpu_count > 32) cpu_count = 32;
     if (cpu_count < 1) cpu_count = 1;
 
+    int paint_y_start = 0;
+    int paint_y_end = sh;
+    if (dirty.active) {
+        paint_y_start = dirty.y;
+        paint_y_end = dirty.y + dirty.h;
+        if (paint_y_start < 0) paint_y_start = 0;
+        if (paint_y_end > sh) paint_y_end = sh;
+        if (paint_y_end <= paint_y_start) {
+            wm_lock_release(rflags);
+            return;
+        }
+    }
+
+    int paint_h = paint_y_end - paint_y_start;
+    uint32_t useful_cpus = (uint32_t)((paint_h + 95) / 96);
+    if (useful_cpus < 1) useful_cpus = 1;
+    if (cpu_count > useful_cpus) cpu_count = useful_cpus;
+
     volatile int completion_counter = (int)cpu_count;
     wm_strip_job_t jobs[32];
-    int rows_per_strip = sh / cpu_count;
+    int rows_per_strip = (paint_h + (int)cpu_count - 1) / (int)cpu_count;
     
     // PASS 1: BACKGROUND & WINDOWS
     for (uint32_t i = 0; i < cpu_count; i++) {
-        jobs[i].y_start = i * rows_per_strip;
-        jobs[i].y_end = (i == cpu_count - 1) ? sh : (i + 1) * rows_per_strip;
+        jobs[i].y_start = paint_y_start + (int)i * rows_per_strip;
+        jobs[i].y_end = jobs[i].y_start + rows_per_strip;
+        if (jobs[i].y_end > paint_y_end) jobs[i].y_end = paint_y_end;
         jobs[i].dirty = dirty;
         jobs[i].completion_counter = &completion_counter;
         jobs[i].pass = 1;
@@ -3412,21 +3460,11 @@ static void wm_handle_mouse_internal(int dx, int dy, uint8_t buttons, int dz) {
         if (new_h < 100) new_h = 100;
         
         if (new_w != drag_window->w || new_h != drag_window->h) {
-            drag_window->w = new_w;
-            drag_window->h = new_h;
             if (drag_window->handle_resize) {
                 drag_window->handle_resize(drag_window, new_w, new_h);
-            }
-            
-            // Push resize event to userland process if it has one
-            process_t *proc = process_get_by_ui_window(drag_window);
-            if (proc) {
-                gui_event_t ev;
-                ev.type = 11; // GUI_EVENT_RESIZE
-                ev.arg1 = new_w;
-                ev.arg2 = new_h;
-                ev.arg3 = 0;
-                process_push_gui_event(proc, &ev);
+            } else {
+                drag_window->w = new_w;
+                drag_window->h = new_h;
             }
             
             force_redraw = true;

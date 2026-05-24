@@ -200,15 +200,22 @@ static void user_window_resize(Window *win, int w, int h) {
     if (win->pixels) kfree(win->pixels);
     if (win->comp_pixels) kfree(win->comp_pixels);
     
-    win->pixels = (uint32_t *)kmalloc(w * h * sizeof(uint32_t));
-    win->comp_pixels = (uint32_t *)kmalloc(w * h * sizeof(uint32_t));
+    size_t client_h = h > 20 ? (size_t)(h - 20) : 0;
+    size_t pixel_size = client_h > 0 ? (size_t)w * client_h * sizeof(uint32_t) : 0;
+
+    win->pixels = pixel_size > 0 ? (uint32_t *)kmalloc(pixel_size) : NULL;
+    win->comp_pixels = pixel_size > 0 ? (uint32_t *)kmalloc(pixel_size) : NULL;
     
     win->w = w;
     win->h = h;
     
     if (win->pixels) {
         extern void mem_memset(void *dest, int val, size_t len);
-        mem_memset(win->pixels, 0, w * h * sizeof(uint32_t));
+        mem_memset(win->pixels, 0, pixel_size);
+    }
+    if (win->comp_pixels) {
+        extern void mem_memset(void *dest, int val, size_t len);
+        mem_memset(win->comp_pixels, 0, pixel_size);
     }
 
     process_t *proc = process_get_by_ui_window(win);
@@ -533,6 +540,15 @@ static uint64_t gui_cmd_draw_string_bitmap(const syscall_args_t *args) {
     return 0;
 }
 
+static float gui_unpack_float(uint32_t value) {
+    union {
+        uint32_t u;
+        float f;
+    } bits;
+    bits.u = value;
+    return bits.f;
+}
+
 static uint64_t gui_cmd_draw_string_scaled(const syscall_args_t *args) {
     Window *win = (Window *)args->arg2;
     uint64_t coords = args->arg3;
@@ -542,7 +558,7 @@ static uint64_t gui_cmd_draw_string_scaled(const syscall_args_t *args) {
     uint64_t packed = args->arg5;
     uint32_t color = packed & 0xFFFFFFFF;
     uint32_t scale_bits = packed >> 32;
-    float scale = *(float*)&scale_bits;
+    float scale = gui_unpack_float(scale_bits);
 
     if (win && user_str) {
         extern void draw_string_scaled(int x, int y, const char *str, uint32_t color, float scale);
@@ -629,11 +645,11 @@ static uint64_t gui_cmd_draw_string_scaled_sloped(const syscall_args_t *args) {
     uint64_t packed1 = args->arg5;
     uint32_t color = packed1 & 0xFFFFFFFF;
     uint32_t scale_bits = packed1 >> 32;
-    float scale = *(float*)&scale_bits;
+    float scale = gui_unpack_float(scale_bits);
     
     uint64_t arg6 = args->regs->r9;
     uint32_t slope_bits = arg6 & 0xFFFFFFFF;
-    float slope = *(float*)&slope_bits;
+    float slope = gui_unpack_float(slope_bits);
     
     if (win && user_str) {
         extern void draw_string_scaled_sloped(int x, int y, const char *str, uint32_t color, float scale, float slope);
@@ -760,6 +776,131 @@ static uint64_t gui_cmd_draw_image(const syscall_args_t *args) {
     return 0;
 }
 
+static uint64_t gui_cmd_draw_image_opaque(const syscall_args_t *args) {
+    Window *win = (Window *)args->arg2;
+    uint64_t *u_params = (uint64_t *)args->arg3;
+    const uint32_t *image_data = (const uint32_t *)args->arg4;
+    process_t *proc = process_get_current();
+
+    if (win && u_params && image_data && proc && proc->ui_window == win) {
+        uint64_t params[4];
+        for (int i = 0; i < 4; i++) params[i] = u_params[i];
+
+        uint64_t rflags = spinlock_acquire_irqsave(&win->lock);
+
+        if (win->pixels) {
+            int rx = (int)params[0]; int ry = (int)params[1];
+            int rw = (int)params[2]; int rh = (int)params[3];
+            int src_w = rw;
+            int src_x_offset = 0;
+            int src_y_offset = 0;
+
+            if (rx < 0) { src_x_offset = -rx; rw += rx; rx = 0; }
+            if (ry < 0) { src_y_offset = -ry; rh += ry; ry = 0; }
+            if (rx + rw > win->w) rw = win->w - rx;
+            if (ry + rh > (win->h - 20)) rh = (win->h - 20) - ry;
+
+            if (rw > 0 && rh > 0) {
+                extern void mem_memcpy(void *dest, const void *src, size_t len);
+                for (int y = 0; y < rh; y++) {
+                    uint32_t *dest = &win->pixels[(ry + y) * win->w + rx];
+                    const uint32_t *src = &image_data[(src_y_offset + y) * src_w + src_x_offset];
+                    mem_memcpy(dest, src, (size_t)rw * sizeof(uint32_t));
+                }
+            }
+        }
+
+        spinlock_release_irqrestore(&win->lock, rflags);
+    }
+    return 0;
+}
+
+static uint64_t gui_cmd_draw_image_opaque_strided(const syscall_args_t *args) {
+    Window *win = (Window *)args->arg2;
+    uint64_t *u_params = (uint64_t *)args->arg3;
+    const uint32_t *image_data = (const uint32_t *)args->arg4;
+    process_t *proc = process_get_current();
+
+    if (win && u_params && image_data && proc && proc->ui_window == win) {
+        uint64_t params[5];
+        for (int i = 0; i < 5; i++) params[i] = u_params[i];
+
+        uint64_t rflags = spinlock_acquire_irqsave(&win->lock);
+
+        if (win->pixels) {
+            int rx = (int)params[0]; int ry = (int)params[1];
+            int rw = (int)params[2]; int rh = (int)params[3];
+            int src_w = (int)params[4];
+            int src_x_offset = 0;
+            int src_y_offset = 0;
+
+            if (src_w <= 0) src_w = rw;
+            if (rx < 0) { src_x_offset = -rx; rw += rx; rx = 0; }
+            if (ry < 0) { src_y_offset = -ry; rh += ry; ry = 0; }
+            if (rx + rw > win->w) rw = win->w - rx;
+            if (ry + rh > (win->h - 20)) rh = (win->h - 20) - ry;
+
+            if (rw > 0 && rh > 0 && src_x_offset + rw <= src_w) {
+                extern void mem_memcpy(void *dest, const void *src, size_t len);
+                for (int y = 0; y < rh; y++) {
+                    uint32_t *dest = &win->pixels[(ry + y) * win->w + rx];
+                    const uint32_t *src = &image_data[(src_y_offset + y) * src_w + src_x_offset];
+                    mem_memcpy(dest, src, (size_t)rw * sizeof(uint32_t));
+                }
+            }
+        }
+
+        spinlock_release_irqrestore(&win->lock, rflags);
+    }
+    return 0;
+}
+
+static uint64_t gui_cmd_present_image_opaque_strided(const syscall_args_t *args) {
+    Window *win = (Window *)args->arg2;
+    uint64_t *u_params = (uint64_t *)args->arg3;
+    const uint32_t *image_data = (const uint32_t *)args->arg4;
+    process_t *proc = process_get_current();
+
+    if (win && u_params && image_data && proc && proc->ui_window == win) {
+        uint64_t params[5];
+        for (int i = 0; i < 5; i++) params[i] = u_params[i];
+
+        int rx = (int)params[0]; int ry = (int)params[1];
+        int rw = (int)params[2]; int rh = (int)params[3];
+        int src_w = (int)params[4];
+        int src_x_offset = 0;
+        int src_y_offset = 0;
+
+        if (src_w <= 0) src_w = rw;
+        if (rx < 0) { src_x_offset = -rx; rw += rx; rx = 0; }
+        if (ry < 0) { src_y_offset = -ry; rh += ry; ry = 0; }
+        if (rx + rw > win->w) rw = win->w - rx;
+        if (ry + rh > (win->h - 20)) rh = (win->h - 20) - ry;
+
+        if (rw > 0 && rh > 0 && src_x_offset + rw <= src_w) {
+            uint64_t rflags = spinlock_acquire_irqsave(&win->lock);
+
+            win->client_opaque = true;
+            uint32_t *target = win->comp_pixels ? win->comp_pixels : win->pixels;
+            if (target) {
+                extern void mem_memcpy(void *dest, const void *src, size_t len);
+                for (int y = 0; y < rh; y++) {
+                    uint32_t *dest = &target[(ry + y) * win->w + rx];
+                    const uint32_t *src = &image_data[(src_y_offset + y) * src_w + src_x_offset];
+                    mem_memcpy(dest, src, (size_t)rw * sizeof(uint32_t));
+                }
+            }
+
+            spinlock_release_irqrestore(&win->lock, rflags);
+
+            uint64_t wm_flags = wm_lock_acquire();
+            wm_mark_dirty(win->x + rx, win->y + 20 + ry, rw, rh);
+            wm_lock_release(wm_flags);
+        }
+    }
+    return 0;
+}
+
 static uint64_t gui_cmd_mark_dirty(const syscall_args_t *args) {
     Window *win = (Window *)args->arg2;
     uint64_t *u_params = (uint64_t *)args->arg3;
@@ -769,11 +910,23 @@ static uint64_t gui_cmd_mark_dirty(const syscall_args_t *args) {
         uint64_t params[4];
         for (int i = 0; i < 4; i++) params[i] = u_params[i];
 
-        // Dual-buffer commit: copy pixels to comp_pixels
+        // Dual-buffer commit: copy only the requested dirty rectangle.
         if (win->pixels && win->comp_pixels) {
             uint64_t win_rflags = spinlock_acquire_irqsave(&win->lock);
             extern void mem_memcpy(void *dest, const void *src, size_t len);
-            mem_memcpy(win->comp_pixels, win->pixels, (size_t)win->w * (win->h - 20) * 4);
+            int rx = (int)params[0]; int ry = (int)params[1];
+            int rw = (int)params[2]; int rh = (int)params[3];
+            if (rx < 0) { rw += rx; rx = 0; }
+            if (ry < 0) { rh += ry; ry = 0; }
+            if (rx + rw > win->w) rw = win->w - rx;
+            if (ry + rh > (win->h - 20)) rh = (win->h - 20) - ry;
+            if (rw > 0 && rh > 0) {
+                for (int y = 0; y < rh; y++) {
+                    uint32_t *dest = &win->comp_pixels[(ry + y) * win->w + rx];
+                    const uint32_t *src = &win->pixels[(ry + y) * win->w + rx];
+                    mem_memcpy(dest, src, (size_t)rw * sizeof(uint32_t));
+                }
+            }
             spinlock_release_irqrestore(&win->lock, win_rflags);
         }
 
@@ -818,6 +971,7 @@ static uint64_t gui_cmd_get_string_width(const syscall_args_t *args) {
 }
 
 static uint64_t gui_cmd_get_font_height(const syscall_args_t *args) {
+    (void)args;
     process_t *proc = process_get_current();
     ttf_font_t *font = (proc->ui_window && ((Window*)proc->ui_window)->font) ? (ttf_font_t*)((Window*)proc->ui_window)->font : graphics_get_current_ttf();
     if (font) {
@@ -830,7 +984,7 @@ static uint64_t gui_cmd_get_string_width_scaled(const syscall_args_t *args) {
     process_t *proc = process_get_current();
     const char *user_str = (const char *)args->arg2;
     uint32_t scale_bits = (uint32_t)args->arg3;
-    float scale = *(float*)&scale_bits;
+    float scale = gui_unpack_float(scale_bits);
 
     if (!user_str) return 0;
     
@@ -854,7 +1008,7 @@ static uint64_t gui_cmd_get_string_width_scaled(const syscall_args_t *args) {
 static uint64_t gui_cmd_get_font_height_scaled(const syscall_args_t *args) {
     process_t *proc = process_get_current();
     uint32_t scale_bits = (uint32_t)args->arg2;
-    float scale = *(float*)&scale_bits;
+    float scale = gui_unpack_float(scale_bits);
     ttf_font_t *font = (proc->ui_window && ((Window*)proc->ui_window)->font) ? (ttf_font_t*)((Window*)proc->ui_window)->font : graphics_get_current_ttf();
     if (font) {
         return (uint64_t)font_manager_get_font_height_scaled(font, scale);
@@ -982,7 +1136,7 @@ static uint64_t gui_cmd_get_datetime(const syscall_args_t *args) {
     return 0;
 }
 
-#define GUI_CMD_TABLE_SIZE 54
+#define GUI_CMD_TABLE_SIZE 57
 static const syscall_handler_fn gui_cmd_table[GUI_CMD_TABLE_SIZE] = {
     [GUI_CMD_WINDOW_CREATE]          = gui_cmd_window_create,
     [GUI_CMD_DRAW_RECT]              = gui_cmd_draw_rect,
@@ -1005,6 +1159,9 @@ static const syscall_handler_fn gui_cmd_table[GUI_CMD_TABLE_SIZE] = {
     [GUI_CMD_GET_SCREENBUFFER]       = gui_cmd_get_screenbuffer,
     [GUI_CMD_SHOW_NOTIFICATION]      = gui_cmd_show_notification,
     [GUI_CMD_GET_DATETIME]           = gui_cmd_get_datetime,
+    [GUI_CMD_DRAW_IMAGE_OPAQUE]      = gui_cmd_draw_image_opaque,
+    [GUI_CMD_DRAW_IMAGE_OPAQUE_STRIDED] = gui_cmd_draw_image_opaque_strided,
+    [GUI_CMD_PRESENT_IMAGE_OPAQUE_STRIDED] = gui_cmd_present_image_opaque_strided,
 };
 
 #define O_RDONLY 0x0000
@@ -2008,6 +2165,77 @@ static uint64_t sys_cmd_tcp_recv_nb(const syscall_args_t *args) {
     return (uint64_t)network_tcp_recv_nb(buf, max_len);
 }
 
+static uint64_t sys_cmd_socket_create(const syscall_args_t *args) {
+    int type = (int)args->arg2;
+    extern int network_socket_create(int type);
+    return (uint64_t)network_socket_create(type);
+}
+
+static uint64_t sys_cmd_socket_connect(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    ipv4_address_t *ip = (ipv4_address_t *)args->arg3;
+    uint16_t port = (uint16_t)args->arg4;
+    extern int network_socket_connect(int fd, const ipv4_address_t *ip, uint16_t port);
+    return (uint64_t)network_socket_connect(fd, ip, port);
+}
+
+static uint64_t sys_cmd_socket_connect_start(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    ipv4_address_t *ip = (ipv4_address_t *)args->arg3;
+    uint16_t port = (uint16_t)args->arg4;
+    extern int network_socket_connect_start(int fd, const ipv4_address_t *ip, uint16_t port);
+    return (uint64_t)network_socket_connect_start(fd, ip, port);
+}
+
+static uint64_t sys_cmd_socket_send(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    const void *data = (const void *)args->arg3;
+    size_t len = (size_t)args->arg4;
+    extern int network_socket_send(int fd, const void *data, size_t len);
+    return (uint64_t)network_socket_send(fd, data, len);
+}
+
+static uint64_t sys_cmd_socket_recv(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    void *buf = (void *)args->arg3;
+    size_t max_len = (size_t)args->arg4;
+    extern int network_socket_recv(int fd, void *buf, size_t max_len);
+    return (uint64_t)network_socket_recv(fd, buf, max_len);
+}
+
+static uint64_t sys_cmd_socket_recv_nb(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    void *buf = (void *)args->arg3;
+    size_t max_len = (size_t)args->arg4;
+    extern int network_socket_recv_nb(int fd, void *buf, size_t max_len);
+    return (uint64_t)network_socket_recv_nb(fd, buf, max_len);
+}
+
+static uint64_t sys_cmd_socket_close(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    extern int network_socket_close(int fd);
+    return (uint64_t)network_socket_close(fd);
+}
+
+static uint64_t sys_cmd_socket_poll(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    extern int network_socket_poll(int fd);
+    return (uint64_t)network_socket_poll(fd);
+}
+
+static uint64_t sys_cmd_socket_error(const syscall_args_t *args) {
+    int fd = (int)args->arg2;
+    extern int network_socket_error(int fd);
+    return (uint64_t)network_socket_error(fd);
+}
+
+static uint64_t sys_cmd_network_poll(const syscall_args_t *args) {
+    (void)args;
+    extern void network_process_frames(void);
+    network_process_frames();
+    return 0;
+}
+
 static uint64_t sys_cmd_set_resolution(const syscall_args_t *args) {
     uint16_t req_w = (uint16_t)args->arg2;
     uint16_t req_h = (uint16_t)args->arg3;
@@ -2622,6 +2850,16 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
     [SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE] = sys_cmd_set_mouse_cursor_scale,
     [SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE] = sys_cmd_get_mouse_cursor_scale,
+    [SYSTEM_CMD_SOCKET_CREATE]       = sys_cmd_socket_create,
+    [SYSTEM_CMD_SOCKET_CONNECT]      = sys_cmd_socket_connect,
+    [SYSTEM_CMD_SOCKET_SEND]         = sys_cmd_socket_send,
+    [SYSTEM_CMD_SOCKET_RECV]         = sys_cmd_socket_recv,
+    [SYSTEM_CMD_SOCKET_RECV_NB]      = sys_cmd_socket_recv_nb,
+    [SYSTEM_CMD_SOCKET_CLOSE]        = sys_cmd_socket_close,
+    [SYSTEM_CMD_SOCKET_POLL]         = sys_cmd_socket_poll,
+    [SYSTEM_CMD_NETWORK_POLL]        = sys_cmd_network_poll,
+    [SYSTEM_CMD_SOCKET_CONNECT_START] = sys_cmd_socket_connect_start,
+    [SYSTEM_CMD_SOCKET_ERROR]        = sys_cmd_socket_error,
     [SYSTEM_CMD_TTY_CREATE]          = sys_cmd_tty_create,
     [SYSTEM_CMD_TTY_READ_OUT]        = sys_cmd_tty_read_out,
     [SYSTEM_CMD_TTY_WRITE_IN]        = sys_cmd_tty_write_in,
@@ -2727,18 +2965,26 @@ static uint64_t handle_sys_sbrk(const syscall_args_t *args) {
         uint64_t end_page = (new_end + 0xFFF) & ~0xFFF;
         
         if (end_page > start_page) {
-            uint64_t total_size = end_page - start_page;
-            void *phys_block = kmalloc_aligned(total_size, 4096);
-            if (!phys_block) return (uint64_t)-1; // Out of memory
-            
+            uint64_t page_count = (end_page - start_page) / 4096;
+            void **phys_pages = (void **)kmalloc(sizeof(void *) * page_count);
+            if (!phys_pages) return (uint64_t)-1;
+
             extern void mem_memset(void *dest, int val, size_t len);
-            mem_memset(phys_block, 0, total_size);
-            
-            uint64_t phys_addr = (uint64_t)phys_block;
-            for (uint64_t page = start_page; page < end_page; page += 4096) {
-                paging_map_page(proc->pml4_phys, page, v2p(phys_addr), 0x07); // PT_PRESENT | PT_RW | PT_USER
-                phys_addr += 4096;
+            for (uint64_t i = 0; i < page_count; i++) {
+                phys_pages[i] = kmalloc_aligned(4096, 4096);
+                if (!phys_pages[i]) {
+                    for (uint64_t j = 0; j < i; j++) kfree(phys_pages[j]);
+                    kfree(phys_pages);
+                    return (uint64_t)-1;
+                }
+                mem_memset(phys_pages[i], 0, 4096);
             }
+
+            for (uint64_t i = 0; i < page_count; i++) {
+                uint64_t page = start_page + i * 4096;
+                paging_map_page(proc->pml4_phys, page, v2p((uint64_t)phys_pages[i]), 0x07); // PT_PRESENT | PT_RW | PT_USER
+            }
+            kfree(phys_pages);
             proc->used_memory += (end_page - start_page);
         }
     }
