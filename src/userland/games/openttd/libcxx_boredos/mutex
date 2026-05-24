@@ -1,0 +1,120 @@
+#ifndef BOREDOS_LIBCXX_MUTEX
+#define BOREDOS_LIBCXX_MUTEX
+
+namespace std {
+
+struct defer_lock_t {
+	explicit defer_lock_t() = default;
+};
+struct try_to_lock_t {
+	explicit try_to_lock_t() = default;
+};
+struct adopt_lock_t {
+	explicit adopt_lock_t() = default;
+};
+
+inline constexpr defer_lock_t defer_lock{};
+inline constexpr try_to_lock_t try_to_lock{};
+inline constexpr adopt_lock_t adopt_lock{};
+
+class mutex {
+public:
+	constexpr mutex() noexcept = default;
+	mutex(const mutex &) = delete;
+	mutex &operator=(const mutex &) = delete;
+
+	void lock() noexcept {}
+	bool try_lock() noexcept { return true; }
+	void unlock() noexcept {}
+};
+
+class recursive_mutex {
+public:
+	constexpr recursive_mutex() noexcept = default;
+	recursive_mutex(const recursive_mutex &) = delete;
+	recursive_mutex &operator=(const recursive_mutex &) = delete;
+
+	void lock() noexcept {}
+	bool try_lock() noexcept { return true; }
+	void unlock() noexcept {}
+};
+
+template <class Mutex>
+class lock_guard {
+	Mutex &m;
+public:
+	using mutex_type = Mutex;
+
+	explicit lock_guard(Mutex &m) : m(m) { this->m.lock(); }
+	lock_guard(Mutex &m, adopt_lock_t) : m(m) {}
+	~lock_guard() { this->m.unlock(); }
+
+	lock_guard(const lock_guard &) = delete;
+	lock_guard &operator=(const lock_guard &) = delete;
+};
+
+template <class Mutex>
+class unique_lock {
+	Mutex *m = nullptr;
+	bool owns = false;
+public:
+	using mutex_type = Mutex;
+
+	unique_lock() noexcept = default;
+	explicit unique_lock(Mutex &m) : m(&m), owns(true) { this->m->lock(); }
+	unique_lock(Mutex &m, defer_lock_t) noexcept : m(&m), owns(false) {}
+	unique_lock(Mutex &m, try_to_lock_t) : m(&m), owns(m.try_lock()) {}
+	unique_lock(Mutex &m, adopt_lock_t) : m(&m), owns(true) {}
+
+	~unique_lock()
+	{
+		if (this->owns) this->m->unlock();
+	}
+
+	unique_lock(const unique_lock &) = delete;
+	unique_lock &operator=(const unique_lock &) = delete;
+
+	unique_lock(unique_lock &&other) noexcept : m(other.m), owns(other.owns)
+	{
+		other.m = nullptr;
+		other.owns = false;
+	}
+
+	unique_lock &operator=(unique_lock &&other) noexcept
+	{
+		if (this != &other) {
+			if (this->owns) this->m->unlock();
+			this->m = other.m;
+			this->owns = other.owns;
+			other.m = nullptr;
+			other.owns = false;
+		}
+		return *this;
+	}
+
+	void lock()
+	{
+		this->m->lock();
+		this->owns = true;
+	}
+
+	bool try_lock()
+	{
+		this->owns = this->m->try_lock();
+		return this->owns;
+	}
+
+	void unlock()
+	{
+		this->m->unlock();
+		this->owns = false;
+	}
+
+	bool owns_lock() const noexcept { return this->owns; }
+	explicit operator bool() const noexcept { return this->owns; }
+	Mutex *mutex() const noexcept { return this->m; }
+};
+
+}
+
+#endif

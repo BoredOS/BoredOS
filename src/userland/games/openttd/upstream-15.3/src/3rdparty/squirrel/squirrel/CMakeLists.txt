@@ -1,0 +1,29 @@
+add_files(
+    sqapi.cpp
+    sqarray.h
+    sqbaselib.cpp
+    sqclass.cpp
+    sqclass.h
+    sqclosure.h
+    sqcompiler.cpp
+    sqcompiler.h
+    sqdebug.cpp
+    sqfuncproto.h
+    sqfuncstate.cpp
+    sqfuncstate.h
+    sqlexer.cpp
+    sqlexer.h
+    sqobject.cpp
+    sqobject.h
+    sqopcodes.h
+    sqpcheader.h
+    sqstate.cpp
+    sqstate.h
+    sqstring.h
+    sqtable.cpp
+    sqtable.h
+    squserdata.h
+    squtils.h
+    sqvm.cpp
+    sqvm.h
+)

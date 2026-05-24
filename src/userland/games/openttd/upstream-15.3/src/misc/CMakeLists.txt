@@ -1,0 +1,15 @@
+add_files(
+    alternating_iterator.hpp
+    autorelease.hpp
+    binaryheap.hpp
+    dbg_helpers.cpp
+    dbg_helpers.h
+    endian_buffer.hpp
+    getoptdata.cpp
+    getoptdata.h
+    hashtable.hpp
+    history.cpp
+    history_func.hpp
+    history_type.hpp
+    lrucache.hpp
+)

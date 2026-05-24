@@ -1,0 +1,3 @@
+# set default server port, and have the dedicated server listen on all interfaces
+server_ip = all
+server_port = 3979

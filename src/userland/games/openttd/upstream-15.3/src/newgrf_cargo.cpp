@@ -1,0 +1,95 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file newgrf_cargo.cpp Implementation of NewGRF cargoes. */
+
+#include "stdafx.h"
+#include "debug.h"
+#include "newgrf_cargo.h"
+#include "newgrf_spritegroup.h"
+
+#include "safeguards.h"
+
+/** Resolver of cargo. */
+struct CargoResolverObject : public ResolverObject {
+	const CargoSpec *cargospec;
+
+	CargoResolverObject(const CargoSpec *cs, CallbackID callback = CBID_NO_CALLBACK, uint32_t callback_param1 = 0, uint32_t callback_param2 = 0);
+
+	GrfSpecFeature GetFeature() const override;
+	uint32_t GetDebugID() const override;
+};
+
+GrfSpecFeature CargoResolverObject::GetFeature() const
+{
+	return GSF_CARGOES;
+}
+
+uint32_t CargoResolverObject::GetDebugID() const
+{
+	return this->cargospec->label.base();
+}
+
+/**
+ * Constructor of the cargo resolver.
+ * @param cs Cargo being resolved.
+ * @param callback Callback ID.
+ * @param callback_param1 First parameter (var 10) of the callback.
+ * @param callback_param2 Second parameter (var 18) of the callback.
+ */
+CargoResolverObject::CargoResolverObject(const CargoSpec *cs, CallbackID callback, uint32_t callback_param1, uint32_t callback_param2)
+		: ResolverObject(cs->grffile, callback, callback_param1, callback_param2), cargospec(cs)
+{
+	this->root_spritegroup = cs->group;
+}
+
+/**
+ * Get the custom sprite for the given cargo type.
+ * @param cs Cargo being queried.
+ * @return Custom sprite to draw, or \c 0 if not available.
+ */
+SpriteID GetCustomCargoSprite(const CargoSpec *cs)
+{
+	CargoResolverObject object(cs);
+	const auto *group = object.Resolve<ResultSpriteGroup>();
+	if (group == nullptr || group->num_sprites == 0) return 0;
+
+	return group->sprite;
+}
+
+
+uint16_t GetCargoCallback(CallbackID callback, uint32_t param1, uint32_t param2, const CargoSpec *cs, std::span<int32_t> regs100)
+{
+	CargoResolverObject object(cs, callback, param1, param2);
+	return object.ResolveCallback(regs100);
+}
+
+/**
+ * Translate a GRF-local cargo slot/bitnum into a CargoType.
+ * @param cargo   GRF-local cargo slot/bitnum.
+ * @param grffile Originating GRF file.
+ * @param usebit  Defines the meaning of \a cargo for GRF version < 7.
+ *                If true, then \a cargo is a bitnum. If false, then \a cargo is a cargoslot.
+ *                For GRF version >= 7 \a cargo is always a translated cargo bit.
+ * @return CargoType or INVALID_CARGO if the cargo is not available.
+ */
+CargoType GetCargoTranslation(uint8_t cargo, const GRFFile *grffile, bool usebit)
+{
+	/* We can't use GetCargoTranslationTable here as the usebit flag changes behaviour. */
+	/* Pre-version 7 uses the bitnum lookup from (standard in v8) instead of climate dependent in some places.. */
+	std::span<const CargoLabel> cargo_list;
+	if (grffile->grf_version < 7 && !usebit && !grffile->cargo_list_is_fallback) {
+		cargo_list = GetClimateDependentCargoTranslationTable();
+	} else if (!grffile->cargo_list.empty()) {
+		cargo_list = grffile->cargo_list;
+	} else {
+		cargo_list = GetClimateIndependentCargoTranslationTable();
+	}
+
+	if (cargo < cargo_list.size()) return GetCargoTypeByLabel(cargo_list[cargo]);
+	return INVALID_CARGO;
+}

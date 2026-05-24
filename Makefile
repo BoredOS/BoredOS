@@ -4,14 +4,17 @@
 
 export MAKEFLAGS += -j4
 
-CC = x86_64-elf-gcc
-LD = x86_64-elf-ld
+CROSS_BIN := $(firstword $(dir $(shell command -v x86_64-elf-gcc 2>/dev/null)) $(if $(wildcard /home/linuxbrew/.linuxbrew/bin/x86_64-elf-gcc),/home/linuxbrew/.linuxbrew/bin/))
+CC = $(CROSS_BIN)x86_64-elf-gcc
+LD = $(CROSS_BIN)x86_64-elf-ld
 NASM = nasm
 XORRISO = xorriso
 
 SRC_DIR = src
 BUILD_DIR = build
 ISO_DIR = iso_root
+OPENTTD_UPSTREAM_DIR ?= $(SRC_DIR)/userland/games/openttd/upstream-15.3
+OPENTTD_UPSTREAM_BUILD ?= $(BUILD_DIR)/openttd-boredos-upstream-15.3
 
 KERNEL_ELF = $(BUILD_DIR)/boredos.elf
 ISO_IMAGE = boredos.iso
@@ -35,6 +38,7 @@ USERLAND_COLLOID_ICONS = $(shell { \
 } | sed 's/"//g' | sed 's@.*/@@' | sort -u)
 USERLAND_METADATA_ICONS = $(shell { \
 	find $(SRC_DIR)/userland -type f -name '*.c' -exec sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' {} + 2>/dev/null; \
+	find $(SRC_DIR)/userland -type f -name '*.cpp' -exec sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' {} + 2>/dev/null; \
 } | tr ';' '\n' | sed 's@.*/@@' | sed '/^[[:space:]]*$$/d' | sort -u)
 COLLOID_ICONS = $(sort $(DOCK_COLLOID_ICONS) $(USERLAND_COLLOID_ICONS) $(USERLAND_METADATA_ICONS) xterm.png)
 
@@ -63,8 +67,9 @@ LIMINE_VERSION = 11.4.1
 LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERSION)
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
+QEMU_ACCEL_LINUX := $(shell if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then printf -- "-enable-kvm"; else printf -- "-accel tcg,thread=multi"; fi)
 
-.PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
+.PHONY: all clean run run-hd limine-setup userland-build openttd-upstream-build openttd-port-check run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux
 
 all:
 	$(call PRINT_STEP,STARTING BOREDOS BUILD)
@@ -110,11 +115,26 @@ $(KERNEL_ELF): $(OBJ_FILES)
 	@printf "$(YELLOW)[LD]$(RESET) Linking kernel ELF: $@\n"
 	$(LD) $(LDFLAGS) -o $@ $(OBJ_FILES)
 	@printf "$(GREEN)[OK]$(RESET) Kernel ELF built: $@\n"
+
+userland-build:
 	$(call PRINT_STEP,BUILDING USERLAND)
-	$(MAKE) -C $(SRC_DIR)/userland
+	PATH="$(dir $(CC)):$$PATH" $(MAKE) -C $(SRC_DIR)/userland
 	@printf "$(GREEN)[OK]$(RESET) Userland build complete.\n"
 
-$(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
+openttd-upstream-build: userland-build
+	$(call PRINT_STEP,BUILDING UPSTREAM OPENTTD FOR BOREDOS)
+	@if [ -f $(OPENTTD_UPSTREAM_DIR)/CMakeLists.txt ] && [ -f tools/build_openttd_boredos_upstream.sh ]; then \
+		PATH="$(dir $(CC)):$$PATH" sh tools/build_openttd_boredos_upstream.sh; \
+	else \
+		printf "$(YELLOW)[SKIP]$(RESET) Upstream OpenTTD source or build script is missing.\n"; \
+	fi
+	@printf "$(GREEN)[OK]$(RESET) Upstream OpenTTD build complete.\n"
+
+openttd-port-check: openttd-upstream-build
+	$(call PRINT_STEP,CHECKING OPENTTD BOREDOS PORT)
+	sh tools/check_openttd_boredos_port.sh
+
+$(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) openttd-upstream-build
 	$(call PRINT_STEP,BUILDING INITRD)
 	@printf "$(YELLOW)[INITRD]$(RESET) Cleaning previous initrd directory...\n"
 	rm -rf $(BUILD_DIR)/initrd
@@ -126,6 +146,8 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/colloid
 	mkdir -p $(BUILD_DIR)/initrd/Library/Fonts/Emoji
 	mkdir -p $(BUILD_DIR)/initrd/Library/DOOM
+	mkdir -p $(BUILD_DIR)/initrd/Library/OpenTTD
+	mkdir -p $(BUILD_DIR)/initrd/Library/Source
 	mkdir -p $(BUILD_DIR)/initrd/Library/conf
 	mkdir -p $(BUILD_DIR)/initrd/Library/bsh
 	mkdir -p $(BUILD_DIR)/initrd/Library/BWM/Wallpaper
@@ -162,6 +184,10 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 			cp "$$f" $(BUILD_DIR)/initrd/bin/; \
 		fi \
 	done
+	@if [ -f $(OPENTTD_UPSTREAM_BUILD)/openttd ]; then \
+		printf "  -> $(OPENTTD_UPSTREAM_BUILD)/openttd as openttd.elf\n"; \
+		cp $(OPENTTD_UPSTREAM_BUILD)/openttd $(BUILD_DIR)/initrd/bin/openttd.elf; \
+	fi
 
 	@printf "$(YELLOW)[COPY]$(RESET) TCC support files...\n"
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/tcc/
@@ -242,6 +268,26 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@printf "$(YELLOW)[COPY]$(RESET) DOOM assets...\n"
 	@if [ -f $(SRC_DIR)/userland/games/doom/doom1.wad ]; then printf "  -> doom1.wad\n"; cp $(SRC_DIR)/userland/games/doom/doom1.wad $(BUILD_DIR)/initrd/Library/DOOM/; fi
 
+	@printf "$(YELLOW)[COPY]$(RESET) OpenTTD data...\n"
+	@if [ -d $(SRC_DIR)/userland/games/openttd/data/baseset ]; then \
+		printf "  -> OpenTTD base graphics/sound/music\n"; \
+		mkdir -p $(BUILD_DIR)/initrd/Library/OpenTTD/baseset; \
+		for archive in $(SRC_DIR)/userland/games/openttd/data/baseset/*.tar; do \
+			[ -f "$$archive" ] || continue; \
+			cp "$$archive" $(BUILD_DIR)/initrd/Library/OpenTTD/baseset/; \
+			tar -xf "$$archive" -C $(BUILD_DIR)/initrd/Library/OpenTTD/baseset/; \
+		done; \
+	fi
+	@if [ -d $(OPENTTD_UPSTREAM_BUILD)/baseset ]; then \
+		printf "  -> OpenTTD upstream base support files\n"; \
+		mkdir -p $(BUILD_DIR)/initrd/Library/OpenTTD/baseset; \
+		cp $(OPENTTD_UPSTREAM_BUILD)/baseset/* $(BUILD_DIR)/initrd/Library/OpenTTD/baseset/; \
+	fi
+	@if [ -d $(OPENTTD_UPSTREAM_BUILD)/lang ]; then \
+		printf "  -> OpenTTD compiled language packs\n"; \
+		mkdir -p $(BUILD_DIR)/initrd/Library/OpenTTD/lang; \
+		cp $(OPENTTD_UPSTREAM_BUILD)/lang/*.lng $(BUILD_DIR)/initrd/Library/OpenTTD/lang/; \
+	fi
 	@printf "$(YELLOW)[COPY]$(RESET) ASCII art...\n"
 	@if [ -f $(SRC_DIR)/library/art/boredos.txt ]; then printf "  -> boredos.txt\n"; cp $(SRC_DIR)/library/art/boredos.txt $(BUILD_DIR)/initrd/Library/art/; fi
 	@if [ -f $(SRC_DIR)/library/art/boredos_small.txt ]; then printf "  -> boredos_small.txt\n"; cp $(SRC_DIR)/library/art/boredos_small.txt $(BUILD_DIR)/initrd/Library/art/; fi
@@ -262,7 +308,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF)
 	@if [ -f limine.conf ]; then printf "  -> limine.conf\n"; cp limine.conf $(BUILD_DIR)/initrd/; fi
 	
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar...\n"
-	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
+	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar bin boot usr etc dev mnt root docs Library README.md LICENSE limine.conf
 	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar\n"
 
 $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar limine.conf limine-setup
@@ -394,7 +440,15 @@ run-hd-mac: disk.qcow2 $(OVMF_VARS)
 
 run-linux: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON LINUX)
-	qemu-system-x86_64 -m 4G -serial stdio -cdrom $< -boot d \
+	@python3 tools/openttd_https_proxy.py > /tmp/boredos-openttd-https-proxy.log 2>&1 & proxy_pid=$$!; \
+	sleep 0.3; \
+	if ! kill -0 $$proxy_pid 2>/dev/null; then \
+		printf "OpenTTD host proxy failed to start. Log follows:\n"; \
+		cat /tmp/boredos-openttd-https-proxy.log; \
+		exit 1; \
+	fi; \
+	trap 'kill $$proxy_pid 2>/dev/null || true' EXIT; \
+	qemu-system-x86_64 $(QEMU_ACCEL_LINUX) -m 4G -serial stdio -cdrom $< -boot d \
 	    -smp 4 \
 		-audiodev pa,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \
@@ -414,7 +468,15 @@ run-hd-windows: disk.qcow2
 
 run-hd-linux: disk.qcow2 $(OVMF_VARS)
 	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE ON LINUX)
-	qemu-system-x86_64 -m 4G -serial stdio -boot c \
+	@python3 tools/openttd_https_proxy.py > /tmp/boredos-openttd-https-proxy.log 2>&1 & proxy_pid=$$!; \
+	sleep 0.3; \
+	if ! kill -0 $$proxy_pid 2>/dev/null; then \
+		printf "OpenTTD host proxy failed to start. Log follows:\n"; \
+		cat /tmp/boredos-openttd-https-proxy.log; \
+		exit 1; \
+	fi; \
+	trap 'kill $$proxy_pid 2>/dev/null || true' EXIT; \
+	qemu-system-x86_64 $(QEMU_ACCEL_LINUX) -m 4G -serial stdio -boot c \
 	    -smp 4 \
 		-audiodev pa,id=audio0 -machine pcspk-audiodev=audio0 \
 		-vga std -global VGA.xres=1920 -global VGA.yres=1080 \

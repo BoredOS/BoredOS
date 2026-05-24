@@ -1,0 +1,55 @@
+#ifndef BOREDOS_LIBCXX_THREAD
+#define BOREDOS_LIBCXX_THREAD
+
+#include <chrono>
+
+namespace std {
+
+class thread {
+public:
+	class id {
+	public:
+		constexpr id() noexcept = default;
+		friend constexpr bool operator==(id, id) noexcept { return true; }
+		friend constexpr bool operator!=(id, id) noexcept { return false; }
+	};
+
+	thread() noexcept = default;
+
+	template <class Fn, class... Args>
+	explicit thread(Fn &&, Args &&...) noexcept
+	{
+	}
+
+	thread(thread &&) noexcept = default;
+	thread &operator=(thread &&) noexcept = default;
+	thread(const thread &) = delete;
+	thread &operator=(const thread &) = delete;
+
+	~thread() = default;
+
+	bool joinable() const noexcept { return false; }
+	void join() noexcept {}
+	void detach() noexcept {}
+	id get_id() const noexcept { return id{}; }
+
+	static unsigned int hardware_concurrency() noexcept { return 1; }
+};
+
+namespace this_thread {
+	inline thread::id get_id() noexcept { return thread::id{}; }
+
+	template <class Rep, class Period>
+	inline void sleep_for(const chrono::duration<Rep, Period> &) noexcept
+	{
+	}
+
+	template <class Clock, class Duration>
+	inline void sleep_until(const chrono::time_point<Clock, Duration> &) noexcept
+	{
+	}
+}
+
+}
+
+#endif

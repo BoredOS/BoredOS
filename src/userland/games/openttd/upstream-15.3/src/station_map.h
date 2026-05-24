@@ -1,0 +1,856 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file station_map.h Maps accessors for stations. */
+
+#ifndef STATION_MAP_H
+#define STATION_MAP_H
+
+#include "rail_map.h"
+#include "road_map.h"
+#include "water_map.h"
+#include "station_func.h"
+#include "rail.h"
+#include "road.h"
+
+typedef uint8_t StationGfx; ///< Index of station graphics. @see _station_display_datas
+
+/**
+ * Get StationID from a tile
+ * @param t Tile to query station ID from
+ * @pre IsTileType(t, MP_STATION)
+ * @return Station ID of the station at \a t
+ */
+inline StationID GetStationIndex(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return (StationID)t.m2();
+}
+
+
+static const int GFX_DOCK_BASE_WATER_PART          =  4; ///< The offset for the water parts.
+static const int GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET =  4; ///< The offset for the drive through parts.
+
+/**
+ * Get the station type of this tile
+ * @param t the tile to query
+ * @pre IsTileType(t, MP_STATION)
+ * @return the station type
+ */
+inline StationType GetStationType(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return (StationType)GB(t.m6(), 3, 4);
+}
+
+/**
+ * Get the road stop type of this tile
+ * @param t the tile to query
+ * @pre GetStationType(t) == StationType::Truck || GetStationType(t) == StationType::Bus
+ * @return the road stop type
+ */
+inline RoadStopType GetRoadStopType(Tile t)
+{
+	assert(GetStationType(t) == StationType::Truck || GetStationType(t) == StationType::Bus);
+	return GetStationType(t) == StationType::Truck ? RoadStopType::Truck : RoadStopType::Bus;
+}
+
+/**
+ * Get the station graphics of this tile
+ * @param t the tile to query
+ * @pre IsTileType(t, MP_STATION)
+ * @return the station graphics
+ */
+inline StationGfx GetStationGfx(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return t.m5();
+}
+
+/**
+ * Set the station graphics of this tile
+ * @param t the tile to update
+ * @param gfx the new graphics
+ * @pre IsTileType(t, MP_STATION)
+ */
+inline void SetStationGfx(Tile t, StationGfx gfx)
+{
+	assert(IsTileType(t, MP_STATION));
+	t.m5() = gfx;
+}
+
+/**
+ * Is this station tile a rail station?
+ * @param t the tile to get the information from
+ * @pre IsTileType(t, MP_STATION)
+ * @return true if and only if the tile is a rail station
+ */
+inline bool IsRailStation(Tile t)
+{
+	return GetStationType(t) == StationType::Rail;
+}
+
+/**
+ * Is this tile a station tile and a rail station?
+ * @param t the tile to get the information from
+ * @return true if and only if the tile is a rail station
+ */
+inline bool IsRailStationTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsRailStation(t);
+}
+
+/**
+ * Is this station tile a rail waypoint?
+ * @param t the tile to get the information from
+ * @pre IsTileType(t, MP_STATION)
+ * @return true if and only if the tile is a rail waypoint
+ */
+inline bool IsRailWaypoint(Tile t)
+{
+	return GetStationType(t) == StationType::RailWaypoint;
+}
+
+/**
+ * Is this tile a station tile and a rail waypoint?
+ * @param t the tile to get the information from
+ * @return true if and only if the tile is a rail waypoint
+ */
+inline bool IsRailWaypointTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsRailWaypoint(t);
+}
+
+/**
+ * Has this station tile a rail? In other words, is this station
+ * tile a rail station or rail waypoint?
+ * @param t the tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return true if and only if the tile has rail
+ */
+inline bool HasStationRail(Tile t)
+{
+	return IsRailStation(t) || IsRailWaypoint(t);
+}
+
+/**
+ * Has this station tile a rail? In other words, is this station
+ * tile a rail station or rail waypoint?
+ * @param t the tile to check
+ * @return true if and only if the tile is a station tile and has rail
+ */
+inline bool HasStationTileRail(Tile t)
+{
+	return IsTileType(t, MP_STATION) && HasStationRail(t);
+}
+
+/**
+ * Is this station tile an airport?
+ * @param t the tile to get the information from
+ * @pre IsTileType(t, MP_STATION)
+ * @return true if and only if the tile is an airport
+ */
+inline bool IsAirport(Tile t)
+{
+	return GetStationType(t) == StationType::Airport;
+}
+
+/**
+ * Is this tile a station tile and an airport tile?
+ * @param t the tile to get the information from
+ * @return true if and only if the tile is an airport
+ */
+inline bool IsAirportTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsAirport(t);
+}
+
+bool IsHangar(Tile t);
+
+/**
+ * Is the station at \a t a truck stop?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if station is a truck stop, \c false otherwise
+ */
+inline bool IsTruckStop(Tile t)
+{
+	return GetStationType(t) == StationType::Truck;
+}
+
+/**
+ * Is the station at \a t a bus stop?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if station is a bus stop, \c false otherwise
+ */
+inline bool IsBusStop(Tile t)
+{
+	return GetStationType(t) == StationType::Bus;
+}
+
+/**
+ * Is the station at \a t a road waypoint?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if station is a road waypoint, \c false otherwise
+ */
+inline bool IsRoadWaypoint(Tile t)
+{
+	return GetStationType(t) == StationType::RoadWaypoint;
+}
+
+/**
+ * Is this tile a station tile and a road waypoint?
+ * @param t the tile to get the information from
+ * @return true if and only if the tile is a road waypoint
+ */
+inline bool IsRoadWaypointTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsRoadWaypoint(t);
+}
+
+/**
+ * Is the station at \a t a road station?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if station at the tile is a bus stop or a truck stop, \c false otherwise
+ */
+inline bool IsStationRoadStop(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return IsTruckStop(t) || IsBusStop(t);
+}
+
+/**
+ * Is tile \a t a road stop station?
+ * @param t Tile to check
+ * @return \c true if the tile is a station tile and a station road stop
+ */
+inline bool IsStationRoadStopTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsStationRoadStop(t);
+}
+
+/**
+ * Is the station at \a t a road station?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if station at the tile is a bus stop, truck stop or road waypoint, \c false otherwise
+ */
+inline bool IsAnyRoadStop(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return IsTruckStop(t) || IsBusStop(t) || IsRoadWaypoint(t);
+}
+
+/**
+ * Is tile \a t a road stop station?
+ * @param t Tile to check
+ * @return \c true if the tile is a station tile and any road stop type (bus stop, truck stop or road waypoint)
+ */
+inline bool IsAnyRoadStopTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsAnyRoadStop(t);
+}
+
+/**
+ * Is tile \a t a bay (non-drive through) road stop station?
+ * @param t Tile to check
+ * @return \c true if the tile is a station tile and a bay road stop
+ */
+inline bool IsBayRoadStopTile(Tile t)
+{
+	return IsStationRoadStopTile(t) && GetStationGfx(t) < GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET;
+}
+
+/**
+ * Is tile \a t a drive through road stop station or waypoint?
+ * @param t Tile to check
+ * @return \c true if the tile is a station tile and a drive through road stop or road waypoint
+ */
+inline bool IsDriveThroughStopTile(Tile t)
+{
+	return IsAnyRoadStopTile(t) && GetStationGfx(t) >= GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET;
+}
+
+StationGfx GetTranslatedAirportTileID(StationGfx gfx);
+
+/**
+ * Get the decorations of a road waypoint.
+ * @param tile The tile to query.
+ * @return The road decoration of the tile.
+ */
+static inline Roadside GetRoadWaypointRoadside(Tile tile)
+{
+	assert(IsRoadWaypointTile(tile));
+	return static_cast<Roadside>(GB(tile.m3(), 2, 2));
+}
+
+/**
+ * Set the decorations of a road waypoint.
+ * @param tile The tile to change.
+ * @param s    The new road decoration of the tile.
+ */
+static inline void SetRoadWaypointRoadside(Tile tile, Roadside s)
+{
+	assert(IsRoadWaypointTile(tile));
+	SB(tile.m3(), 2, 2, to_underlying(s));
+}
+
+/**
+ * Check if a road waypoint tile has snow/desert.
+ * @param t The tile to query.
+ * @return True if the tile has snow/desert.
+ */
+static inline bool IsRoadWaypointOnSnowOrDesert(Tile t)
+{
+	assert(IsRoadWaypointTile(t));
+	return HasBit(t.m8(), 15);
+}
+
+/**
+ * Toggle the snow/desert state of a road waypoint tile.
+ * @param t The tile to change.
+ */
+static inline void ToggleRoadWaypointOnSnowOrDesert(Tile t)
+{
+	assert(IsRoadWaypointTile(t));
+	ToggleBit(t.m8(), 15);
+}
+
+/**
+ * Get the station graphics of this airport tile
+ * @param t the tile to query
+ * @pre IsAirport(t)
+ * @return the station graphics
+ */
+inline StationGfx GetAirportGfx(Tile t)
+{
+	assert(IsAirport(t));
+	return GetTranslatedAirportTileID(GetStationGfx(t));
+}
+
+/**
+ * Gets the direction the bay road stop entrance points towards.
+ * @param t the tile of the road stop
+ * @pre IsBayRoadStopTile(t)
+ * @return the direction of the entrance
+ */
+inline DiagDirection GetBayRoadStopDir(Tile t)
+{
+	assert(IsBayRoadStopTile(t));
+	return static_cast<DiagDirection>(GetStationGfx(t));
+}
+
+/**
+ * Gets the axis of the drive through stop.
+ * @param t the tile of the road stop
+ * @pre IsDriveThroughStopTile(t)
+ * @return the axis the drive through is in
+ */
+inline Axis GetDriveThroughStopAxis(Tile t)
+{
+	assert(IsDriveThroughStopTile(t));
+	return static_cast<Axis>(GetStationGfx(t) - GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET);
+}
+
+/**
+ * Is tile \a t part of an oilrig?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if the tile is an oilrig tile
+ */
+inline bool IsOilRig(Tile t)
+{
+	return GetStationType(t) == StationType::Oilrig;
+}
+
+/**
+ * Is tile \a t a dock tile?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if the tile is a dock
+ */
+inline bool IsDock(Tile t)
+{
+	return GetStationType(t) == StationType::Dock;
+}
+
+/**
+ * Is tile \a t a dock tile?
+ * @param t Tile to check
+ * @return \c true if the tile is a dock
+ */
+inline bool IsDockTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && GetStationType(t) == StationType::Dock;
+}
+
+/**
+ * Is tile \a t a buoy tile?
+ * @param t Tile to check
+ * @pre IsTileType(t, MP_STATION)
+ * @return \c true if the tile is a buoy
+ */
+inline bool IsBuoy(Tile t)
+{
+	return GetStationType(t) == StationType::Buoy;
+}
+
+/**
+ * Is tile \a t a buoy tile?
+ * @param t Tile to check
+ * @return \c true if the tile is a buoy
+ */
+inline bool IsBuoyTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsBuoy(t);
+}
+
+/**
+ * Is tile \a t an hangar tile?
+ * @param t Tile to check
+ * @return \c true if the tile is an hangar
+ */
+inline bool IsHangarTile(Tile t)
+{
+	return IsTileType(t, MP_STATION) && IsHangar(t);
+}
+
+/**
+ * Is tile \a t a blocked tile?
+ * @pre HasStationRail(t)
+ * @param t Tile to check
+ * @return \c true if the tile is blocked
+ */
+inline bool IsStationTileBlocked(Tile t)
+{
+	assert(HasStationRail(t));
+	return HasBit(t.m3(), 0);
+}
+
+/**
+ * Set the blocked state of the rail station
+ * @pre HasStationRail(t)
+ * @param t the station tile
+ * @param b the blocked state
+ */
+inline void SetStationTileBlocked(Tile t, bool b)
+{
+	assert(HasStationRail(t));
+	AssignBit(t.m3(), 0, b);
+}
+
+/**
+ * Can tile \a t have catenary wires?
+ * @pre HasStationRail(t)
+ * @param t Tile to check
+ * @return \c true if the tile can have catenary wires
+ */
+inline bool CanStationTileHaveWires(Tile t)
+{
+	assert(HasStationRail(t));
+	return HasBit(t.m3(), 1);
+}
+
+/**
+ * Set the catenary wires state of the rail station
+ * @pre HasStationRail(t)
+ * @param t the station tile
+ * @param b the catenary wires state
+ */
+inline void SetStationTileHaveWires(Tile t, bool b)
+{
+	assert(HasStationRail(t));
+	AssignBit(t.m3(), 1, b);
+}
+
+/**
+ * Can tile \a t have catenary pylons?
+ * @pre HasStationRail(t)
+ * @param t Tile to check
+ * @return \c true if the tile can have catenary pylons
+ */
+inline bool CanStationTileHavePylons(Tile t)
+{
+	assert(HasStationRail(t));
+	return HasBit(t.m3(), 2);
+}
+
+/**
+ * Set the catenary pylon state of the rail station
+ * @pre HasStationRail(t)
+ * @param t the station tile
+ * @param b the catenary pylons state
+ */
+inline void SetStationTileHavePylons(Tile t, bool b)
+{
+	assert(HasStationRail(t));
+	AssignBit(t.m3(), 2, b);
+}
+
+/**
+ * Get the rail direction of a rail station.
+ * @param t Tile to query
+ * @pre HasStationRail(t)
+ * @return The direction of the rails on tile \a t.
+ */
+inline Axis GetRailStationAxis(Tile t)
+{
+	assert(HasStationRail(t));
+	return HasBit(GetStationGfx(t), 0) ? AXIS_Y : AXIS_X;
+}
+
+/**
+ * Get the rail track of a rail station tile.
+ * @param t Tile to query
+ * @pre HasStationRail(t)
+ * @return The rail track of the rails on tile \a t.
+ */
+inline Track GetRailStationTrack(Tile t)
+{
+	return AxisToTrack(GetRailStationAxis(t));
+}
+
+/**
+ * Get the trackbits of a rail station tile.
+ * @param t Tile to query
+ * @pre HasStationRail(t)
+ * @return The trackbits of the rails on tile \a t.
+ */
+inline TrackBits GetRailStationTrackBits(Tile t)
+{
+	return AxisToTrackBits(GetRailStationAxis(t));
+}
+
+/**
+ * Check if a tile is a valid continuation to a railstation tile.
+ * The tile \a test_tile is a valid continuation to \a station_tile, if all of the following are true:
+ * \li \a test_tile is a rail station tile
+ * \li the railtype of \a test_tile is compatible with the railtype of \a station_tile
+ * \li the tracks on \a test_tile and \a station_tile are in the same direction
+ * \li both tiles belong to the same station
+ * \li \a test_tile is not blocked (@see IsStationTileBlocked)
+ * @param test_tile Tile to test
+ * @param station_tile Station tile to compare with
+ * @pre IsRailStationTile(station_tile)
+ * @return true if the two tiles are compatible
+ */
+inline bool IsCompatibleTrainStationTile(Tile test_tile, Tile station_tile)
+{
+	assert(IsRailStationTile(station_tile));
+	return IsRailStationTile(test_tile) && !IsStationTileBlocked(test_tile) &&
+			IsCompatibleRail(GetRailType(test_tile), GetRailType(station_tile)) &&
+			GetRailStationAxis(test_tile) == GetRailStationAxis(station_tile) &&
+			GetStationIndex(test_tile) == GetStationIndex(station_tile);
+}
+
+/**
+ * Get the reservation state of the rail station
+ * @pre HasStationRail(t)
+ * @param t the station tile
+ * @return reservation state
+ */
+inline bool HasStationReservation(Tile t)
+{
+	assert(HasStationRail(t));
+	return HasBit(t.m6(), 2);
+}
+
+/**
+ * Set the reservation state of the rail station
+ * @pre HasStationRail(t)
+ * @param t the station tile
+ * @param b the reservation state
+ */
+inline void SetRailStationReservation(Tile t, bool b)
+{
+	assert(HasStationRail(t));
+	AssignBit(t.m6(), 2, b);
+}
+
+/**
+ * Get the reserved track bits for a waypoint
+ * @pre HasStationRail(t)
+ * @param t the tile
+ * @return reserved track bits
+ */
+inline TrackBits GetStationReservationTrackBits(Tile t)
+{
+	return HasStationReservation(t) ? GetRailStationTrackBits(t) : TRACK_BIT_NONE;
+}
+
+/**
+ * Get the direction of a dock.
+ * @param t Tile to query
+ * @pre IsDock(t)
+ * @pre \a t is the land part of the dock
+ * @return The direction of the dock on tile \a t.
+ */
+inline DiagDirection GetDockDirection(Tile t)
+{
+	StationGfx gfx = GetStationGfx(t);
+	assert(IsDock(t) && gfx < GFX_DOCK_BASE_WATER_PART);
+	return (DiagDirection)(gfx);
+}
+
+/**
+ * Check whether a dock tile is the tile on water.
+ */
+inline bool IsDockWaterPart(Tile t)
+{
+	assert(IsDockTile(t));
+	StationGfx gfx = GetStationGfx(t);
+	return gfx >= GFX_DOCK_BASE_WATER_PART;
+}
+
+/**
+ * Is there a custom rail station spec on this tile?
+ * @param t Tile to query
+ * @pre HasStationTileRail(t)
+ * @return True if this station is part of a newgrf station.
+ */
+inline bool IsCustomStationSpecIndex(Tile t)
+{
+	assert(HasStationTileRail(t));
+	return t.m4() != 0;
+}
+
+/**
+ * Set the custom station spec for this tile.
+ * @param t Tile to set the stationspec of.
+ * @param specindex The new spec.
+ * @pre HasStationTileRail(t)
+ */
+inline void SetCustomStationSpecIndex(Tile t, uint8_t specindex)
+{
+	assert(HasStationTileRail(t));
+	t.m4() = specindex;
+}
+
+/**
+ * Get the custom station spec for this tile.
+ * @param t Tile to query
+ * @pre HasStationTileRail(t)
+ * @return The custom station spec of this tile.
+ */
+inline uint GetCustomStationSpecIndex(Tile t)
+{
+	assert(HasStationTileRail(t));
+	return t.m4();
+}
+
+/**
+ * Is there a custom road stop spec on this tile?
+ * @param t Tile to query
+ * @pre IsAnyRoadStopTile(t)
+ * @return True if this station is part of a newgrf station.
+ */
+inline bool IsCustomRoadStopSpecIndex(Tile t)
+{
+	assert(IsAnyRoadStopTile(t));
+	return GB(t.m8(), 0, 6) != 0;
+}
+
+/**
+ * Set the custom road stop spec for this tile.
+ * @param t Tile to set the stationspec of.
+ * @param specindex The new spec.
+ * @pre IsAnyRoadStopTile(t)
+ */
+inline void SetCustomRoadStopSpecIndex(Tile t, uint8_t specindex)
+{
+	assert(IsAnyRoadStopTile(t));
+	SB(t.m8(), 0, 6, specindex);
+}
+
+/**
+ * Get the custom road stop spec for this tile.
+ * @param t Tile to query
+ * @pre IsAnyRoadStopTile(t)
+ * @return The custom station spec of this tile.
+ */
+inline uint GetCustomRoadStopSpecIndex(Tile t)
+{
+	assert(IsAnyRoadStopTile(t));
+	return GB(t.m8(), 0, 6);
+}
+
+/**
+ * Set the random bits for a station tile.
+ * @param t Tile to set random bits for.
+ * @param random_bits The random bits.
+ * @pre IsTileType(t, MP_STATION)
+ */
+inline void SetStationTileRandomBits(Tile t, uint8_t random_bits)
+{
+	assert(IsTileType(t, MP_STATION));
+	SB(t.m3(), 4, 4, random_bits);
+}
+
+/**
+ * Get the random bits of a station tile.
+ * @param t Tile to query
+ * @pre IsTileType(t, MP_STATION)
+ * @return The random bits for this station tile.
+ */
+inline uint8_t GetStationTileRandomBits(Tile t)
+{
+	assert(IsTileType(t, MP_STATION));
+	return GB(t.m3(), 4, 4);
+}
+
+/**
+ * Make the given tile a station tile.
+ * @param t the tile to make a station tile
+ * @param o the owner of the station
+ * @param sid the station to which this tile belongs
+ * @param st the type this station tile
+ * @param section the StationGfx to be used for this tile
+ * @param wc The water class of the station
+ */
+inline void MakeStation(Tile t, Owner o, StationID sid, StationType st, uint8_t section, WaterClass wc = WaterClass::Invalid)
+{
+	SetTileType(t, MP_STATION);
+	SetTileOwner(t, o);
+	SetWaterClass(t, wc);
+	SetDockingTile(t, false);
+	t.m2() = sid.base();
+	t.m3() = 0;
+	t.m4() = 0;
+	t.m5() = section;
+	SB(t.m6(), 2, 1, 0);
+	SB(t.m6(), 3, 4, to_underlying(st));
+	SB(t.m6(), 7, 1, 0);
+	t.m7() = 0;
+	t.m8() = 0;
+}
+
+/**
+ * Make the given tile a rail station tile.
+ * @param t the tile to make a rail station tile
+ * @param o the owner of the station
+ * @param sid the station to which this tile belongs
+ * @param a the axis of this tile
+ * @param section the StationGfx to be used for this tile
+ * @param rt the railtype of this tile
+ */
+inline void MakeRailStation(Tile t, Owner o, StationID sid, Axis a, uint8_t section, RailType rt)
+{
+	MakeStation(t, o, sid, StationType::Rail, section + a);
+	SetRailType(t, rt);
+	SetRailStationReservation(t, false);
+}
+
+/**
+ * Make the given tile a rail waypoint tile.
+ * @param t the tile to make a rail waypoint
+ * @param o the owner of the waypoint
+ * @param sid the waypoint to which this tile belongs
+ * @param a the axis of this tile
+ * @param section the StationGfx to be used for this tile
+ * @param rt the railtype of this tile
+ */
+inline void MakeRailWaypoint(Tile t, Owner o, StationID sid, Axis a, uint8_t section, RailType rt)
+{
+	MakeStation(t, o, sid, StationType::RailWaypoint, section + a);
+	SetRailType(t, rt);
+	SetRailStationReservation(t, false);
+}
+
+/**
+ * Make the given tile a roadstop tile.
+ * @param t the tile to make a roadstop
+ * @param o the owner of the roadstop
+ * @param sid the station to which this tile belongs
+ * @param rst the type of roadstop to make this tile
+ * @param road_rt the road roadtype on this tile
+ * @param tram_rt the tram roadtype on this tile
+ * @param d the direction of the roadstop
+ */
+inline void MakeRoadStop(Tile t, Owner o, StationID sid, RoadStopType rst, RoadType road_rt, RoadType tram_rt, DiagDirection d)
+{
+	MakeStation(t, o, sid, (rst == RoadStopType::Bus ? StationType::Bus : StationType::Truck), d);
+	SetRoadTypes(t, road_rt, tram_rt);
+	SetRoadOwner(t, RTT_ROAD, o);
+	SetRoadOwner(t, RTT_TRAM, o);
+}
+
+/**
+ * Make the given tile a drivethrough roadstop tile.
+ * @param t the tile to make a roadstop
+ * @param station the owner of the roadstop
+ * @param road the owner of the road
+ * @param tram the owner of the tram
+ * @param sid the station to which this tile belongs
+ * @param rst the type of roadstop to make this tile
+ * @param road_rt the road roadtype on this tile
+ * @param tram_rt the tram roadtype on this tile
+ * @param a the direction of the roadstop
+ */
+inline void MakeDriveThroughRoadStop(Tile t, Owner station, Owner road, Owner tram, StationID sid, StationType rst, RoadType road_rt, RoadType tram_rt, Axis a)
+{
+	MakeStation(t, station, sid, rst, GFX_TRUCK_BUS_DRIVETHROUGH_OFFSET + a);
+	SetRoadTypes(t, road_rt, tram_rt);
+	SetRoadOwner(t, RTT_ROAD, road);
+	SetRoadOwner(t, RTT_TRAM, tram);
+}
+
+/**
+ * Make the given tile an airport tile.
+ * @param t the tile to make a airport
+ * @param o the owner of the airport
+ * @param sid the station to which this tile belongs
+ * @param section the StationGfx to be used for this tile
+ * @param wc the type of water on this tile
+ */
+inline void MakeAirport(Tile t, Owner o, StationID sid, uint8_t section, WaterClass wc)
+{
+	MakeStation(t, o, sid, StationType::Airport, section, wc);
+}
+
+/**
+ * Make the given tile a buoy tile.
+ * @param t the tile to make a buoy
+ * @param sid the station to which this tile belongs
+ * @param wc the type of water on this tile
+ */
+inline void MakeBuoy(Tile t, StationID sid, WaterClass wc)
+{
+	/* Make the owner of the buoy tile the same as the current owner of the
+	 * water tile. In this way, we can reset the owner of the water to its
+	 * original state when the buoy gets removed. */
+	MakeStation(t, GetTileOwner(t), sid, StationType::Buoy, 0, wc);
+}
+
+/**
+ * Make the given tile a dock tile.
+ * @param t the tile to make a dock
+ * @param o the owner of the dock
+ * @param sid the station to which this tile belongs
+ * @param d the direction of the dock
+ * @param wc the type of water on this tile
+ */
+inline void MakeDock(Tile t, Owner o, StationID sid, DiagDirection d, WaterClass wc)
+{
+	MakeStation(t, o, sid, StationType::Dock, d);
+	MakeStation(TileIndex(t) + TileOffsByDiagDir(d), o, sid, StationType::Dock, GFX_DOCK_BASE_WATER_PART + DiagDirToAxis(d), wc);
+}
+
+/**
+ * Make the given tile an oilrig tile.
+ * @param t the tile to make an oilrig
+ * @param sid the station to which this tile belongs
+ * @param wc the type of water on this tile
+ */
+inline void MakeOilrig(Tile t, StationID sid, WaterClass wc)
+{
+	MakeStation(t, OWNER_NONE, sid, StationType::Oilrig, 0, wc);
+}
+
+#endif /* STATION_MAP_H */

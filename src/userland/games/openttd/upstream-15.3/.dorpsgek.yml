@@ -1,0 +1,20 @@
+notifications:
+  global:
+    irc:
+      - openttd
+      - openttd.notice
+
+  push:
+    only:
+    - master
+    only-by:
+    - eints-sync\[bot\]
+  commit-comment:
+  discussion:
+  pull-request:
+  issue:
+  tag-created:
+  workflow-run:
+    only:
+    - .github/workflows/release.yml
+    - .github/workflows/ci-nightly.yml

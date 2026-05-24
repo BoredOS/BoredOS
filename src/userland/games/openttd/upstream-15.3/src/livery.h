@@ -1,0 +1,93 @@
+/*
+ * This file is part of OpenTTD.
+ * OpenTTD is free software; you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, version 2.
+ * OpenTTD is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+ * See the GNU General Public License for more details. You should have received a copy of the GNU General Public License along with OpenTTD. If not, see <https://www.gnu.org/licenses/old-licenses/gpl-2.0>.
+ */
+
+/** @file livery.h Functions/types related to livery colours. */
+
+#ifndef LIVERY_H
+#define LIVERY_H
+
+#include "core/enum_type.hpp"
+#include "company_type.h"
+#include "gfx_type.h"
+
+static const uint8_t LIT_NONE    = 0; ///< Don't show the liveries at all
+static const uint8_t LIT_COMPANY = 1; ///< Show the liveries of your own company
+static const uint8_t LIT_ALL     = 2; ///< Show the liveries of all companies
+
+/** List of different livery schemes. */
+enum LiveryScheme : uint8_t {
+	LS_BEGIN = 0,
+	LS_DEFAULT = 0,
+
+	/* Rail vehicles */
+	LS_STEAM,
+	LS_DIESEL,
+	LS_ELECTRIC,
+	LS_MONORAIL,
+	LS_MAGLEV,
+	LS_DMU,
+	LS_EMU,
+	LS_PASSENGER_WAGON_STEAM,
+	LS_PASSENGER_WAGON_DIESEL,
+	LS_PASSENGER_WAGON_ELECTRIC,
+	LS_PASSENGER_WAGON_MONORAIL,
+	LS_PASSENGER_WAGON_MAGLEV,
+	LS_FREIGHT_WAGON,
+
+	/* Road vehicles */
+	LS_BUS,
+	LS_TRUCK,
+
+	/* Ships */
+	LS_PASSENGER_SHIP,
+	LS_FREIGHT_SHIP,
+
+	/* Aircraft */
+	LS_HELICOPTER,
+	LS_SMALL_PLANE,
+	LS_LARGE_PLANE,
+
+	/* Trams (appear on Road Vehicles tab) */
+	LS_PASSENGER_TRAM,
+	LS_FREIGHT_TRAM,
+
+	LS_END
+};
+
+DECLARE_INCREMENT_DECREMENT_OPERATORS(LiveryScheme)
+
+/** List of different livery classes, used only by the livery GUI. */
+enum LiveryClass : uint8_t {
+	LC_OTHER,
+	LC_RAIL,
+	LC_ROAD,
+	LC_SHIP,
+	LC_AIRCRAFT,
+	LC_GROUP_RAIL,
+	LC_GROUP_ROAD,
+	LC_GROUP_SHIP,
+	LC_GROUP_AIRCRAFT,
+	LC_END
+};
+DECLARE_ENUM_AS_ADDABLE(LiveryClass)
+
+/** Information about a particular livery. */
+struct Livery {
+	enum class Flag : uint8_t {
+		Primary = 0, ///< Primary colour is set.
+		Secondary = 1, ///< Secondary colour is set.
+	};
+	using Flags = EnumBitSet<Flag, uint8_t>;
+
+	Flags in_use{}; ///< Livery flags.
+	Colours colour1 = COLOUR_BEGIN; ///< First colour, for all vehicles.
+	Colours colour2 = COLOUR_BEGIN; ///< Second colour, for vehicles with 2CC support.
+};
+
+void ResetCompanyLivery(Company *c);
+
+#endif /* LIVERY_H */
