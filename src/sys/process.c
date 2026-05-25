@@ -259,8 +259,10 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
 
     // Initialize FPU state for new process
     asm volatile("fninit");
+    uint32_t mxcsr = 0x1F80;
+    asm volatile("ldmxcsr %0" : : "m"(mxcsr));
     new_proc->fpu_initialized = true;
-    
+
     new_proc->cpu_affinity = 0; // Non-ELF processes stay on BSP
     
     // Add to linked list
@@ -503,6 +505,8 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     stack_ptr = (uint64_t*)((uint64_t)stack_ptr - 512);
     // Initialize with a clean FPU state
     asm volatile("fninit");
+    uint32_t mxcsr_init = 0x1F80;
+    asm volatile("ldmxcsr %0" : : "m"(mxcsr_init));
     asm volatile("fxsave %0" : "=m"(*stack_ptr));
 
     new_proc->kernel_stack = (uint64_t)kernel_stack + 65536;
@@ -513,6 +517,8 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
 
     // Initialize FPU state for new process
     asm volatile("fninit");
+    uint32_t mxcsr_val = 0x1F80;
+    asm volatile("ldmxcsr %0" : : "m"(mxcsr_val));
     new_proc->fpu_initialized = true;
 
     // Assign to a CPU core via round-robin across APs (if SMP is active)

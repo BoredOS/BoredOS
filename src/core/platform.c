@@ -40,8 +40,10 @@ void platform_init(void) {
     cr4 |= (1ULL << 10); // Set OSXMMEXCPT (SIMD exception support)
     asm volatile("mov %0, %%cr4" : : "r"(cr4));
 
-    // Initialize FPU
+    // Initialize FPU and SSE state
     asm volatile("fninit");
+    uint32_t mxcsr = 0x1F80;
+    asm volatile("ldmxcsr %0" : : "m"(mxcsr));
 }
 uint64_t p2v(uint64_t phys) { return phys + hhdm_offset; }
 uint64_t v2p(uint64_t virt) {

@@ -75,6 +75,8 @@ static void ap_entry(struct limine_smp_info *info) {
     cr4 |= (1ULL << 10);
     asm volatile("mov %0, %%cr4" : : "r"(cr4));
     asm volatile("fninit");
+    uint32_t mxcsr = 0x1F80;
+    asm volatile("ldmxcsr %0" : : "m"(mxcsr));
 
     extern struct gdt_ptr gdtr;
     extern void gdt_flush(uint64_t);
