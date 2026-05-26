@@ -3,7 +3,21 @@
 # Uses x86_64-elf-gcc + mlibc + libX11.a (core fonts only, no Xft/Xinerama).
 set -e
 
-BOREDOS_ROOT="/Users/chris/BoredOS"
+# Resolve repo root from env, git, or script location.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+BOREDOS_ROOT="${BOREDOS_ROOT:-}"
+if [ -z "$BOREDOS_ROOT" ]; then
+  if command -v git >/dev/null 2>&1; then
+    BOREDOS_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  fi
+  if [ -z "$BOREDOS_ROOT" ]; then
+    BOREDOS_ROOT="$(cd "$SCRIPT_DIR/../../../../" && pwd)"
+  fi
+fi
+if [ ! -f "$BOREDOS_ROOT/Makefile" ]; then
+  echo "[ERR] Could not resolve BoredOS root (missing Makefile)." >&2
+  exit 1
+fi
 MLIBC_HEADERS="${BOREDOS_ROOT}/src/userland/mlibc/build/mlibc-headers/usr/include"
 MLIBC_CRT1="${BOREDOS_ROOT}/src/userland/mlibc/build/sysdeps/boredos/crt1.o"
 SDK_INCLUDE="${BOREDOS_ROOT}/src/userland/sdk/include"
