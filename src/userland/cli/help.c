@@ -28,6 +28,7 @@ int main(int argc, char **argv) {
     printf("hexdump <file> - Display file contents in hexadecimal.\n");
     printf("ps [options]   - List running processes\n");
     printf("lsblk          - List block devices and partitions\n");
+    printf("loadkeys [args]- Change keyboard layout\n");
     printf("cowsay [msg]   - Fun cow says something\n");
     printf("beep           - Make a beep sound\n");
     printf("reboot         - Reboot the system\n");

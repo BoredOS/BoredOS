@@ -75,6 +75,7 @@
 #define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 51
 #define SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE 52
 #define SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE 53
+#define SYSTEM_CMD_GET_KEYBOARD_LAYOUTS 54
 #define SYSTEM_CMD_SET_TEXT_COLOR 29
 #define SYSTEM_CMD_SET_WALLPAPER_PATH 31
 #define SYSTEM_CMD_RTC_SET 32
@@ -157,6 +158,13 @@ typedef struct {
     char build_time[64];
     char build_arch[64];
 } os_info_t;
+
+#define SYS_KEYBOARD_LAYOUT_NAME_MAX 64
+
+typedef struct {
+    uint32_t id;
+    char name[SYS_KEYBOARD_LAYOUT_NAME_MAX];
+} sys_keyboard_layout_t;
 
 int sys_get_os_info(os_info_t *info);
 

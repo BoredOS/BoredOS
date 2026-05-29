@@ -46,6 +46,7 @@ void create_man_entries(void) {
     write_man_file("echo", "ECHO - Print text\n\nUsage: echo [text]\n\nPrints the specified text to the terminal.");
     write_man_file("hello", "HELLO - Hello World demo\n\nUsage: hello\n\nA simple demonstration program that prints a greeting.");
     write_man_file("help", "HELP - List available commands\n\nUsage: help\n\nLists all internal and external commands available in the shell.");
+    write_man_file("loadkeys", "LOADKEYS - Change keyboard layout\n\nUsage: loadkeys <layout>\n       loadkeys -l\n       loadkeys -c\n\nChanges the active keyboard layout for the current system session. Use -l to list layouts exposed by the kernel.\n\nLayouts:\n  us, qwerty   QWERTY\n  fr, azerty   AZERTY\n  de, qwertz   QWERTZ\n  dvorak       DVORAK");
     write_man_file("uptime", "UPTIME - Show system uptime\n\nUsage: uptime\n\nDisplays how long BoredOS has been running since boot.");
     write_man_file("pwd", "PWD - Print working directory\n\nUsage: pwd\n\nDisplays the absolute path of the current working directory.");
     write_man_file("mkdir", "MKDIR - Create directory\n\nUsage: mkdir <dirname>\n\nCreates a new directory with the specified name.");

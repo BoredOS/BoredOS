@@ -46,6 +46,7 @@
 
 #define SYSTEM_CMD_SET_KEYBOARD_LAYOUT 49
 #define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 51
+#define SYSTEM_CMD_GET_KEYBOARD_LAYOUTS 54
 
 // Read MSR
 static inline uint64_t rdmsr(uint32_t msr) {
@@ -2343,6 +2344,31 @@ static uint64_t sys_cmd_get_keyboard_layout(const syscall_args_t *args) {
     return (uint64_t)keymap_get_current();
 }
 
+static uint64_t sys_cmd_get_keyboard_layouts(const syscall_args_t *args) {
+    sys_keyboard_layout_t *out = (sys_keyboard_layout_t *)args->arg2;
+    int max_entries = (int)args->arg3;
+    int count = keymap_get_count();
+
+    if (!out || max_entries <= 0) return (uint64_t)count;
+
+    int copy_count = count;
+    if (copy_count > max_entries) copy_count = max_entries;
+
+    for (int i = 0; i < copy_count; i++) {
+        const char *name = keymap_get_name((keymap_id_t)i);
+        int j = 0;
+
+        out[i].id = (uint32_t)i;
+        while (name[j] && j < SYS_KEYBOARD_LAYOUT_NAME_MAX - 1) {
+            out[i].name[j] = name[j];
+            j++;
+        }
+        out[i].name[j] = '\0';
+    }
+
+    return (uint64_t)count;
+}
+
 typedef struct {
     char     devname[16];
     char     label[32];
@@ -2620,6 +2646,7 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_PARALLEL_RUN]        = sys_cmd_parallel_run,
     [SYSTEM_CMD_SET_KEYBOARD_LAYOUT] = sys_cmd_set_keyboard_layout,
     [SYSTEM_CMD_GET_KEYBOARD_LAYOUT] = sys_cmd_get_keyboard_layout,
+    [SYSTEM_CMD_GET_KEYBOARD_LAYOUTS] = sys_cmd_get_keyboard_layouts,
     [SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE] = sys_cmd_set_mouse_cursor_scale,
     [SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE] = sys_cmd_get_mouse_cursor_scale,
     [SYSTEM_CMD_TTY_CREATE]          = sys_cmd_tty_create,

@@ -20,6 +20,13 @@ typedef struct {
     char build_arch[64];
 } os_info_t;
 
+#define SYS_KEYBOARD_LAYOUT_NAME_MAX 64
+
+typedef struct {
+    uint32_t id;
+    char name[SYS_KEYBOARD_LAYOUT_NAME_MAX];
+} sys_keyboard_layout_t;
+
 // MSRs used for syscalls in x86_64
 #define MSR_EFER       0xC0000080
 #define MSR_STAR       0xC0000081
@@ -111,6 +118,7 @@ typedef struct {
 #define SYSTEM_CMD_GET_KEYBOARD_LAYOUT 51
 #define SYSTEM_CMD_SET_MOUSE_CURSOR_SCALE 52
 #define SYSTEM_CMD_GET_MOUSE_CURSOR_SCALE 53
+#define SYSTEM_CMD_GET_KEYBOARD_LAYOUTS 54
 #define SYSTEM_CMD_TTY_CREATE 60
 #define SYSTEM_CMD_TTY_READ_OUT 61
 #define SYSTEM_CMD_TTY_WRITE_IN 62
