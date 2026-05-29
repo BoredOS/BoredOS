@@ -144,7 +144,6 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	mkdir -p $(BUILD_DIR)/initrd/root/Documents
 	mkdir -p $(BUILD_DIR)/initrd/root/Downloads
 	mkdir -p $(BUILD_DIR)/initrd/etc
-	mkdir -p $(BUILD_DIR)/initrd/tmp/.X11-unix
 
 	mkdir -p $(BUILD_DIR)/initrd/usr/lib/tcc/include
 	mkdir -p $(BUILD_DIR)/initrd/usr/local/include
@@ -167,7 +166,6 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	done
 
 	@printf "$(YELLOW)[COPY]$(RESET) TCC support files...\n"
-	@cp -r $(SRC_DIR)/userland/third_party/tinyxserver/fonts/* $(BUILD_DIR)/initrd/Library/Fonts/
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/tcc/
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/
 	@cp $(SRC_DIR)/userland/cli/third_party/tcc/include/*.h $(BUILD_DIR)/initrd/usr/lib/tcc/include/

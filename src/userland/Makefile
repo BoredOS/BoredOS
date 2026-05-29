@@ -100,50 +100,7 @@ PDC_OBJS      = $(patsubst $(PDCURSES_DIR)/pdcurses/%.c, $(BIN_DIR)/pdcurses_cor
                 $(patsubst $(PDCURSES_DIR)/vt/%.c, $(BIN_DIR)/pdcurses_vt_%.o, $(PDC_VT_SRCS))
 
 all: $(BIN_DIR) $(MLIBC_LIB) $(SDK_DIR)/lib/libboredos.a $(SDK_DIR)/lib/libncurses.a $(APP_ELFS) \
-     $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o \
-     $(BIN_DIR)/Xfbdev.elf $(SDK_DIR)/lib/libX11.a $(BIN_DIR)/dwm.elf $(BIN_DIR)/st.elf
-
-$(SDK_DIR)/lib/libz.a: $(MLIBC_LIB)
-	@echo "[ZLIB] Building zlib..."
-	cd third_party/zlib && sh build_zlib.sh
-	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include
-	cp third_party/zlib/libz.a $@
-	cp third_party/zlib/zlib.h third_party/zlib/zconf.h $(SDK_DIR)/include/
-
-$(SDK_DIR)/lib/libXau.a: $(MLIBC_LIB)
-	@echo "[LIBXAU] Building libXau..."
-	cd third_party/libXau && sh build_libXau.sh
-	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include/X11
-	cp third_party/libXau/libXau.a $@
-	cp third_party/libXau/include/X11/Xauth.h $(SDK_DIR)/include/X11/
-
-$(SDK_DIR)/lib/libXfont.a: $(SDK_DIR)/lib/libz.a $(MLIBC_LIB)
-	@echo "[LIBXFONT] Building libXfont..."
-	cd third_party/libXfont && sh build_libXfont.sh
-	mkdir -p $(SDK_DIR)/lib
-	cp third_party/libXfont/libXfont.a $@
-
-$(BIN_DIR)/Xfbdev.elf: $(SDK_DIR)/lib/libz.a $(SDK_DIR)/lib/libXau.a $(SDK_DIR)/lib/libXfont.a
-	@echo "[TINYXSERVER] Building Xfbdev..."
-	cd third_party/tinyxserver && PATH=$$(pwd)/bin:$$PATH make Xfbdev
-	cp third_party/tinyxserver/Xfbdev $@
-
-$(SDK_DIR)/lib/libX11.a: $(SDK_DIR)/lib/libXau.a $(MLIBC_LIB)
-	@echo "[LIBX11] Building libX11..."
-	cd third_party/libX11 && sh build_libX11.sh
-	mkdir -p $(SDK_DIR)/lib $(SDK_DIR)/include/X11
-	cp third_party/libX11/libX11.a $@
-	cp -r third_party/libX11/include/X11/* $(SDK_DIR)/include/X11/
-
-$(BIN_DIR)/dwm.elf: $(SDK_DIR)/lib/libX11.a $(SDK_DIR)/lib/libXau.a $(SDK_DIR)/lib/libboredos.a $(MLIBC_LIB)
-	@echo "[DWM] Building dwm..."
-	cd third_party/dwm && sh build_dwm.sh
-	cp third_party/dwm/dwm.elf $@
-
-$(BIN_DIR)/st.elf: $(SDK_DIR)/lib/libX11.a $(SDK_DIR)/lib/libXau.a $(SDK_DIR)/lib/libboredos.a $(MLIBC_LIB)
-	@echo "[ST] Building st..."
-	cd third_party/st && sh build_st.sh
-	cp third_party/st/st.elf $@
+     $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o
 
 
 # ---------------------------------------------------------------------------
@@ -325,11 +282,4 @@ clean:
 		echo "[CLEAN] Removing mlibc build dir..."; \
 		rm -rf $(MLIBC_BUILD_DIR); \
 	fi
-	cd third_party/zlib && make clean || true
-	cd third_party/libXau && rm -f *.o *.a || true
-	cd third_party/libX11 && rm -f *.o *.a || true
-	cd third_party/libXfont && rm -f src/**/*.o src/*.o *.a || true
-	cd third_party/tinyxserver && make clean || true
-	cd third_party/dwm && rm -f *.o dwm.elf || true
-	cd third_party/st && rm -f *.o st.elf || true
 

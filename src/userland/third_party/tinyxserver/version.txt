@@ -1,1 +1,0 @@
-tiny-Xserver 0.03

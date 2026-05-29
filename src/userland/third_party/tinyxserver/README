@@ -1,9 +1,0 @@
-tiny-Xserver-0.03
-
-Based on X11-tiny-1.2.61 but modified by goingnuts to enable build of more
-extensions.
-
-Further modified by Isaac Dunham with backports of CVE fixes and a few
-portability changes.  Builds on musl OOB.
-
-

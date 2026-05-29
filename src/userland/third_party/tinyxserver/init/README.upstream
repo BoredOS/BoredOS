@@ -1,5 +1,0 @@
-The xinit is not intended for naive users.  Instead, site administrators should
-design user-friendly scripts that present the desired interface when starting
-up X.  The startx script is one such example.  
-
-Note that the sample xinitrc file is NOT installed by default.
