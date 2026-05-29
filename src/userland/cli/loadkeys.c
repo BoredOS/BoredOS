@@ -88,14 +88,6 @@ int main(int argc, char **argv) {
         return print_available_layouts();
     }
 
-    // -c for current layout
-    if (strcmp(argv[1], "-c") == 0 || strcmp(argv[1], "--current") == 0) {
-        keyboard_layout = sys_system(SYSTEM_CMD_GET_KEYBOARD_LAYOUT, 0, 0, 0, 0);
-        printf("Current keyboard layout: %d\n", keyboard_layout);
-        return 0;
-    }
-
-
     if (!parse_layout(argv[1], &layout_id)) {
         printf("loadkeys: unknown layout: %s\n", argv[1]);
         print_usage();
