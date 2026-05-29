@@ -20,7 +20,6 @@ static void print_usage(void) {
     printf("Options:\n");
     printf("  -h, --help      Show this help message and exit\n");
     printf("  -l, --list      List available keyboard layouts\n");
-    printf("  -c, --current   Show the current keyboard layout\n");
 }
 
 static int print_available_layouts(void) {
