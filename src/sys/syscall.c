@@ -7,6 +7,7 @@
 #include "memory_manager.h"
 #include "process.h"
 #include "vfs.h"
+#include "shm.h"
 
 #include "app_metadata.h"
 #include "cmd.h"
@@ -557,11 +558,6 @@ static uint64_t fs_cmd_unix_socket_accept(const syscall_args_t *args) {
   if (!sock || !sock->is_listening)
     return -1;
 
-  serial_write("[syscall] accept called on fd=");
-  serial_write_num(fd);
-  serial_write(" domain=");
-  serial_write_num(sock->domain);
-  serial_write("\n");
 
   if (sock->domain == 2) {
     if (sock->accept_queue_count == 0) {
@@ -2539,6 +2535,8 @@ static const syscall_handler_fn sys_cmd_table[SYS_CMD_TABLE_SIZE] = {
     [SYSTEM_CMD_GET_WALLPAPER_THUMB] = sys_cmd_get_wallpaper_thumb,
     [SYSTEM_CMD_CLEAR_SCREEN] = sys_cmd_clear_screen,
     [SYSTEM_CMD_RTC_GET] = sys_cmd_rtc_get,
+    [SYSTEM_CMD_REBOOT] = sys_cmd_reboot,
+    [SYSTEM_CMD_SHUTDOWN] = sys_cmd_shutdown,
     [SYSTEM_CMD_BEEP] = sys_cmd_beep,
     [SYSTEM_CMD_GET_MEM_INFO] = sys_cmd_get_mem_info,
     [SYSTEM_CMD_GET_TICKS] = sys_cmd_get_ticks,
@@ -2783,6 +2781,34 @@ static uint64_t handle_sys_mmap(const syscall_args_t *args) {
     for (uint64_t off = 0; off < aligned_len; off += 4096) {
       paging_map_page(proc->pml4_phys, virt_addr + off, phys_addr + off,
                       fb_flags);
+    }
+    return virt_addr;
+  }
+
+  if (file->is_device && file->device_type == DEVICE_TYPE_SHM) {
+    typedef struct shm_segment shm_segment_t;
+    extern int shm_allocate(shm_segment_t *seg, size_t size);
+    extern void shm_ref(shm_segment_t *seg);
+    shm_segment_t *seg = (shm_segment_t *)file->fs_handle;
+    if (!seg)
+      return (uint64_t)MAP_FAILED;
+
+    // Ensure segment has enough pages for the requested mapping size
+    if ((uint64_t)seg->page_count * 4096 < aligned_len) {
+      if (shm_allocate(seg, aligned_len) < 0)
+        return (uint64_t)MAP_FAILED;
+    }
+
+    // Keep the segment alive after the file descriptor is closed.
+    // Without this, close(shm_fd) after mmap drops refcount to 0,
+    // freeing backing pages while they are still mapped into userspace.
+    shm_ref(seg);
+
+    // Map pages covering the requested length
+    uint32_t pages_to_map = aligned_len / 4096;
+    for (uint32_t i = 0; i < pages_to_map; i++) {
+      paging_map_page(proc->pml4_phys, virt_addr + i * 4096, seg->phys_pages[i],
+                      pt_flags);
     }
     return virt_addr;
   }

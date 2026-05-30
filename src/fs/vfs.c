@@ -2,6 +2,7 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "vfs.h"
+#include "shm.h"
 #include "memory_manager.h"
 #include "spinlock.h"
 #include <stddef.h>
@@ -392,6 +393,31 @@ vfs_file_t* vfs_open(const char *path, const char *mode) {
             }
         }
 
+        // Handle Shared Memory: /dev/shm/some_name
+        if (vfs_starts_with(devname, "shm/")) {
+            const char *shm_name = devname + 4;
+            if (shm_name[0] != '\0') {
+                typedef struct shm_segment shm_segment_t;
+                extern shm_segment_t* shm_get_or_create(const char *name);
+                shm_segment_t *seg = shm_get_or_create(shm_name);
+                if (seg) {
+                    vfs_file_t *vf = vfs_alloc_file();
+                    if (vf) {
+                        vf->mount = &mounts[0];
+                        vf->fs_handle = (void*)seg;
+                        vf->is_device = true;
+                        vf->device_type = DEVICE_TYPE_SHM;
+                        vf->position = 0;
+                        spinlock_release_irqrestore(&vfs_lock, flags);
+                        return vf;
+                    } else {
+                        extern void shm_unref(shm_segment_t *seg);
+                        shm_unref(seg);
+                    }
+                }
+            }
+        }
+
         Disk *d = disk_get_by_name(devname);
 
         if (d && (!mount || mount->path_len == 1)) {
@@ -442,6 +468,12 @@ vfs_file_t* vfs_open(const char *path, const char *mode) {
 void vfs_close(vfs_file_t *file) {
     if (!file || !file->valid) return;
 
+    if (file->is_device && file->device_type == DEVICE_TYPE_SHM) {
+        typedef struct shm_segment shm_segment_t;
+        extern void shm_unref(shm_segment_t *seg);
+        shm_unref((shm_segment_t *)file->fs_handle);
+    }
+
     vfs_mount_t *mount = file->mount;
     if (mount && mount->ops->close && !file->is_device) {
         mount->ops->close(mount->fs_private, file->fs_handle);
@@ -486,9 +518,35 @@ int vfs_read(vfs_file_t *file, void *buf, int size) {
             return tty_read_key((int)(uintptr_t)file->fs_handle, (uint8_t*)buf, size);
         } else if (file->device_type == DEVICE_TYPE_MOUSE) {
             return tty_read_mouse((int)(uintptr_t)file->fs_handle, (uint8_t*)buf, size);
+        } else if (file->device_type == DEVICE_TYPE_SHM) {
+            typedef struct shm_segment shm_segment_t;
+            shm_segment_t *seg = (shm_segment_t *)file->fs_handle;
+            if (!seg || seg->page_count == 0) return -1;
+            if (file->position >= seg->size) return 0;
+            
+            uint64_t to_read = seg->size - file->position;
+            if ((uint64_t)size < to_read) to_read = size;
+            
+            uint64_t read_accum = 0;
+            while (read_accum < to_read) {
+                uint64_t current_pos = file->position + read_accum;
+                uint32_t page_idx = (uint32_t)(current_pos / 4096);
+                uint32_t page_off = (uint32_t)(current_pos % 4096);
+                
+                uint64_t chunk = 4096 - page_off;
+                if (chunk > to_read - read_accum) chunk = to_read - read_accum;
+                
+                extern uint64_t p2v(uint64_t phys);
+                void *page_vaddr = (void *)p2v(seg->phys_pages[page_idx]);
+                memcpy((uint8_t*)buf + read_accum, (uint8_t*)page_vaddr + page_off, chunk);
+                
+                read_accum += chunk;
+            }
+            file->position += to_read;
+            return (int)to_read;
         } else if (file->device_type == DEVICE_TYPE_FRAMEBUFFER) {
             // Read framebuffer data (raw pixel data)
-            vfs_framebuffer_info_t fb = graphics_get_fb_params();
+            vfs_framebuffer_info_t fb = graphics_get_fb_backing_params();
             
             if (!fb.address || fb.width == 0 || fb.height == 0) return -1;
             
@@ -518,7 +576,7 @@ int vfs_write(vfs_file_t *file, const void *buf, int size) {
             tty_write((int)(uintptr_t)file->fs_handle, (const char*)buf, size);
             return size;
         } else if (file->device_type == DEVICE_TYPE_FRAMEBUFFER) {
-            vfs_framebuffer_info_t fb = graphics_get_fb_params();
+            vfs_framebuffer_info_t fb = graphics_get_fb_backing_params();
             
             if (!fb.address || fb.width == 0 || fb.height == 0) return -1;
             
@@ -529,6 +587,40 @@ int vfs_write(vfs_file_t *file, const void *buf, int size) {
             if ((uint64_t)size < to_write) to_write = size;
             
             memcpy((uint8_t*)fb.address + file->position, buf, to_write);
+            file->position += to_write;
+            graphics_present_framebuffer();
+            return (int)to_write;
+        } else if (file->device_type == DEVICE_TYPE_SHM) {
+            typedef struct shm_segment shm_segment_t;
+            extern int shm_allocate(shm_segment_t *seg, size_t size);
+            shm_segment_t *seg = (shm_segment_t *)file->fs_handle;
+            if (!seg) return -1;
+
+            // Grow the segment if this write extends beyond current size
+            size_t end_pos = (size_t)file->position + (size_t)size;
+            if (end_pos > seg->size) {
+                if (shm_allocate(seg, end_pos) < 0) return -1;
+            }
+            if (file->position >= seg->size) return -1;
+            
+            uint64_t to_write = seg->size - file->position;
+            if ((uint64_t)size < to_write) to_write = size;
+            
+            uint64_t write_accum = 0;
+            while (write_accum < to_write) {
+                uint64_t current_pos = file->position + write_accum;
+                uint32_t page_idx = (uint32_t)(current_pos / 4096);
+                uint32_t page_off = (uint32_t)(current_pos % 4096);
+                
+                uint64_t chunk = 4096 - page_off;
+                if (chunk > to_write - write_accum) chunk = to_write - write_accum;
+                
+                extern uint64_t p2v(uint64_t phys);
+                void *page_vaddr = (void *)p2v(seg->phys_pages[page_idx]);
+                memcpy((uint8_t*)page_vaddr + page_off, (const uint8_t*)buf + write_accum, chunk);
+                
+                write_accum += chunk;
+            }
             file->position += to_write;
             return (int)to_write;
         }
@@ -554,11 +646,12 @@ int vfs_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
             #define FBIOGET_VSCREENINFO 0x4600
             #define FBIOPUT_VSCREENINFO 0x4601
             #define FBIOGET_FSCREENINFO 0x4602
+            #define FBIOPAN_DISPLAY     0x4604
             #define FBIOGETCMAP         0x4604
             #define FBIOPUTCMAP         0x4605
             
-            vfs_framebuffer_info_t fb = graphics_get_fb_params();
-            
+            vfs_framebuffer_info_t fb = graphics_get_fb_backing_params();
+           /* 
             serial_write("[vfs_ioctl] Framebuffer request=");
             serial_write_hex(request);
             serial_write(" arg=");
@@ -571,7 +664,7 @@ int vfs_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
             serial_write_num(fb.height);
             serial_write(" fb_bpp=");
             serial_write_num(fb.bpp);
-            serial_write("\n");
+            serial_write("\n"); */
             
             // Validate framebuffer is initialized
             if (!fb.address || fb.width == 0 || fb.height == 0 || fb.bpp == 0) {
@@ -692,6 +785,9 @@ int vfs_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
                 finfo->accel = 0;
                 
                 return 0;
+            } else if (request == FBIOPAN_DISPLAY) {
+                graphics_present_framebuffer();
+                return 0;
             } else if (request == FBIOPUT_VSCREENINFO) {
                 // Ignore changes as our FB is fixed by the bootloader, but report success
                 return 0;
@@ -714,7 +810,7 @@ int vfs_seek(vfs_file_t *file, int offset, int whence) {
     if (file->is_device) {
         if (file->device_type == DEVICE_TYPE_FRAMEBUFFER) {
             // Seek in framebuffer
-            vfs_framebuffer_info_t fb = graphics_get_fb_params();
+            vfs_framebuffer_info_t fb = graphics_get_fb_backing_params();
             
             if (!fb.address || fb.width == 0 || fb.height == 0) return -1;
             
@@ -727,6 +823,19 @@ int vfs_seek(vfs_file_t *file, int offset, int whence) {
             else return -1;
             
             if (new_pos > fb_size) new_pos = fb_size;
+            file->position = new_pos;
+            return 0;
+        } else if (file->device_type == DEVICE_TYPE_SHM) {
+            typedef struct shm_segment shm_segment_t;
+            shm_segment_t *seg = (shm_segment_t *)file->fs_handle;
+            if (!seg) return -1;
+            uint64_t new_pos = file->position;
+            if (whence == 0) new_pos = (uint64_t)offset; // SEEK_SET
+            else if (whence == 1) new_pos += (uint64_t)offset; // SEEK_CUR
+            else if (whence == 2) new_pos = (uint64_t)seg->size + (uint64_t)offset; // SEEK_END
+            else return -1;
+            
+            if (new_pos > seg->size) new_pos = seg->size;
             file->position = new_pos;
             return 0;
         } else if (file->device_type == DEVICE_TYPE_BLOCK) {
@@ -804,8 +913,13 @@ uint32_t vfs_file_size(vfs_file_t *file) {
     if (!file || !file->valid || !file->mount) return 0;
     if (file->is_device) {
         if (file->device_type == DEVICE_TYPE_FRAMEBUFFER) {
-            vfs_framebuffer_info_t fb = graphics_get_fb_params();
+            vfs_framebuffer_info_t fb = graphics_get_fb_backing_params();
             return (uint32_t)(fb.width * fb.height * (fb.bpp / 8));
+        }
+        if (file->device_type == DEVICE_TYPE_SHM) {
+            typedef struct shm_segment shm_segment_t;
+            shm_segment_t *seg = (shm_segment_t *)file->fs_handle;
+            return seg ? seg->size : 0;
         }
         Disk *d = (Disk*)file->fs_handle;
         return d ? d->total_sectors * 512 : 0;
@@ -929,6 +1043,14 @@ int vfs_list_directory(const char *path, vfs_dirent_t *entries, int max) {
             vfs_framebuffer_info_t fb = graphics_get_fb_params();
             entries[count].size = (uint64_t)fb.width * fb.height * (fb.bpp / 8);
             entries[count].is_directory = 0;
+            count++;
+        }
+
+        // Shared memory directory
+        if (count < max) {
+            vfs_strcpy(entries[count].name, "shm");
+            entries[count].size = 0;
+            entries[count].is_directory = 1;
             count++;
         }
 
@@ -1071,6 +1193,10 @@ bool vfs_exists(const char *path) {
             vfs_framebuffer_info_t fb = graphics_get_fb_params();
             return fb.address != NULL && fb.width > 0 && fb.height > 0;
         }
+        if (vfs_strcmp(dev, "keyboard") == 0 || vfs_starts_with(dev, "keyboard")) return true;
+        if (vfs_strcmp(dev, "mouse") == 0 || vfs_starts_with(dev, "mouse")) return true;
+        if (vfs_starts_with(dev, "tty")) return true;
+        if (vfs_starts_with(dev, "shm/")) return true;
         if (disk_get_by_name(dev)) return true;
     }
 
