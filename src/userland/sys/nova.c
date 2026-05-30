@@ -470,6 +470,26 @@ surface_t *surface_get_focused(void) {
     return NULL;
 }
 
+static int send_all(int fd, const void *buf, size_t size) {
+    size_t written = 0;
+    while (written < size) {
+        ssize_t rc = send(fd, (const char *)buf + written, size - written, 0);
+        if (rc <= 0) return -1;
+        written += rc;
+    }
+    return 0;
+}
+
+static int recv_all(int fd, void *buf, size_t size) {
+    size_t read_bytes = 0;
+    while (read_bytes < size) {
+        ssize_t rc = recv(fd, (char *)buf + read_bytes, size - read_bytes, 0);
+        if (rc <= 0) return -1;
+        read_bytes += rc;
+    }
+    return 0;
+}
+
 // Send frame headers to socket clients
 static int send_frame(int fd, uint32_t type, uint32_t surface_id, const void *payload, uint32_t size) {
     (void)surface_id;
@@ -481,13 +501,13 @@ static int send_frame(int fd, uint32_t type, uint32_t surface_id, const void *pa
     header.payload_size = size;
 
     // Send header
-    if (send(fd, &header, sizeof(header), 0) != sizeof(header)) {
+    if (send_all(fd, &header, sizeof(header)) < 0) {
         return -1;
     }
 
     // Send payload
     if (size > 0 && payload) {
-        if (send(fd, payload, size, 0) != (ssize_t)size) {
+        if (send_all(fd, payload, size) < 0) {
             return -1;
         }
     }
@@ -1310,7 +1330,7 @@ void handle_client_message(int fd, surface_t **surf_ptr) {
     NovaFrameHeader header;
     uint8_t buffer[1024];
 
-    if (recv(fd, &header, sizeof(header), 0) != sizeof(header)) {
+    if (recv_all(fd, &header, sizeof(header)) < 0) {
         return;
     }
 
@@ -1322,11 +1342,8 @@ void handle_client_message(int fd, surface_t **surf_ptr) {
         uint32_t to_read = header.payload_size;
         if (to_read > sizeof(buffer)) to_read = sizeof(buffer);
         
-        uint32_t read_bytes = 0;
-        while (read_bytes < to_read) {
-            ssize_t rc = recv(fd, (char*)buffer + read_bytes, to_read - read_bytes, 0);
-            if (rc <= 0) return;
-            read_bytes += rc;
+        if (recv_all(fd, buffer, to_read) < 0) {
+            return;
         }
     }
 

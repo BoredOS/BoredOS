@@ -31,6 +31,26 @@ int nova_connect(const char *socket_path) {
     return fd;
 }
 
+static int send_all(int fd, const void *buf, size_t size) {
+    size_t written = 0;
+    while (written < size) {
+        ssize_t rc = send(fd, (const char *)buf + written, size - written, 0);
+        if (rc <= 0) return -1;
+        written += rc;
+    }
+    return 0;
+}
+
+static int recv_all(int fd, void *buf, size_t size) {
+    size_t read_bytes = 0;
+    while (read_bytes < size) {
+        ssize_t rc = recv(fd, (char *)buf + read_bytes, size - read_bytes, 0);
+        if (rc <= 0) return -1;
+        read_bytes += rc;
+    }
+    return 0;
+}
+
 static int send_frame(int fd, uint32_t type, const void *payload, uint32_t size) {
     NovaFrameHeader header;
     header.magic = NOVA_MAGIC;
@@ -39,12 +59,12 @@ static int send_frame(int fd, uint32_t type, const void *payload, uint32_t size)
     header.msg_type = type;
     header.payload_size = size;
 
-    if (send(fd, &header, sizeof(header), 0) != sizeof(header)) {
+    if (send_all(fd, &header, sizeof(header)) < 0) {
         return -1;
     }
 
     if (size > 0 && payload) {
-        if (send(fd, payload, size, 0) != (ssize_t)size) {
+        if (send_all(fd, payload, size) < 0) {
             return -1;
         }
     }
@@ -52,7 +72,7 @@ static int send_frame(int fd, uint32_t type, const void *payload, uint32_t size)
 }
 
 static int recv_frame(int fd, NovaFrameHeader *header_out, void *payload_out, uint32_t max_size) {
-    if (recv(fd, header_out, sizeof(NovaFrameHeader), 0) != sizeof(NovaFrameHeader)) {
+    if (recv_all(fd, header_out, sizeof(NovaFrameHeader)) < 0) {
         return -1;
     }
 
@@ -64,11 +84,8 @@ static int recv_frame(int fd, NovaFrameHeader *header_out, void *payload_out, ui
         uint32_t to_read = header_out->payload_size;
         if (to_read > max_size) to_read = max_size;
 
-        uint32_t read_bytes = 0;
-        while (read_bytes < to_read) {
-            ssize_t rc = recv(fd, (char*)payload_out + read_bytes, to_read - read_bytes, 0);
-            if (rc <= 0) return -1;
-            read_bytes += rc;
+        if (recv_all(fd, payload_out, to_read) < 0) {
+            return -1;
         }
     }
     return 0;
