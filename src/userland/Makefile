@@ -65,7 +65,7 @@ LUA_CFLAGS = -std=gnu11 -ffreestanding -O2 -fno-stack-protector -fno-stack-check
              -Wno-implicit-fallthrough -Wno-type-limits
 
 all: $(BIN_DIR) $(LIBC_OBJS) $(BIN_DIR)/crt1.o $(BIN_DIR)/crti.o $(BIN_DIR)/crtn.o sdk $(APP_ELFS) \
-     $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o
+     $(BIN_DIR)/lua.elf $(BIN_DIR)/tcc.elf $(BIN_DIR)/empty.o tcc-libtcc1
 
 # ---------------------------------------------------------------------------
 # Directories and utility objects
@@ -199,5 +199,8 @@ $(BIN_DIR)/tcc.elf: $(LIBC_OBJS) $(BIN_DIR)/tcc.note.o sdk $(TCC_DIR)/tcc.c $(TC
 	cp $(TCC_DIR)/tcc.elf $(BIN_DIR)/tcc.elf
 
 # ---------------------------------------------------------------------------
+# Build TCC's libtcc1.a runtime library
+tcc-libtcc1:
+	@$(MAKE) -C $(TCC_DIR) libtcc1.a
 clean:
 	rm -rf $(BIN_DIR) $(SDK_DIR)
