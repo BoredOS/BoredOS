@@ -47,6 +47,7 @@ uint64_t graphics_get_fb_addr(void);
 int graphics_get_fb_bpp(void);
 uint64_t graphics_get_fb_pitch(void);
 void graphics_update_resolution(int width, int height, int bpp, void* fb_addr, int color_mode);
+void graphics_present_framebuffer(void);
 
 // Framebuffer info structure (for userspace and VFS)
 typedef struct {
@@ -65,6 +66,7 @@ typedef struct {
 
 struct limine_framebuffer* graphics_get_fb_info(void);
 framebuffer_info_t graphics_get_fb_params(void);
+framebuffer_info_t graphics_get_fb_backing_params(void);
 
 // Dirty rectangle management
 void graphics_mark_dirty(int x, int y, int w, int h);

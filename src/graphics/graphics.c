@@ -161,6 +161,24 @@ framebuffer_info_t graphics_get_fb_params(void) {
     return info;
 }
 
+framebuffer_info_t graphics_get_fb_backing_params(void) {
+    framebuffer_info_t info = {0};
+    if (g_fb) {
+        info.address = g_back_buffer;
+        info.width = g_fb->width;
+        info.height = g_fb->height;
+        info.pitch = g_fb->pitch;
+        info.bpp = g_fb->bpp;
+        info.red_mask_size = g_fb->red_mask_size;
+        info.red_mask_shift = g_fb->red_mask_shift;
+        info.green_mask_size = g_fb->green_mask_size;
+        info.green_mask_shift = g_fb->green_mask_shift;
+        info.blue_mask_size = g_fb->blue_mask_size;
+        info.blue_mask_shift = g_fb->blue_mask_shift;
+    }
+    return info;
+}
+
 // faltten the structure, cache the edges, calculate the right and bottom edges
 // calculate a new bounding box with some of my clever branchless math
 // and perform exactly 1 Write to memory
@@ -1019,6 +1037,11 @@ void graphics_copy_screenbuffer(uint32_t *dest) {
     }
     
     spinlock_release_irqrestore(&graphics_lock, rflags);
+}
+
+void graphics_present_framebuffer(void) {
+    if (!g_fb) return;
+    graphics_copy_screenbuffer((uint32_t *)g_fb->address);
 }
 
 void graphics_set_clipping(int x, int y, int w, int h) {
