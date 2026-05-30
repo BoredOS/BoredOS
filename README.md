@@ -26,30 +26,32 @@
 ## Features
 
 ### Kernel and Architecture
-- **Long Mode Architecture** — Native x86_64 implementation utilizing 64-bit address space and registers
-- **Symmetric Multi-Processing** — Scalable multi-core support with IPI-based scheduling and synchronization
-- **Advanced Memory Management** — Custom slab allocator with object pooling and efficient physical/virtual page mapping
-- **Hybrid VFS Layer** — Unified filesystem interface supporting FAT32, TAR, ProcFS, and SysFS
-- **Preemptive Multitasking** — Prioritized process scheduling with full context isolation
-- **Hardware Abstraction** — Comprehensive driver support for PCI, AHCI, PS/2, and ACPI
+- **Long Mode (x86_64)** 
+- **SMP** — Multi-core with IPI-based scheduling and cross-core synchronization
+- **Memory Management** — Slab allocator with object pooling; handles physical/virtual mapping
+- **VFS** — Unified interface over FAT32, TAR, ProcFS, and SysFS
+- **Preemptive Scheduling** — Priority-based, with full context isolation per process
+- **Hardware Support** — PCI, AHCI, PS/2, ACPI drivers
+- **Virtual Terminals** — 10 independent TTYs (`/dev/tty1`–`/dev/tty10`), each with its own graphics buffer
 
-### Graphical Desktop Environment
-- **BoredWM** — High-performance window manager featuring window stacking, focus management, and drag-and-drop interactions
-- **Typography Engine** — Integrated font manager with TrueType (TTF) support and efficient glyph caching
-- **Rich Media Subsystem** — Native hardware-independent decoding for PNG, JPEG, GIF, BMP, and TGA formats
-- **LibWidget Toolkit** — Native UI component library for rapid application development
+### Display & Compositing
+- **Nova Compositor** — Userland window server over a UNIX socket (`/tmp/nova.sock`)
+- **Framebuffer** — `/dev/fb0` for direct pixel access and mode switching
+- **Window Management** — Layered rendering, decorations, focus, and client event routing
+- **Input Routing** — Keyboard and mouse via `/dev/keyboard` and `/dev/mouse`
 
-### Networking Stack
-- **TCP/IP Integration** — Full lwIP-based network stack featuring DHCP, DNS, and Berkeley-style sockets
-- **Network Services** — Integrated support for basic web browsing and real-time network telemetry
+### Networking
+- **TCP/IP** — lwIP stack with DHCP, DNS, and Berkeley sockets
+- **Utilities** — `ping`, `curl`, `telnet`
 
-### Application Ecosystem
+### Applications
 | Category | Applications |
 |----------|--------------|
-| Productivity | Text Editor, Markdown Viewer, BoredWord Processor, Web Browser, Calculator |
-| Development | TCC (Tiny C Compiler), Lua|
-| System | Explorer (File Manager), Task Manager, System Monitor, Graphing Utility |
-| Games | doomgeneric, Minesweeper, 2048, Snake |
+| Shell & CLI | bsh, kilo, ls, grep, find, tar |
+| Development | TCC, Lua, POSIX syscalls, custom app framework |
+| System | ps, fdisk, mkfs_fat, df, du, lsblk, pci_list, meminfo, sysfetch |
+| Graphics | Nova compositor + example clients (taskbar, wallpaper daemon) |
+| Network | ping, curl, telnet |
 
 
 ---
