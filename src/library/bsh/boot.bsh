@@ -1,4 +1,0 @@
-# BoredShell boot script
-# Runs once on boot for the first shell.
-# Example:
-# echo "Boot script executed"

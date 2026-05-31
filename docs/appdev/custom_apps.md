@@ -1,67 +1,139 @@
-<div align="center">
-  <h1>Creating a Custom CLI App</h1>
-  <p><em>A step-by-step tutorial on writing a new C userland application.</em></p>
-</div>
+# Creating Custom Applications & Adding External Repositories
+
+In BoredOS, all userland applications, graphical shells, network diagnostics, and tools reside inside isolated external repositories under `/external/`. 
+
+This guide details:
+1. How to develop new applications within existing repositories.
+2. What conditions warrant creating a **new** standalone repository.
+3. A step-by-step tutorial on registering and integrating a new repository.
 
 ---
 
-This guide explains how to write a new "Hello World" command-line application locally, compile it as an `.elf` binary into the `bin/` folder, and launch it inside BoredOS.
+## 1. Developing Apps in Existing Repositories
 
-> [!TIP]
-> **Looking for working code?** Check out the [Examples Directory](examples/README.md) for full source code demonstrating basic CLI, direct Framebuffer drawing, and TCP Networking.
+If your new tool is small, lightweight, or naturally fits into an existing logical group, you should develop it directly inside one of the current external repositories. (See the repositories under the [BoredOS account.](https://github.com/BoredOS))
 
-## Step 1: Write the C Source
+### Adding your application code:
+1. Navigate to the appropriate subdirectory in the corresponding `external/` repo (e.g. `external/coreutils/src/` or `external/nova/apps/`).
+2. Add your `.c` source code file.
+3. The sub-makefiles in these repositories utilize wildcards (e.g. `$(wildcard src/*.c)`) to automatically scan and compile new files. If your new file is not covered, simply append it to the `SOURCES` variable in the repository's Makefile.
+4. Stage it in the root `Makefile`'s `$(BUILD_DIR)/initrd.tar` rule to make sure it gets copied into the `initrd` filesystem (e.g. `/bin/` or `/Library/`).
 
-Applications reside in the `src/userland/` directory. Create a new file for a CLI app under `src/userland/cli/hello.c`.
+---
 
-```c
-// BOREDOS_APP_DESC: Hello World - my first BoredOS command-line app!
-#include <stdlib.h>
-#include <stdio.h>
+## 2. What Warrants a NEW Repository?
 
-int main(int argc, char **argv) {
-    printf("Hello, BoredOS!!\n");
-    
-    if (argc > 1) {
-        printf("You passed %d arguments. First argument: %s\n", argc - 1, argv[1]);
-    } else {
-        printf("No arguments passed. Try running: hello world\n");
-    }
+Developers should avoid bloating existing folders. Creating a **new, dedicated external repository** is highly recommended under the following guidelines:
 
-    return 0; // Returning 0 smoothly exits the process via crt0.asm
-}
+1. **Large Standalone Scope**: Any large application featuring significant logic (e.g. a game, a terminal emulator, or a custom database engine) should have its own repository.
+2. **Third-Party Ports**: Any imported third-party open-source codebase (e.g. `lua`, `tcc`, or a standard library) **must** reside in its own isolated repository.
+3. **Licensing Isolation**: BoredOS core components use the **GNU GPL v3.0**. If you are porting software that is licensed under a different standard (such as the **MIT License**, **BSD 2-Clause**, or **LGPL**), you **must** isolate it in its own repository with its own license file to maintain licensing compliance.
+4. **Asset & Media Footprint**: Repositories containing thousands of binary/media assets (such as the `bart` wallpapers or the `colloid` icon sets) must be isolated to keep the main code repository small, quick to stage, and easy to clone.
+
+---
+
+## 3. Integrating a New Repository: Step-by-Step
+
+Let's assume you are creating a new GUI calculator app named `calc`. Here is how to create, register, and integrate it into the BoredOS build pipeline:
+
+### Step 1: Create the Local Repository
+Create the directory structure under `/external/calc/` and add your source files:
+```sh
+mkdir -p external/calc/src
 ```
 
-## Step 2: Edit the Makefile
+### Step 2: Write an Autonomic Standalone Makefile
+Every external repository Makefile must support both **Integrated Builds** (within the BoredOS workspace) and **Standalone Builds** (cloned in isolation). 
 
-Now you need to tell the build system to compile `hello.c`. Fortunately, the `src/userland/Makefile` is designed to detect new C files in source folders automatically!
+Write `external/calc/Makefile`:
+```makefile
+# Default to local build/sdk if not passed by root Makefile
+BOREDOS_SDK ?= $(abspath build/sdk)
+DESTDIR ?= $(abspath build/bin)
 
-1. Open `src/userland/Makefile`.
-2. Find the line specifying `APP_SOURCES_FULL`:
-   ```make
-   APP_SOURCES_FULL = $(wildcard cli/*.c sys/*.c net/*.c *.c)
-   ```
-   Since you placed the file in `cli/hello.c`, the wildcard logic will pick it up automatically.
-3. The Makefile will generate `bin/hello.elf` during the build phase.
+# Setup Compiler flags using BOREDOS_SDK
+CC = x86_64-elf-gcc
+CFLAGS = -O2 -m64 -march=x86-64 -fno-stack-protector -fno-stack-check -fno-lto -fno-pie -ffreestanding -nostdlib -static -no-pie
+INCLUDES = -I$(BOREDOS_SDK)/include
 
-## Step 3: Bundle it into the OS
+# Source files
+SOURCES = $(wildcard src/*.c)
+OBJECTS = $(SOURCES:src/%.c=obj/%.o)
+BINARY = calc.elf
 
-The main overarching `Makefile` (in the project root) takes binaries from `src/userland/bin/*.elf` and places them into the `iso_root/bin/` directory, while also making them available on the ISO boot image.
+all: $(BINARY)
 
-1. Go back to the root of the OS:
+# Standalone build automatic bootstrap
+$(BOREDOS_SDK)/lib/libc.a:
+	@printf "Standalone build detected. Fetching C SDK (libc)...\n"
+	@git clone https://github.com/boredos/libc.git build/libc-sdk
+	@$(MAKE) -C build/libc-sdk SDK_DIR=$(BOREDOS_SDK) install
+	@rm -rf build/libc-sdk
+
+# Compile C source files
+obj/%.o: src/%.c | $(BOREDOS_SDK)/lib/libc.a
+	@mkdir -p obj
+	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
+
+# Link the userland executable
+$(BINARY): $(OBJECTS)
+	x86_64-elf-ld -m elf_x86_64 -nostdlib -static -no-pie -Ttext=0x40000000 \
+		--no-dynamic-linker -z text -z max-page-size=0x1000 -e _start \
+		-L$(BOREDOS_SDK)/lib $(BOREDOS_SDK)/lib/crt0.o $(OBJECTS) -lc -o $@
+
+install: $(BINARY)
+	mkdir -p $(DESTDIR)/bin
+	cp $(BINARY) $(DESTDIR)/bin/
+
+clean:
+	rm -rf obj $(BINARY) build
+```
+
+### Step 3: Register in the Dependency Fetcher
+To integrate your repository into the standard BoredOS distribution build:
+1. Publish your new repository on GitHub **under your own personal user account** (e.g., `https://github.com/<your-github-username>/calc.git`).
+2. Open a **Pull Request (PR)** on the parent BoredOS repository to register your repository in [tools/fetch_external.sh](file:///Users/chris/BoredOS/tools/fetch_external.sh):
    ```sh
-   cd ../..
-   ```
-2. Compile the entire project to build the ISO and test in QEMU:
-   ```sh
-   make clean && make run
+   # Format: repo_name | git_url | commit_hash_or_branch
+   REPOS="
+   ...
+   calc|https://github.com/<your-github-username>/calc.git|main
+   "
    ```
 
-## Step 4: Run it inside BoredOS
+### Step 4: Configure the Root Makefile Integration
+Now, wire the new repository into the top-level [Makefile](file:///Users/chris/BoredOS/Makefile):
 
-1. When BoredOS boots, you are automatically logged into the main shell console (TTY0).
-2. The OS automatically maps built applications in `/bin` to standard shell commands. Simply type your application's filename (without the `.elf` extension).
-3. Type `hello` (or `hello argument1`) in the terminal and press Enter.
-4. Your custom application will run, print its output, and exit cleanly!
+1. **Userland Build Rules**:
+   Find the `userland:` target and append the calc compilation line:
+   ```makefile
+   userland: build/sdk
+   	...
+   	$(MAKE) -C external/calc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+   ```
+
+2. **Initrd Copy & Staging Rules**:
+   Find the `$(BUILD_DIR)/initrd.tar:` target and add the modular installation hook:
+   ```makefile
+   $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
+   	...
+   	@printf "$(YELLOW)[STAGE]$(RESET) Invoking modular repository installations...\n"
+   	...
+   	$(MAKE) -C external/calc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+   ```
+
+3. **Clean Rule Requirements**:
+   - **No edits are required in the root Makefile for cleaning!**
+   - The root Makefile `clean` target dynamically scans the `external/` folder and automatically invokes `$(MAKE) -C "$$dir" clean` on any subdirectory that contains a `Makefile`.
+   - You **must** ensure that your repository's Makefile implements a standard, working `clean:` target (as written in Step 2) so that `make clean` executes successfully.
+   ```
 
 ---
+
+## 4. Testing Your New Repository
+
+Once integrated, run the verification build and launch the QEMU emulator:
+```sh
+make clean && make run
+```
+Your new repository will automatically be resolved, compiled standalone using the shared C SDK, packaged cleanly into the `/bin` directory of your bootable initrd filesystem, and available on the desktop terminal console!

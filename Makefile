@@ -32,11 +32,11 @@ endef
 DOCK_COLLOID_ICONS = 
 
 USERLAND_COLLOID_ICONS = $(shell { \
-	find $(SRC_DIR)/userland -type f -name '*.c' ! -path '*/third_party/*' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
-	find $(SRC_DIR)/userland -type f -name '*.h' ! -path '*/third_party/*' ! -name 'stb_image.h' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
+	find external -type f -name '*.c' ! -path '*/third_party/*' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
+	find external -type f -name '*.h' ! -path '*/third_party/*' ! -name 'stb_image.h' -exec grep -hoE '"[^"]+\.png"' {} + 2>/dev/null; \
 } | sed 's/"//g' | sed 's@.*/@@' | sort -u)
 USERLAND_METADATA_ICONS = $(shell { \
-	find $(SRC_DIR)/userland -type f -name '*.c' -exec sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' {} + 2>/dev/null; \
+	find external -type f -name '*.c' -exec sed -n 's@^[[:space:]]*//[[:space:]]*BOREDOS_APP_ICONS:[[:space:]]*@@p' {} + 2>/dev/null; \
 } | tr ';' '\n' | sed 's@.*/@@' | sed '/^[[:space:]]*$$/d' | sort -u)
 COLLOID_ICONS = $(sort $(DOCK_COLLOID_ICONS) $(USERLAND_COLLOID_ICONS) $(USERLAND_METADATA_ICONS) xterm.png)
 
@@ -113,9 +113,26 @@ $(KERNEL_ELF): $(OBJ_FILES)
 	$(LD) $(LDFLAGS) -o $@ $(OBJ_FILES)
 	@printf "$(GREEN)[OK]$(RESET) Kernel ELF built: $@\n"
 
-userland:
-	$(call PRINT_STEP,BUILDING USERLAND)
-	$(MAKE) -C $(SRC_DIR)/userland
+external-fetch:
+	$(call PRINT_STEP,FETCHING EXTERNAL REPOSITORIES)
+	@sh tools/fetch_external.sh
+
+build/sdk: external-fetch
+	$(call PRINT_STEP,BUILDING BOREDOS SDK (LIBC))
+	@mkdir -p build/sdk
+	$(MAKE) -C external/libc SDK_DIR=$(abspath build/sdk) install
+
+userland: build/sdk
+	$(call PRINT_STEP,BUILDING USERERLAND APPLICATIONS)
+	@mkdir -p build/userland/bin
+	$(MAKE) -C external/bsh BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/coreutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/nova BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/kilo BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/boredos_install BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/lua BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/tcc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/netutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
 	@printf "$(GREEN)[OK]$(RESET) Userland build complete.\n"
 
 $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
@@ -126,7 +143,6 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	@printf "$(YELLOW)[INITRD]$(RESET) Creating directory structure...\n"
 	mkdir -p $(BUILD_DIR)/initrd/bin
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/Wallpapers
-	mkdir -p $(BUILD_DIR)/initrd/Library/images/gif
 	mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/colloid
 	mkdir -p $(BUILD_DIR)/initrd/Library/Fonts/Emoji
 	mkdir -p $(BUILD_DIR)/initrd/Library/DOOM
@@ -157,51 +173,39 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	@if [ -f limine/limine-bios.sys ]; then cp limine/limine-bios.sys $(BUILD_DIR)/initrd/boot/; fi
 	@cp $(KERNEL_ELF) $(BUILD_DIR)/initrd/boot/boredos.elf
 
-	@printf "$(YELLOW)[COPY]$(RESET) Userland binaries...\n"
-	@for f in $(SRC_DIR)/userland/bin/*.elf; do \
-		if [ -f "$$f" ]; then \
-			printf "  -> $$f\n"; \
-			cp "$$f" $(BUILD_DIR)/initrd/bin/; \
-		fi \
-	done
+	@printf "$(YELLOW)[STAGE]$(RESET) Invoking modular repository installations...\n"
+	$(MAKE) -C external/bsh BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/coreutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/nova BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/kilo BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/boredos_install BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/lua BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/tcc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/netutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
 
-	@printf "$(YELLOW)[COPY]$(RESET) TCC support files...\n"
-	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/tcc/
-	@cp $(SRC_DIR)/userland/cli/third_party/tcc/libtcc1.a $(BUILD_DIR)/initrd/usr/lib/
-	@cp $(SRC_DIR)/userland/cli/third_party/tcc/include/*.h $(BUILD_DIR)/initrd/usr/lib/tcc/include/
-	@cp $(SRC_DIR)/userland/sdk/lib/libboredos.a $(BUILD_DIR)/initrd/usr/lib/
-	@cp $(SRC_DIR)/userland/sdk/lib/libboredos.a $(BUILD_DIR)/initrd/usr/lib/libc.a
-	@cp $(SRC_DIR)/userland/sdk/lib/libboredos.a $(BUILD_DIR)/initrd/usr/lib/libm.a
-	@x86_64-elf-strip -S $(BUILD_DIR)/initrd/usr/lib/libboredos.a
+	@printf "$(YELLOW)[COPY]$(RESET) Staging SDK development environment files in initrd...\n"
+	@cp build/sdk/lib/libc.a $(BUILD_DIR)/initrd/usr/lib/
+	@cp build/sdk/lib/libc.a $(BUILD_DIR)/initrd/usr/lib/libboredos.a
+	@cp build/sdk/lib/libc.a $(BUILD_DIR)/initrd/usr/lib/libm.a
 	@x86_64-elf-strip -S $(BUILD_DIR)/initrd/usr/lib/libc.a
+	@x86_64-elf-strip -S $(BUILD_DIR)/initrd/usr/lib/libboredos.a
 	@x86_64-elf-strip -S $(BUILD_DIR)/initrd/usr/lib/libm.a
-	@cp $(SRC_DIR)/userland/bin/crt0.o $(BUILD_DIR)/initrd/usr/lib/crt0.o
-	@cp $(SRC_DIR)/userland/bin/crt1.o $(BUILD_DIR)/initrd/usr/lib/crt1.o
-	@cp $(SRC_DIR)/userland/bin/crti.o $(BUILD_DIR)/initrd/usr/lib/crti.o
-	@cp $(SRC_DIR)/userland/bin/crtn.o $(BUILD_DIR)/initrd/usr/lib/crtn.o
-	@printf "$(YELLOW)[COPY]$(RESET) SDK headers...\n"
-	@cp -r $(SRC_DIR)/userland/sdk/include/. $(BUILD_DIR)/initrd/usr/include/
-	@cp $(SRC_DIR)/userland/stb_image.h $(BUILD_DIR)/initrd/usr/include/
+	@cp build/sdk/lib/crt0.o $(BUILD_DIR)/initrd/usr/lib/crt0.o
+	@cp build/sdk/lib/crt1.o $(BUILD_DIR)/initrd/usr/lib/crt1.o
+	@cp build/sdk/lib/crti.o $(BUILD_DIR)/initrd/usr/lib/crti.o
+	@cp build/sdk/lib/crtn.o $(BUILD_DIR)/initrd/usr/lib/crtn.o
+	@cp -r build/sdk/include/. $(BUILD_DIR)/initrd/usr/include/
 
 	@printf "$(YELLOW)[COPY]$(RESET) Wallpapers...\n"
-	@for f in $(SRC_DIR)/images/wallpapers/*; do \
+	@for f in external/bart/wallpapers/*; do \
 		if [ -f "$$f" ]; then \
 			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/images/Wallpapers/; \
 		fi \
 	done
-
-	@printf "$(YELLOW)[COPY]$(RESET) GIF assets...\n"
-	@for f in $(SRC_DIR)/images/gif/*.gif; do \
-		if [ -f "$$f" ]; then \
-			printf "  -> $$f\n"; \
-			cp "$$f" $(BUILD_DIR)/initrd/Library/images/gif/; \
-		fi \
-	done
-
 	@printf "$(YELLOW)[COPY]$(RESET) Colloid icons...\n"
 	@for f in $(COLLOID_ICONS); do \
-		src="$(SRC_DIR)/images/icons/colloid/$$f"; \
+		src="external/colloid/$$f"; \
 		if [ -f "$$src" ]; then \
 			printf "  -> $$src\n"; \
 			cp "$$src" $(BUILD_DIR)/initrd/Library/images/icons/colloid/; \
@@ -210,7 +214,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 
 	@printf "$(YELLOW)[COPY]$(RESET) BoredOS icons...\n"
 	@mkdir -p $(BUILD_DIR)/initrd/Library/images/icons/boredos
-	@for f in $(SRC_DIR)/images/icons/boredos/*.png; do \
+	@for f in external/bart/icons/boredos/*.png; do \
 		if [ -f "$$f" ]; then \
 			printf "  -> $$f\n"; \
 			cp "$$f" $(BUILD_DIR)/initrd/Library/images/icons/boredos/; \
@@ -323,38 +327,27 @@ $(ISO_IMAGE): $(KERNEL_ELF) $(BUILD_DIR)/initrd.tar.lz4 limine.conf limine-setup
 clean:
 	$(call PRINT_STEP,CLEANING BUILD OUTPUT)
 	rm -rf $(BUILD_DIR) $(ISO_DIR) $(ISO_IMAGE)
-	$(MAKE) -C $(SRC_DIR)/userland clean
+	@for dir in external/*; do \
+		if [ -d "$$dir" ] && [ -f "$$dir/Makefile" ]; then \
+			$(MAKE) -C "$$dir" clean; \
+		fi \
+	done
 	@printf "$(GREEN)[OK]$(RESET) Clean complete.\n"
 
 disk.qcow2:
 	$(call PRINT_STEP,CREATING 10GB EXPANDABLE DISK IMAGE)
 	qemu-img create -f qcow2 disk.qcow2 10G
 
-run: $(ISO_IMAGE) disk.qcow2
-	$(call PRINT_STEP,DETECTING PLATFORM AND RUNNING BOREDOS)
-	@if [ "$(HOST_OS)" = "Darwin" ]; then \
-		printf "$(GREEN)[RUN]$(RESET) Detected macOS\n"; \
-		$(MAKE) run-mac; \
-	elif [ "$(HOST_OS)" = "Linux" ]; then \
-		printf "$(GREEN)[RUN]$(RESET) Detected Linux\n"; \
-		$(MAKE) run-linux; \
-	else \
-		printf "$(GREEN)[RUN]$(RESET) Detected Windows\n"; \
-		$(MAKE) run-windows; \
-	fi
-
-run-hd: disk.qcow2 $(OVMF_VARS)
-	$(call PRINT_STEP,DETECTING PLATFORM AND BOOTING FROM HARD DRIVE)
-	@if [ "$(HOST_OS)" = "Darwin" ]; then \
-		printf "$(GREEN)[RUN-HD]$(RESET) Detected macOS\n"; \
-		$(MAKE) run-hd-mac; \
-	elif [ "$(HOST_OS)" = "Linux" ]; then \
-		printf "$(GREEN)[RUN-HD]$(RESET) Detected Linux\n"; \
-		$(MAKE) run-hd-linux; \
-	else \
-		printf "$(GREEN)[RUN-HD]$(RESET) Detected Windows\n"; \
-		$(MAKE) run-hd-windows; \
-	fi
+ifeq ($(HOST_OS),Darwin)
+run: run-mac
+run-hd: run-hd-mac
+else ifeq ($(HOST_OS),Linux)
+run: run-linux
+run-hd: run-hd-linux
+else
+run: run-windows
+run-hd: run-hd-windows
+endif
 
 run-windows: $(ISO_IMAGE) disk.qcow2
 	$(call PRINT_STEP,RUNNING BOREDOS IN QEMU ON WINDOWS)

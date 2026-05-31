@@ -28,3 +28,6 @@ src/userland/mlibc/headers-build/
 .gitignore
 src/userland/cli/third_party/tcc/tcc.elf
 src/userland/sdk/include/*
+
+# External Repositories
+/external/
