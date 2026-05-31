@@ -133,6 +133,7 @@ userland: build/sdk
 	$(MAKE) -C external/lua BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
 	$(MAKE) -C external/tcc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
 	$(MAKE) -C external/netutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
+	$(MAKE) -C external/doomgeneric BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath build/userland/bin)
 	@printf "$(GREEN)[OK]$(RESET) Userland build complete.\n"
 
 $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
@@ -182,6 +183,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	$(MAKE) -C external/lua BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
 	$(MAKE) -C external/tcc BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
 	$(MAKE) -C external/netutils BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
+	$(MAKE) -C external/doomgeneric BOREDOS_SDK=$(abspath build/sdk) DESTDIR=$(abspath $(BUILD_DIR)/initrd) install
 
 	@printf "$(YELLOW)[COPY]$(RESET) Staging SDK development environment files in initrd...\n"
 	@cp build/sdk/lib/libc.a $(BUILD_DIR)/initrd/usr/lib/
@@ -250,7 +252,11 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland
 	@mkdir -p $(BUILD_DIR)/initrd/etc/nova
 	@if [ -f $(SRC_DIR)/library/conf/nova.conf ]; then printf "  -> nova.conf\n"; cp $(SRC_DIR)/library/conf/nova.conf $(BUILD_DIR)/initrd/etc/nova/; fi
 
-	@printf "$(YELLOW)[COPY]$(RESET) Skipped DOOM assets (deleted)\n"
+	@printf "$(YELLOW)[COPY]$(RESET) Copying Freedoom assets...\n"
+	@if [ -f external/doomgeneric/freedoom1.wad ]; then \
+		printf "  -> freedoom1.wad -> Library/DOOM/doom1.wad\n"; \
+		cp external/doomgeneric/freedoom1.wad $(BUILD_DIR)/initrd/Library/DOOM/freedoom1.wad; \
+	fi
 
 
 	@printf "$(YELLOW)[COPY]$(RESET) ASCII art...\n"

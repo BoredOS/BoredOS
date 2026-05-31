@@ -21,6 +21,7 @@ netutils|https://github.com/boredos/netutils.git|main
 bart|https://github.com/boredos/bart.git|main
 colloid|https://github.com/boredos/colloid.git|main
 bfonts|https://github.com/boredos/bfonts.git|main
+doomgeneric|https://github.com/boredos/doomgeneric.git|main
 "
 
 LOCKDIR="build/fetch.lock"
