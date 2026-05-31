@@ -1,194 +1,330 @@
 # Build Toolchain
 
-BoredOS is built cross-compiled from a host system (such as macOS or Linux) to target the generic `x86_64-elf` platform.
+BoredOS is cross-compiled from a host operating system (Linux, macOS, or Windows) and targets the generic `x86_64-elf` platform.
 
+---
 
-## Table of Contents
+# Table of Contents
 
 - [Prerequisites](#prerequisites)
-- [Building the Cross-Compiler on Linux](#building-the-cross-compiler-on-linux)
-- [Installing the Toolchain on Windows](#installing-the-toolchain-on-windows)
+- [Linux (Recommended)](#linux-recommended)
+- [Linux (Manual Build)](#linux-manual-build)
+- [macOS](#macos)
+- [Windows (MSYS2)](#windows-msys2)
 
-## Prerequisites
+---
 
-To build BoredOS, you need the following tools:
+# Prerequisites
 
-1.  **x86_64 ELF GCC Cross-Compiler**:
-    -   `x86_64-elf-gcc`: The C compiler targeting the freestanding overarching ELF environment.
-    -   `x86_64-elf-ld`: The linker to combine object files into the final `boredos.elf` kernel and userland binaries.
+BoredOS requires the following tools.
 
-2.  **NASM**:
-    -   Required to compile the `.asm` files in `src/arch/` and `external/libc/src/crt0.asm`. It formats the output as `elf64` objects to be linked alongside the C code.
+## x86_64 ELF Cross Toolchain
 
-3.  **xorriso**:
-    -   A specialized tool to create ISO 9660 filesystem images.
-    -   *Why?* `xorriso` packages the compiled kernel, Limine bootloader, and asset files (fonts, images, userland binaries) into the final bootable `boredos.iso` CD-ROM image.
+The BoredOS build system uses a freestanding x86_64 ELF cross-compilation toolchain.
 
-4.  **QEMU** (Optional but highly recommended for testing):
-    -   `qemu-system-x86_64` is used to virtualize the OS for testing or to mess around.
+Required components:
 
-## Building the Cross-Compiler on Linux
+- `x86_64-elf-gcc` — Cross C compiler
+- `x86_64-elf-g++` — Cross C++ compiler
+- `x86_64-elf-ld` — Cross linker
+- `x86_64-elf-ar` — Static library archiver
+- `x86_64-elf-ranlib` — Archive index generator
+- `x86_64-elf-objcopy` — Binary conversion utility
+- `x86_64-elf-strip` — Symbol stripping utility
 
-### Availability Issue
+These tools target the generic `x86_64-elf` platform and are completely independent from the host operating system.
 
-On most Linux distributions, the `x86_64-elf-gcc` cross-compiler binary is **not pre-packaged** in standard repositories. The only notable exception is **Arch Linux** and Arch-based distributions (Manjaro, EndeavourOS, etc.), where it can be installed via `pacman`:
+## NASM
+
+Used to assemble architecture-specific code.
+
+## xorriso
+
+Used to create bootable ISO images.
+
+## QEMU (Optional)
+
+Recommended for testing and development.
+
+---
+
+# Linux (Recommended)
+
+The recommended way to install the BoredOS toolchain on Linux is to use the provided installer script.
+
+The installer automatically:
+
+- Detects the Linux distribution
+- Checks installed tools
+- Installs required dependencies
+- Downloads Binutils
+- Downloads GCC
+- Builds Binutils
+- Builds GCC
+- Installs the toolchain
+- Configures the PATH
+
+Run:
 
 ```bash
-pacman -S x86_64-elf-gcc x86_64-elf-binutils
+chmod +x tools/install_deps_linux.sh
+./tools/install_deps_linux.sh
 ```
 
-For all other Linux distributions (Debian, Ubuntu, Fedora, openSUSE, etc.), you **must build the cross-compiler from source**.
+The installer checks the availability of the following tools before starting.
 
-### Building from Source
+### Cross Toolchain
 
-To build the x86_64-ELF GCC cross-compiler:
+```text
+x86_64-elf-gcc
+x86_64-elf-g++
+x86_64-elf-ld
+```
 
-1.  **Download prerequisites**:
-    -   GNU Binutils source
-    -   GCC source
+### Required Build Tools
 
-2.  **Configure and build Binutils**:
-    ```bash
-    ../binutils-*/configure --target=x86_64-elf --prefix=/usr/local/cross
-    make && make install
-    ```
+```text
+gcc
+g++
+make
+nasm
+xorriso
+git
+wget
+tar
+xz
+patch
+```
 
-3.  **Configure and build GCC**:
-    ```bash
-    ../gcc-*/configure --target=x86_64-elf --prefix=/usr/local/cross \
-        --without-headers --enable-languages=c
-    make all-gcc && make install-gcc
-    ```
+### Optional Tools
 
-4.  **Add to PATH**:
-    ```bash
-    export PATH="/usr/local/cross/bin:$PATH"
-    ```
+```text
+qemu-system-x86_64
+```
 
-Verify the installation:
+The toolchain is installed by default into:
+
+```text
+~/.local/cross
+```
+
+The installer automatically appends the following entry to your shell configuration:
+
+```bash
+export PATH="$HOME/.local/cross/bin:$PATH"
+```
+
+---
+
+# Linux (Manual Build)
+
+If you prefer to build the toolchain manually:
+
+## Download Sources
+
+```bash
+wget https://ftp.gnu.org/gnu/binutils/binutils-2.45.tar.xz
+wget https://ftp.gnu.org/gnu/gcc/gcc-16.1.0/gcc-16.1.0.tar.xz
+```
+
+## Build Binutils
+
+```bash
+mkdir build-binutils
+cd build-binutils
+
+../binutils-2.45/configure \
+    --target=x86_64-elf \
+    --prefix=$HOME/.local/cross \
+    --with-sysroot \
+    --disable-nls \
+    --disable-werror
+
+make -j$(nproc)
+make install
+
+cd ..
+```
+
+## Build GCC
+
+```bash
+mkdir build-gcc
+cd build-gcc
+
+../gcc-16.1.0/configure \
+    --target=x86_64-elf \
+    --prefix=$HOME/.local/cross \
+    --disable-nls \
+    --enable-languages=c,c++ \
+    --without-headers
+
+make -j$(nproc) all-gcc
+make -j$(nproc) all-target-libgcc
+
+make install-gcc
+make install-target-libgcc
+
+cd ..
+```
+
+## Add to PATH
+
+```bash
+export PATH="$HOME/.local/cross/bin:$PATH"
+```
+
+## Verify Installation
 
 ```bash
 x86_64-elf-gcc --version
+x86_64-elf-g++ --version
+x86_64-elf-ld --version
 ```
 
-> **Note**: Building the cross-compiler can take 20-30 minutes depending on system performance. This is a one-time setup cost.
+---
 
-## Installing the Toolchain on Windows
-### Recommended Environment: MSYS2
+# macOS
 
-On Windows, the recommended way to build BoredOS is using **MSYS2**.
-MSYS2 provides a Unix-like environment with the `pacman` package manager, making it easy to install the required development tools.
+## Install Xcode Command Line Tools
+
+```bash
+xcode-select --install
+```
+
+## Install Homebrew
+
+If Homebrew is not already installed:
+
+```bash
+/bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+```
+
+## Install Required Dependencies
+
+```bash
+brew install \
+    gcc \
+    gmp \
+    mpfr \
+    libmpc \
+    texinfo \
+    wget \
+    xz \
+    nasm \
+    xorriso \
+    gnu-tar \
+    git
+```
+
+## Build the Toolchain
+
+Follow the same [Manual Build instructions](#linux-manual-build) described in the Linux section.
+
+The resulting toolchain should be installed into:
+
+```text
+~/.local/cross
+```
+
+## Verify Installation
+
+```bash
+x86_64-elf-gcc --version
+x86_64-elf-g++ --version
+x86_64-elf-ld --version
+```
 
 ---
 
-## 1. Install MSYS2
+# Windows (MSYS2)
 
-Download and install MSYS2 from the official website:
+## Install MSYS2
 
-- https://www.msys2.org/
+Download and install:
 
-After installation, launch the **MSYS2 UCRT64** terminal.
+https://www.msys2.org/
+
+Launch the **MSYS2 UCRT64** terminal.
 
 ---
 
-## 2. Update MSYS2
-
-Before installing packages, fully update the environment:
+## Update MSYS2
 
 ```bash
 pacman -Syu
 ```
 
-You may be asked to close the terminal after the first update.
-
-If so:
-
-1. Close the MSYS2 window
-2. Reopen **MSYS2 UCRT64**
-3. Run the update command again:
-
-```bash
-pacman -Syu
-```
-
-Repeat until no further updates are available.
+Restart the terminal if requested and repeat until no updates remain.
 
 ---
 
-## 3. Install Required Packages
-
-Install the required development tools:
+## Install Required Packages
 
 ```bash
-pacman -S make nasm xorriso git
+pacman -S \
+    make \
+    nasm \
+    xorriso \
+    git \
+    wget \
+    tar \
+    xz
 ```
 
 ---
 
-## 4. Install QEMU for Windows
+## Install QEMU (Optional)
 
-Download the Windows version of QEMU from:
+Download:
 
-- https://qemu.weilnetz.de/w64/
+https://qemu.weilnetz.de/w64/
 
-Install QEMU normally and make sure the installation directory is added to your Windows `PATH`.
-Note that if it breaks when building, you need too add `qemu-img` to your `PATH`:
-`export PATH="/c/Program Files/qemu:$PATH"`
+Add the QEMU installation directory to your PATH.
 
-You can verify the installation with:
+If image creation fails, you may also need:
 
 ```bash
-qemu-system-x86_64 --version
+export PATH="/c/Program Files/qemu:$PATH"
 ```
 
 ---
 
-## 5. Install the x86_64 ELF Cross Toolchain
+## Install the x86_64 ELF Toolchain
 
-Download the prebuilt `x86_64-elf` toolchain for Windows:
+### Recommended
 
-- https://github.com/lordmilko/i686-elf-tools/releases/download/15.2.0/x86_64-elf-tools-windows.zip
+Download a prebuilt x86_64-elf toolchain:
 
-Extract the archive somewhere convenient.
+https://github.com/lordmilko/i686-elf-tools/releases
 
----
+Extract it somewhere convenient.
 
-## 6. Add the Toolchain to PATH
-
-Inside the **MSYS2 UCRT64** terminal, add the toolchain binaries to your `PATH`:
+Add the toolchain to your PATH:
 
 ```bash
-export PATH="/c/Users/your/path/to/the/binaries/x86_64-elf-tools-windows/bin:$PATH"
+export PATH="/c/path/to/x86_64-elf-tools/bin:$PATH"
 ```
 
-To make this permanent, add the line to your `~/.bashrc` file:
+To make it permanent:
 
 ```bash
-echo 'export PATH="/c/Users/your/path/to/the/binaries/x86_64-elf-tools-windows/bin:$PATH"' >> ~/.bashrc
-```
-
-Then reload the shell:
-
-```bash
+echo 'export PATH="/c/path/to/x86_64-elf-tools/bin:$PATH"' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ---
 
-## 7. Verify the Installation
-
-Verify that the cross compiler is available:
+## Verify Installation
 
 ```bash
 x86_64-elf-gcc --version
-```
+x86_64-elf-g++ --version
+x86_64-elf-ld --version
 
-You should also verify NASM and QEMU:
-
-```bash
 nasm -v
+
 qemu-system-x86_64 --version
 ```
 
-If all commands work, the development environment is correctly configured.
-
+If all commands succeed, the BoredOS development environment is correctly configured and ready for development.
