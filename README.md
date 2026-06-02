@@ -5,8 +5,8 @@
 
   [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
   ![Platform: x86_64](https://img.shields.io/badge/Platform-x86_64-lightgrey)
-  ![Status: Active](https://img.shields.io/badge/Status-Active-brightgreen)
   ![GitHub all releases](https://img.shields.io/github/downloads/boreddevnl/BoredOS/total?color=brightgreen)
+  [![Donate](https://img.shields.io/badge/Donate-❤️-pink)](https://buymeacoffee.com/boreddevhq)
 
   <br />
 
@@ -70,9 +70,9 @@
 ---
 
 
-## ☕ Support the Journey
+## ☕ Support
 
-If you find BoredOS interesting or useful, consider fueling development with a coffee!
+BoredOS is a community hobby project. If you find it interesting, a coffee goes a long way!
 
 <a href="https://buymeacoffee.com/boreddevhq" target="_blank">
   <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" style="border-radius: 8px;" />
