@@ -8,7 +8,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 
-#define MAX_PROCESS_FDS 16
+#define MAX_PROCESS_FDS 64
 #define MAX_SIGNALS 32
 
 #define PROC_STATE_RUNNING 0

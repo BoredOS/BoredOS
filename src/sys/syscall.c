@@ -617,6 +617,7 @@ static uint64_t fs_cmd_unix_socket_accept(const syscall_args_t *args) {
 
     newfd = fs_alloc_fd_slot(proc, 0);
     if (newfd < 0) {
+      serial_write("[syscall] accept: no free fd slot for UNIX client\n");
       unix_enqueue_pending(lst, pc);
       return -1;
     }
