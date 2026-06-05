@@ -417,6 +417,30 @@ void kmain(void) {
     } else {
         boot_parse_cmdline(NULL, LIMINE_MEDIA_TYPE_GENERIC);
     }
+
+    if (g_bootfs_state.boot_flags & BOOT_FLAG_DISK) {
+        void *vol = NULL;
+        for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+            vfs_mount_t *m = vfs_get_mount(i);
+            if (m && strcmp(m->device, g_bootfs_state.root_device) == 0) {
+                vol = m->fs_private;
+                break;
+            }
+        }
+        if (vol) {
+            vfs_umount("/");
+            vfs_mount("/", g_bootfs_state.root_device, "fat32", fat32_get_realfs_ops(), vol);
+            fat32_set_root_volume(vol);
+            serial_write("[INIT] Switched root to /dev/");
+            serial_write(g_bootfs_state.root_device);
+            serial_write("\n");
+            
+            extern void bootfs_mount_boot_partition(void);
+            bootfs_mount_boot_partition();
+        } else {
+            serial_write("[INIT] Warning: Root device volume not found! Running from ramfs.\n");
+        }
+    }
     
     extern uint32_t kernel_ticks;
     g_bootfs_state.boot_time_ms = kernel_ticks;
@@ -463,7 +487,7 @@ void kmain(void) {
 
     if (module_request.response == NULL) {
         log_fail("Limine module response NULL");
-    } else {
+    } else if (!(g_bootfs_state.boot_flags & BOOT_FLAG_DISK)) {
         log_ok("Limine modules loaded");
         for (uint64_t i = 0; i < module_request.response->module_count; i++) {
             struct limine_file *mod = module_request.response->modules[i];
