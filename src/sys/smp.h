@@ -18,6 +18,7 @@ typedef struct cpu_state {
     uint64_t user_rsp_scratch;  
     uint64_t kernel_syscall_stack; 
     uint8_t xsave_area[8192] __attribute__((aligned(64)));
+    void *current_process;
 } cpu_state_t;
  
  void smp_init_bsp(void);

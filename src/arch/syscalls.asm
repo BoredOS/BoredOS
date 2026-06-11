@@ -52,12 +52,48 @@ syscall_entry:
     sub rsp, 512
 
     ; 4. Call C handler with registers_t*
+    mov r12, rsp
     mov rdi, rsp
     call syscall_handler_c
 
-    ; 5. Switch to the resulting RSP (might be different if task switched)
-    mov rsp, rax
+    ; Check if task switch occurred (returned RSP in rax != input RSP in r12)
+    cmp rax, r12
+    jne .slow_path
 
+    ; Fast path: no task switch. Return via sysretq!
+    add rsp, 512       ; drop fxsave_region
+    pop r15
+    pop r14
+    pop r13
+    pop r12
+    pop r11
+    pop r10
+    pop r9
+    pop r8
+    pop rbp
+    pop rdi
+    pop rsi
+    pop rdx
+    pop rcx            ; will be overwritten by sysretq anyway, but we pop it to restore GPRs
+    pop rbx
+    pop rax
+    
+    ; Extract RIP, RFLAGS, and RSP from the remaining frame:
+    ; [rsp]     = int_no
+    ; [rsp+8]   = err_code
+    ; [rsp+16]  = rip
+    ; [rsp+24]  = cs
+    ; [rsp+32]  = rflags
+    ; [rsp+40]  = rsp
+    ; [rsp+48]  = ss
+    mov rcx, [rsp + 16] ; user rip
+    mov r11, [rsp + 32] ; user rflags
+    mov rsp, [rsp + 40] ; user rsp
+    swapgs
+    o64 sysret
+
+.slow_path:
+    mov rsp, rax
     add rsp, 512
 
     ; 6. Restore and return via iretq

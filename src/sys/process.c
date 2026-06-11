@@ -217,7 +217,7 @@ void process_init(void) {
     memset(kernel_proc->cwd, 0, 1024);
     kernel_proc->cwd[0] = '/';
     memset(&kernel_proc->poll_table, 0, sizeof(kernel_proc->poll_table));
-    current_process[0] = kernel_proc;
+    process_set_current_for_cpu(0, kernel_proc);
 }
 
 process_t* process_create(void (*entry_point)(void), bool is_user) {
@@ -670,7 +670,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
         target_head->next = new_proc;
     } else {
         new_proc->next = new_proc;
-        current_process[target_cpu] = new_proc;
+        process_set_current_for_cpu(target_cpu, new_proc);
     }
     spinlock_release_irqrestore(&runqueue_lock, rflags);
     
@@ -695,11 +695,21 @@ process_t* process_get_current_for_cpu(uint32_t cpu_id) {
 void process_set_current_for_cpu(uint32_t cpu_id, process_t* p) {
     if (cpu_id >= MAX_CPUS_SCHED) return;
     current_process[cpu_id] = p;
+    
+    if (cpu_id == smp_this_cpu_id()) {
+        asm volatile("movq %0, %%gs:%c1" : : "r"(p), "i"(offsetof(cpu_state_t, current_process)));
+    } else {
+        cpu_state_t *cpu_state = smp_get_cpu(cpu_id);
+        if (cpu_state) {
+            cpu_state->current_process = p;
+        }
+    }
 }
 
 process_t* process_get_current(void) {
-    uint32_t cpu = smp_this_cpu_id();
-    return current_process[cpu];
+    process_t *p;
+    asm volatile("movq %%gs:%c1, %0" : "=r"(p) : "i"(offsetof(cpu_state_t, current_process)));
+    return p;
 }
 
 uint32_t process_get_current_pid(void) {
@@ -771,7 +781,7 @@ uint64_t process_schedule(uint64_t current_rsp) {
                 }
             }
 
-            current_process[my_cpu] = next_proc;
+            process_set_current_for_cpu(my_cpu, next_proc);
 
             cur->exited = true;
             cur->cpu_affinity = 0xFFFFFFFF;
@@ -859,7 +869,7 @@ uint64_t process_schedule(uint64_t current_rsp) {
         }
     }
     
-    current_process[my_cpu] = next_proc;
+    process_set_current_for_cpu(my_cpu, next_proc);
     
     if (current_process[my_cpu]->is_user && current_process[my_cpu]->kernel_stack) {
         tss_set_stack_cpu(my_cpu, current_process[my_cpu]->kernel_stack);
@@ -1004,7 +1014,7 @@ void process_terminate_with_status(process_t *to_delete, int status) {
                     }
                 }
             }
-            current_process[c] = np;
+            process_set_current_for_cpu(c, np);
         }
     }
 
@@ -1091,7 +1101,7 @@ uint64_t process_terminate_current_with_status(int status, uint64_t current_rsp)
         }
     }
     
-    current_process[my_cpu] = next_proc;
+    process_set_current_for_cpu(my_cpu, next_proc);
     
     // Mark slot as free
     to_delete->cpu_affinity = 0xFFFFFFFF;
