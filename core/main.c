@@ -184,30 +184,6 @@ void log_fail(const char *msg) {
     serial_write("\n");
 }
 
-static void print_verbose_boot_banner(void) {
-    kconsole_set_color(0xFF473ba3);
-    serial_write("       @@@@\n");
-    serial_write("     @@@@@@@\n");
-    serial_write("      @@@@@@\n");
-    serial_write("      @@@@@@@\n");
-    serial_write("       @@@@@@@      @@@@@@\n");
-    serial_write("        @@@@@@   @@@@@@@@@@@@\n");
-    serial_write("         @@@@@@ @@@@@@@@@@@@@@a\n");
-    serial_write("         @@@@@@@@@@@X  @@@@@@@@w\n");
-    serial_write("          @@@@@@@@       @@@@@@@\n");
-    serial_write("           @@@@@@M        @@@@@@\n");
-    serial_write("           @@@@@@@        @@@@@@\n");
-    serial_write("            @@@@@@@     @@@@@@@@\n");
-    serial_write("             @@@@@@@@@@@@@@@@@@\n");
-    serial_write("             i@@@@@@@@@@@@@@@\n");
-    serial_write("              @@@@@@@\n");
-    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-    serial_write(" @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@\n");
-    kconsole_set_color(0xFFFFFFFF);
-    serial_write("\n");
-}
-
 
 // Kernel Entry Point
 
@@ -304,28 +280,6 @@ static void vfs_mkdir_recursive(const char *path) {
     }
 }
 
-static void init_early(void) {
-    platform_init();
-    serial_init();
-    vfs_init();
-    serial_write("\n");
-    log_ok("Platform initialized");
-    
-    extern uint64_t hhdm_offset;
-    extern uint64_t kernel_phys_base;
-    extern uint64_t kernel_virt_base;
-    
-    serial_write("[INIT] HHDM Offset: 0x");
-    serial_write_hex(hhdm_offset);
-    serial_write("\n");
-    serial_write("[INIT] Kernel Phys: 0x");
-    serial_write_hex(kernel_phys_base);
-    serial_write("\n");
-    serial_write("[INIT] Kernel Virt: 0x");
-    serial_write_hex(kernel_virt_base);
-    serial_write("\n");
-}
-
 static void init_graphics(void) {
     const char *cmdline = NULL;
     if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
@@ -348,9 +302,38 @@ static void init_graphics(void) {
     graphics_init(fb);
     kconsole_init();
 
+    if (cmdline_has_flag(cmdline, "-v") || (cmdline != NULL && k_strstr(cmdline, "-v") != NULL)) {
+        kconsole_set_active(true);
+    }
+
     // Graphical mode active: set kernel debug to COM1
     serial_set_debug_port(COM1_PORT);
     serial_set_log_silenced(false);
+
+    log_ok("Graphics and Console ready");
+}
+
+static void init_early(void) {
+    platform_init();
+    serial_init();
+    init_graphics();
+    vfs_init();
+    serial_write("\n");
+    log_ok("Platform initialized");
+    
+    extern uint64_t hhdm_offset;
+    extern uint64_t kernel_phys_base;
+    extern uint64_t kernel_virt_base;
+    
+    serial_write("[INIT] HHDM Offset: 0x");
+    serial_write_hex(hhdm_offset);
+    serial_write("\n");
+    serial_write("[INIT] Kernel Phys: 0x");
+    serial_write_hex(kernel_phys_base);
+    serial_write("\n");
+    serial_write("[INIT] Kernel Virt: 0x");
+    serial_write_hex(kernel_virt_base);
+    serial_write("\n");
 }
 
 static void init_cpu_state(void) {
@@ -362,18 +345,6 @@ static void init_cpu_state(void) {
 
     syscall_init();
     log_ok("Syscalls ready");
-}
-
-static void init_verbose_console(void) {
-    // Check for verbose boot flag
-    if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
-        const char *cmdline = kernel_file_request.response->kernel_file->cmdline;
-        if (cmdline != NULL && k_strstr(cmdline, "-v") != NULL) {
-            kconsole_set_active(true);
-        }
-    }
-
-    log_ok("Graphics and Console ready");
 }
 
 static void init_memory(void) {
@@ -456,7 +427,6 @@ static void init_memory(void) {
 static void init_banner_and_acpi(void) {
     idt_load();
     log_ok("IDT ready");
-    print_verbose_boot_banner();
     kconsole_set_color(0xFFFFFF55);
     serial_write("Welcome to BoredOS!\n");
     kconsole_set_color(0xFFFFFFFF);
@@ -700,7 +670,7 @@ static void init_tty(void) {
     pty_init();
     kconsole_set_active(false);
 
-    /* Spawn the zombie reaper daemon first so it registers via SYS_SET_REAPER */
+    /* Spawn the zombie reaper daemon first so it registers via prctl(PR_SET_CHILD_SUBREAPER) */
     process_create_elf("/bin/job_applications.elf", "", false, -1);
 
     if (!g_headless_mode) {
@@ -726,9 +696,7 @@ static void init_tty(void) {
 
 void kmain(void) {
     init_early();
-    init_graphics();
     init_cpu_state();
-    init_verbose_console();
     init_memory();
     init_banner_and_acpi();
     init_subsystems();

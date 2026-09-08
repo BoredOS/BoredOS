@@ -91,6 +91,7 @@ void tty_init(void) {
         g_ttys[i].fg_color = 0xFFFFFFFF;
         g_ttys[i].bg_color = 0xFF000000;
         g_ttys[i].blit_enabled = !g_ttys[i].is_serial;
+        g_ttys[i].kd_mode = KD_TEXT;
         g_ttys[i].fg_pid = -1;
         g_ttys[i].esc_state = 0;
         g_ttys[i].esc_num_params = 0;
@@ -818,10 +819,16 @@ int tty_ioctl(int id, uint64_t request, void *arg) {
     } else if (request == KDSETMODE) {
         uint64_t mode = (uint64_t)arg;
         if (mode == KD_GRAPHICS) {
+            t->kd_mode = KD_GRAPHICS;
             t->blit_enabled = false;
         } else if (mode == KD_TEXT) {
+            t->kd_mode = KD_TEXT;
             t->blit_enabled = true;
         }
+        return 0;
+    } else if (request == KDGETMODE) {
+        if (!arg) return -1;
+        *(int *)arg = t->kd_mode;
         return 0;
     } else if (request == 0x5606) { // VT_ACTIVATE
         tty_switch(id);
@@ -891,7 +898,10 @@ int tty_get_foreground(int id) {
 void tty_set_blit_enabled_for_id(int id, bool enabled) {
     if (pty_is_pty_id(id)) return;
     tty_t *t = tty_get(id);
-    if (t) t->blit_enabled = enabled;
+    if (t) {
+        if (enabled && t->kd_mode == KD_GRAPHICS) return;
+        t->blit_enabled = enabled;
+    }
 }
 
 void tty_set_blit_enabled(bool enabled) {
@@ -905,7 +915,7 @@ bool tty_get_blit_enabled(void) {
 
 void tty_blit_active(void) {
     tty_t *t = tty_get(g_active_tty);
-    if (!t || !t->blit_enabled || !g_active_tty_vfb) return;
+    if (!t || !t->blit_enabled || t->kd_mode == KD_GRAPHICS || !g_active_tty_vfb) return;
     uint64_t flags = spinlock_acquire_irqsave(&t->lock);
     if (t->dirty) {
         tty_render_grid_to_vfb(t, g_active_tty_vfb);

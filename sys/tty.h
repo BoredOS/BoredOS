@@ -11,6 +11,10 @@
 #include "wait_queue.h"
 
 #define TIOCGWINSZ 0x5413
+#define KDSETMODE   0x4B3A
+#define KDGETMODE   0x4B3B
+#define KD_TEXT     0x00
+#define KD_GRAPHICS 0x01
 
 #define CTRL_C_CHAR 0x03
 
@@ -54,6 +58,7 @@ typedef struct {
     bool cursor_visible;
     uint32_t fg_color, bg_color;
     bool blit_enabled;
+    int kd_mode;
     
     tty_queue_t key_queue;
     tty_queue_t mouse_queue;
