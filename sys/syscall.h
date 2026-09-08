@@ -64,32 +64,23 @@ typedef enum {
     SYS_UNLINK = 87,
     SYS_GETTIMEOFDAY = 96,
     SYS_TIMES = 100,
+    SYS_STATFS = 137,
+    SYS_FSTATFS = 138,
+    SYS_PRCTL = 157,
     SYS_ARCH_PRCTL = 158,
+    SYS_SYNC = 162,
+    SYS_MOUNT = 165,
+    SYS_UMOUNT2 = 166,
+    SYS_REBOOT = 169,
     SYS_GETTID = 186,
     SYS_FUTEX = 202,
+    SYS_GETDENTS64 = 217,
     SYS_SET_TID_ADDRESS = 218,
     SYS_CLOCK_GETTIME = 228,
     SYS_CLOCK_GETRES = 229,
     SYS_EXIT_GROUP = 231,
-
-    // Custom BoredOS system calls
-    SYS_LIST_OFFSET = 300,
-    SYS_SIZE = 301,
-    SYS_TELL = 302,
-    SYS_EXISTS = 303,
-    SYS_FS_STATFS = 304,
-    SYS_FS_MOUNT_COUNT = 305,
-    SYS_FS_MOUNT_INFO = 306,
-    SYS_SPAWN = 317,
-    SYS_SET_REAPER = 318,
-    SYS_DISK_GET_COUNT = 322,
-    SYS_DISK_GET_INFO = 323,
-    SYS_DISK_MOUNT = 327,
-    SYS_DISK_UMOUNT = 328,
-    SYS_DISK_SYNC = 329,
-    SYS_DISK_RESCAN = 330,
-    SYS_REBOOT = 349,
-    SYS_SHUTDOWN = 350
+    SYS_FACCESSAT = 269,
+    SYS_SYNCFS = 306
 } syscall_t;
 
 // Futex operations (mlibc FutexWait/FutexWake)
