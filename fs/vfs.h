@@ -89,6 +89,7 @@ typedef struct vfs_fs_ops {
 #define DEVICE_TYPE_PTY_MASTER  10
 #define DEVICE_TYPE_PTY_SLAVE   11
 #define DEVICE_TYPE_TUN         12
+#define DEVICE_TYPE_RANDOM      13
 
 // VFS file handle
 struct vfs_file {
@@ -99,6 +100,7 @@ struct vfs_file {
     bool is_device;         // Is this a raw device handle?
     int device_type;        // DEVICE_TYPE_BLOCK, TTY, etc.
     uint32_t wb_err;        // errseq_t snapshot
+    char path[VFS_MAX_PATH]; // Normalized path
 };
 
 
