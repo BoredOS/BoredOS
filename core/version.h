@@ -5,8 +5,6 @@
 
 typedef struct {
     char os_name[64];
-    char os_version[64];
-    char os_codename[64];
     char kernel_name[64];
     char kernel_version[64];
     char build_date[64];

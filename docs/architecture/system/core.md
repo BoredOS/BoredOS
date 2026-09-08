@@ -9,10 +9,10 @@ The kernel source tree is organized into the following directories:
 - **`arch/`**: Low-level assembly routines for bootstrap, GDT/IDT management, FPU/SSE state, interrupts, and syscall entry stubs.
 - **`core/`**: Initialization entry point ([`main.c`](../../core/main.c)), kernel utilities ([`kutils.c`](../../core/kutils.c)), data structures ([`rbtree.c`](../../core/lib/rbtree.c)), and panic handling.
 - **`dev/`**: Device drivers including PCI scanning, AHCI SATA controller, PS/2 input, AC97 audio, and RTC.
-- **`fs/`**: Virtual File System ([`vfs.c`](../../fs/vfs.c)), [tmpfs](../../fs/tmpfs.c), [FAT32](../../fs/fat32.c), [ext4](../../fs/ext4fs.c), ProcFS, SysFS, and writeback flusher ([`flusher.c`](../../fs/flusher.c)).
+- **`fs/`**: Virtual File System ([`vfs.c`](../../fs/vfs.c), [`vfs_mount.c`](../../fs/vfs_mount.c), [`vfs_path.c`](../../fs/vfs_path.c), [`vfs_dev.c`](../../fs/vfs_dev.c)), [tmpfs](../../fs/tmpfs.c), [FAT32](../../fs/fat32.c), [ext4](../../fs/ext4fs.c), ProcFS, SysFS, and writeback flusher ([`flusher.c`](../../fs/flusher.c)).
 - **`mem/`**: Memory subsystem including [PMM](../../mem/pmm.c), [MMU](../../mem/mmu.c), [VMA](../../mem/vma.c), [VMM](../../mem/vmm.c), [Slab allocator](../../mem/slab.c), [Page cache](../../mem/pagecache.c), and [Radix tree](../../mem/radix_tree.c).
 - **`net/`**: Networking stack using lwIP with NIC drivers ([`net/nic/`](../../net/nic/)) and socket buffer layer.
-- **`sys/`**: Process scheduler ([`process.c`](../../sys/process.c)), system call dispatcher ([`syscall.c`](../../sys/syscall.c)), SMP management ([`smp.c`](../../sys/smp.c)), futexes, and ELF loader.
+- **`sys/`**: Process scheduler ([`process.c`](../../sys/process.c)), modular system call layer ([`syscall.c`](../../sys/syscall.c), [`syscall_file.c`](../../sys/syscall_file.c), [`syscall_proc.c`](../../sys/syscall_proc.c), [`syscall_mem.c`](../../sys/syscall_mem.c), [`syscall_net.c`](../../sys/syscall_net.c), [`syscall_time.c`](../../sys/syscall_time.c), [`syscall_system.c`](../../sys/syscall_system.c)), SMP management ([`smp.c`](../../sys/smp.c)), futexes, and ELF loader.
 - **`graphics/`**: Graphical primitives, console font rendering, and framebuffer management.
 - **`usr/`**: Userspace libraries (such as mlibc) and applications (Nova compositor, core utilities, packages).
 

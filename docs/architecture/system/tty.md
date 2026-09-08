@@ -145,7 +145,7 @@ if (ch == CTRL_C_CHAR) {
 
 ## 6. VFS Integration & Device Nodes
 
-The Virtual File System ([`fs/vfs.c`](../../../fs/vfs.c)) exposes TTY and PTY interfaces under `/dev/` and guards graphical nodes during headless boots.
+The Virtual File System ([`fs/vfs_dev.c`](../../../fs/vfs_dev.c) and [`fs/vfs.c`](../../../fs/vfs.c)) exposes TTY and PTY interfaces under `/dev/` and guards graphical nodes during headless boots.
 
 ### Device Node Mapping
 

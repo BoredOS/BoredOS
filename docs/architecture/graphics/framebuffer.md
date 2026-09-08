@@ -6,7 +6,7 @@ In BoredOS, graphical output is managed via a standard, Linux-compatible framebu
 
 ## 1. VFS Registration and Routing
 
-The virtual file system (VFS) in [`src/fs/vfs.c`](../../../src/fs/vfs.c) manages all files under the `/dev` hierarchy. When an application opens `/dev/fb0`, the kernel assigns it a special device type:
+The Virtual File System device layer in [`fs/vfs_dev.c`](../../../fs/vfs_dev.c) manages all device nodes under the `/dev` hierarchy. When an application opens `/dev/fb0`, the kernel assigns it a special device type:
 
 ```c
 #define DEVICE_TYPE_FRAMEBUFFER 2

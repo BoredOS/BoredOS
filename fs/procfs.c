@@ -75,10 +75,6 @@ int procfs_read(void *fs_private, void *handle, void *buf, size_t size) {
             get_os_info(&info);
 
             strcpy(out, info.os_name);
-            strcpy(out + strlen(out), " [");
-            strcpy(out + strlen(out), info.os_codename);
-            strcpy(out + strlen(out), "] Version ");
-            strcpy(out + strlen(out), info.os_version);
             strcpy(out + strlen(out), "\nKernel: ");
             strcpy(out + strlen(out), info.kernel_name);
             strcpy(out + strlen(out), " ");

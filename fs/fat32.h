@@ -107,7 +107,7 @@ typedef fat32_file_handle_t FAT32_FileHandle;
 typedef struct {
     char name[FAT32_MAX_FILENAME];
     uint32_t size;
-    bool is_directory;
+    uint8_t is_directory;
     uint32_t start_cluster;
     uint16_t write_date;
     uint16_t write_time;

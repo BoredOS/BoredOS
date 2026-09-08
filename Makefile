@@ -75,7 +75,12 @@ OBJ_FILES := $(patsubst %.c, $(BUILD_DIR)/%.o, $(C_SOURCES)) \
 INCLUDE_DIRS := $(shell find $(KERNEL_DIRS) -type d \
                 ! -path 'fs/vendor/*' \
                 ! -path '*/fs/vendor/*')
-INCLUDES := $(patsubst %, -I%, $(INCLUDE_DIRS))
+INCLUDES := $(patsubst %, -I%, $(INCLUDE_DIRS)) -I$(BUILD_DIR)
+
+KERNEL_GIT_HASH ?= $(shell git rev-parse --short=8 HEAD 2>/dev/null || echo "unknown")
+KERNEL_GIT_DATE ?= $(shell date +%Y.%m.%d)
+KERNEL_VERSION_STR ?= $(KERNEL_GIT_DATE)-g$(KERNEL_GIT_HASH)
+KERNEL_VERSION_FILE := $(BUILD_DIR)/kernel_version.h
 
 # Detect clang wrapper (FreeBSD) vs freestanding GCC cross (macOS/Linux)
 CC_IS_CLANG := $(shell $(CC) --version 2>/dev/null | grep -q clang && echo 1)
@@ -131,6 +136,17 @@ limine-setup:
 	@printf "$(YELLOW)[LIMINE] Building Limine host utility...$(RESET)\n"
 	$(MAKE) -C limine
 	@printf "$(GREEN)[OK] Limine setup complete.$(RESET)\n"
+
+.PHONY: update-kernel-version
+update-kernel-version: | $(BUILD_DIR)
+	@VER="$(KERNEL_VERSION_STR)"; \
+	if [ ! -f $(KERNEL_VERSION_FILE) ] || [ "$$(cat $(KERNEL_VERSION_FILE) 2>/dev/null)" != "#define BOREDOS_KERNEL_VERSION \"$$VER\"" ]; then \
+		mkdir -p $(BUILD_DIR); \
+		printf '#define BOREDOS_KERNEL_VERSION "%s"\n' "$$VER" > $(KERNEL_VERSION_FILE); \
+	fi
+
+$(KERNEL_VERSION_FILE): update-kernel-version
+$(BUILD_DIR)/core/version.o: $(KERNEL_VERSION_FILE)
 
 $(BUILD_DIR)/%.o: %.c | $(BUILD_DIR) limine-setup
 	@printf "$(YELLOW)[CC]$(RESET) $< -> $@\n"
