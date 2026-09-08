@@ -13,9 +13,21 @@
 
 ---
 
-BoredOS is a from-scratch x86-64 UNIX-like operating system written mostly in C.
+BoredOS is a from-scratch x86-64 UNIX-like hobby operating system written in C.
 
-It isn't fully POSIX compliant, so software generally needs some porting work before it runs, though for most programs the required changes are minor. The project includes a windowed desktop environment called [Nova](usr/nova), a package manager, and an expanding set of ported software.
+It implements preemptive scheduling, demand-paged virtual memory with COW, an ext4/FAT32-capable VFS, Unix domain sockets, and hardware drivers spanning AHCI, AC97 audio, and common network cards (e1000, RTL8139/8111, VirtIO). It targets a practical subset of POSIX, enough to run standard userspace tools and dynamic ports via mlibc. The design aims for a clean, modern UNIX rather than decades of accumulated backwards-compatibility bloat.
+
+## BoredOS sub-projects:
+
+### [Bored Package Manager (BPM)](https://github.com/BoredOS/bpm)
+
+`bpm` is our package manager. It installs, removes, and upgrades software from a remote repository index. Packages are `.bup` files, which are really just tar archives compressed with LZ4, plus a TOML manifest and optional install/remove hook scripts.
+
+There's a community repo, [BUR](https://github.com/boredos/bur), where anyone can submit packages through a pull request. If you want to add something, the [packaging guide](https://github.com/BoredOS/bur/blob/main/PACKAGING.md) walks through the format.
+
+### [Nova](https://github.com/BoredOS/nova)
+
+Nova is a custom compositor built for BoredOS, with its own UI toolkit and a win9x-inspired design language.
 
 ## Features
 
@@ -32,33 +44,21 @@ It isn't fully POSIX compliant, so software generally needs some porting work be
 | **kirc** | A simple IRC client. |
 | **tvi** | A vi-like text editor. |
 
-### Package manager
 
-`bpm` is our package manager. It installs, removes, and upgrades software from a remote repository index. Packages are `.bup` files, which are really just tar archives compressed with LZ4, plus a TOML manifest and optional install/remove hook scripts.
-
-There's a community repo, [BUR](https://github.com/boredos/bur), where anyone can submit packages through a pull request. If you want to add something, the [packaging guide](https://github.com/BoredOS/bur/blob/main/PACKAGING.md) walks through the format.
-
-### Nova
-
-Nova is a custom compositor built for BoredOS, with its own UI toolkit and a win9x-inspired design language.
-
-### Networking
-
-Networking is handled by lwIP, with drivers for Intel e1000, Realtek RTL8139/RTL8111, and VirtIO-net, covering most common hardware and virtualized environments.
-
-## Kernel internals
+## Kernel Summary
 
 | Subsystem | Details |
 |-----------|---------|
 | **SMP** | Multi-core support via LAPIC. Per-CPU state lives in the GS segment. XSAVE/XRSTOR handle FPU context across switches. |
 | **Scheduler** | Preemptive round-robin over a circular process list, with sleep/wake support, per-CPU affinity, and cross-core IPI for AP scheduling. |
 | **Memory** | Physical page allocator (PMM), slab allocator, 4-level MMU with COW, VMA tracking with an RB-tree, demand paging, and a page cache. |
-| **VFS** | Virtual filesystem layer supporting tmpfs, FAT32, ext4, ProcFS, and SysFS. |
+| **VFS** | Virtual filesystem layer supporting tmpfs, FAT32, ext4, ProcFS, DevFS, and SysFS. |
 | **IPC** | Unix domain sockets, shared memory through `/dev/shm`, wait queues, and work queues. |
 | **PTY** | Full pseudo-terminal support. |
 | **Devices** | PCI, AHCI (SATA), PS/2, ACPI, I2C, AC97 audio, and RTC. |
 | **TTYs** | 10 virtual terminals, each with its own graphics buffer. |
 | **ELF** | Loads and runs ELF64 binaries with correct segment mapping. |
+| **Networking** | LWIP TCP/IP stack with support for Intel e1000, RTL8139/RTL8111, and VirtIO-net. |
 
 ## Documentation
 
