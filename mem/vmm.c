@@ -574,6 +574,14 @@ int vmm_handle_page_fault(vmm_space_t *space, uintptr_t fault_addr, uint32_t err
         uintptr_t old_paddr = old_pte & PT_ADDR_MASK;
         page_t *old_page = pmm_paddr_to_page(old_paddr);
 
+        if ((vma->flags & VMA_FLAG_SHARED) || !old_page) {
+            __atomic_fetch_or(pte_ptr, PT_RW, __ATOMIC_SEQ_CST);
+            mmu_tlb_flush_page(page_vaddr);
+            mmu_tlb_shootdown_target(__atomic_load_n(&space->active_cpus, __ATOMIC_SEQ_CST), page_vaddr, 1);
+            vmm_up_read(&space->mmap_sem);
+            return 0;
+        }
+
         if (old_page && old_page != zero_page_desc && __atomic_load_n(&old_page->refcount, __ATOMIC_SEQ_CST) == 1) {
             __atomic_fetch_or(pte_ptr, PT_RW, __ATOMIC_SEQ_CST);
             mmu_tlb_flush_page(page_vaddr);

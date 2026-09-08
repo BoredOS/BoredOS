@@ -8,6 +8,9 @@
 #include "slab.h"
 #include "io.h"
 #include "graphics.h"
+#include "vma.h"
+#include "vmm.h"
+#include "process.h"
 #include <string.h>
 
 #define EINVAL 22
@@ -29,7 +32,7 @@
 #define PT_HUGE          (1ULL << 7)
 #define PT_GLOBAL        (1ULL << 8)
 #define PT_COW           (1ULL << 9)
-#define PT_PAT_4K        (1ULL << 12)
+#define PT_PAT_4K        (1ULL << 7)
 #define PT_PAT_2M        (1ULL << 12)
 #define PT_NX            (1ULL << 63)
 
@@ -57,6 +60,8 @@ void pat_init(void) {
     uint64_t pat = rdmsr(0x277);
     pat &= ~(0xFFULL << 32);
     pat |=  (0x01ULL << 32);
+    pat &= ~(0xFFULL << 8);
+    pat |=  (0x01ULL << 8);
     wrmsr(0x277, pat);
 }
 
@@ -70,7 +75,11 @@ static inline uint64_t mmu_flags_to_pte(uint32_t flags) {
     if (flags & MMU_FLAG_COW) pte |= PT_COW;
 
     if (flags & MMU_FLAG_WC) {
-        pte |= PT_PAT_4K;
+        if (flags & MMU_FLAG_HUGE_2M) {
+            pte |= PT_PAT_2M;
+        } else {
+            pte |= PT_PAT_4K;
+        }
     } else if (flags & MMU_FLAG_NOCACHE) {
         pte |= PT_PCD | PT_PWT;
     }
@@ -113,13 +122,15 @@ void mmu_init(void) {
     uintptr_t fb_base = (uintptr_t)graphics_get_fb_addr();
     if (fb_base) {
         size_t fb_size = (size_t)get_screen_height() * (size_t)graphics_get_fb_pitch();
-        uintptr_t fb_end = fb_base + fb_size;
-        uintptr_t fb_map_base = fb_base & ~(HUGE_PAGE_2M - 1);
-        uintptr_t fb_map_end = (fb_end + HUGE_PAGE_2M - 1) & ~(HUGE_PAGE_2M - 1);
-        for (uintptr_t p = fb_map_base; p < fb_map_end; p += HUGE_PAGE_2M) {
+        uintptr_t phys_base = v2p(fb_base);
+        uintptr_t phys_end = phys_base + fb_size;
+        uintptr_t phys_map_base = phys_base & ~(HUGE_PAGE_2M - 1);
+        uintptr_t phys_map_end = (phys_end + HUGE_PAGE_2M - 1) & ~(HUGE_PAGE_2M - 1);
+        for (uintptr_t p = phys_map_base; p < phys_map_end; p += HUGE_PAGE_2M) {
             mmu_map_page(&kernel_context, (uintptr_t)p2v(p), p,
                          MMU_PROT_READ | MMU_PROT_WRITE | MMU_FLAG_WC | MMU_FLAG_GLOBAL | MMU_FLAG_HUGE_2M);
         }
+        mmu_tlb_flush_all();
     }
 }
 
@@ -265,6 +276,22 @@ static int mmu_map_page_unlocked(mmu_context_t *ctx, uintptr_t virt, uintptr_t p
         pd = p2table(pdpt->entries[l3]);
     }
 
+    if (flags & MMU_FLAG_HUGE_2M) {
+        if ((virt & HUGE_PAGE_2M_MASK) || (phys & HUGE_PAGE_2M_MASK)) {
+            return -EINVAL;
+        }
+
+        uint64_t pde_val = (phys & PT_2M_ADDR_MASK) | mmu_flags_to_pte(flags) | PT_HUGE;
+
+        uint64_t old_pde = __atomic_exchange_n(&pd->entries[l2], pde_val, __ATOMIC_SEQ_CST);
+        if ((read_cr3() & PT_ADDR_MASK) == ctx->pml4_phys) {
+            invlpg(virt);
+        }
+
+        (void)old_pde;
+        return 0;
+    }
+
     if (pd->entries[l2] & PT_HUGE) {
         if (new_pd_phys) {
             pdpt->entries[l3] = 0;
@@ -275,23 +302,6 @@ static int mmu_map_page_unlocked(mmu_context_t *ctx, uintptr_t virt, uintptr_t p
             free_table_frame(new_pdpt_phys);
         }
         return -EEXIST;
-    }
-
-    if (flags & MMU_FLAG_HUGE_2M) {
-        if ((virt & HUGE_PAGE_2M_MASK) || (phys & HUGE_PAGE_2M_MASK)) {
-            return -EINVAL;
-        }
-
-        uint64_t pde_val = (phys & PT_2M_ADDR_MASK) | mmu_flags_to_pte(flags) | PT_HUGE;
-        if (flags & MMU_FLAG_WC) pde_val |= PT_PAT_2M;
-
-        uint64_t old_pde = __atomic_exchange_n(&pd->entries[l2], pde_val, __ATOMIC_SEQ_CST);
-        if ((read_cr3() & PT_ADDR_MASK) == ctx->pml4_phys) {
-            invlpg(virt);
-        }
-
-        (void)old_pde;
-        return 0;
     }
 
     page_table_t *pt = NULL;
@@ -680,6 +690,22 @@ int mmu_clone_user_cow(mmu_context_t *parent_ctx, mmu_context_t *child_ctx) {
                     uintptr_t phys = pte & PT_ADDR_MASK;
                     page_t *page = pmm_paddr_to_page(phys);
 
+                    uintptr_t virt = ((uint64_t)l4 << 39) | ((uint64_t)l3 << 30) |
+                                     ((uint64_t)l2 << 21) | ((uint64_t)l1 << 12);
+
+                    process_t *proc = process_get_current();
+                    vm_area_t *vma = (proc && proc->vmm_space) ? vma_find(&proc->vmm_space->vma_tree, virt) : NULL;
+                    bool is_shared = (!page) || (vma && (vma->flags & VMA_FLAG_SHARED));
+
+                    if (is_shared) {
+                        uint32_t map_flags = MMU_PROT_READ | MMU_PROT_USER;
+                        if (pte & PT_RW) map_flags |= MMU_PROT_WRITE;
+                        if (!(pte & PT_NX)) map_flags |= MMU_PROT_EXEC;
+                        if (!page) map_flags |= MMU_FLAG_WC;
+                        mmu_map_page_unlocked(child_ctx, virt, phys, map_flags);
+                        continue;
+                    }
+
                     if (pte & PT_RW) {
                         pte &= ~PT_RW;
                         pte |= PT_COW;
@@ -690,9 +716,6 @@ int mmu_clone_user_cow(mmu_context_t *parent_ctx, mmu_context_t *child_ctx) {
                         __atomic_fetch_add(&page->refcount, 1, __ATOMIC_SEQ_CST);
                     }
 
-                    uintptr_t virt = ((uint64_t)l4 << 39) | ((uint64_t)l3 << 30) |
-                                     ((uint64_t)l2 << 21) | ((uint64_t)l1 << 12);
-                    
                     uint32_t map_flags = MMU_PROT_READ | MMU_PROT_USER;
                     if (pte & PT_COW) map_flags |= MMU_FLAG_COW;
                     if (!(pte & PT_NX)) map_flags |= MMU_PROT_EXEC;
