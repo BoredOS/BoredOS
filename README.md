@@ -15,7 +15,7 @@
 
 BoredOS is a from-scratch x86-64 UNIX-like hobby operating system written in C.
 
-It implements preemptive scheduling, demand-paged virtual memory with COW, an ext4/FAT32-capable VFS, Unix domain sockets, and hardware drivers spanning AHCI, AC97 audio, and common network cards (e1000, RTL8139/8111, VirtIO). It targets a practical subset of POSIX, enough to run standard userspace tools and dynamic ports via mlibc. The design aims for a clean, modern UNIX rather than decades of accumulated backwards-compatibility bloat.
+It implements preemptive scheduling, demand-paged virtual memory with COW, an ext4/FAT32-capable VFS, Unix domain sockets, a custom init system (YAWN), and hardware drivers spanning AHCI, AC97 audio, and common network cards (e1000, RTL8139/8111, VirtIO). It targets a practical subset of POSIX, enough to run standard userspace tools and dynamic ports via mlibc. The design aims for a clean, modern UNIX rather than decades of accumulated backwards-compatibility bloat.
 
 ## BoredOS sub-projects:
 
@@ -28,6 +28,10 @@ There's a community repo, [BUR](https://github.com/boredos/bur), where anyone ca
 ### [Nova](https://github.com/BoredOS/nova)
 
 Nova is a custom compositor built for BoredOS, with its own UI toolkit and a win9x-inspired design language.
+
+### [YAWN](docs/architecture/system/yawn.md)
+
+YAWN (*Yet Another Workload Navigator*) is our custom init and service management system. It bootstraps userspace, supervises login terminals, handles zombie process reaping, and manages daemons through a BSD-style rc system (`/etc/rc.d` and `/etc/rc.conf`). (YAWN also stands for "You Awake? Well, Now what?")
 
 ## Features
 
