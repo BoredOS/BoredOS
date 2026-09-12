@@ -377,6 +377,10 @@ void pmm_free_order(page_t *page, uint8_t order) {
     if (prev > 1) {
         return;
     }
+    if (prev == 0) {
+        __atomic_store_n(&page->refcount, 0, __ATOMIC_SEQ_CST);
+        return;
+    }
 
     uint32_t cpu_id = smp_this_cpu_id();
     if (cpu_id >= PMM_MAX_CPUS) cpu_id = 0;

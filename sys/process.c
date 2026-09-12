@@ -130,13 +130,13 @@ void process_put(process_t *proc) {
             kfree_null(proc->user_stack_alloc);
             proc->user_stack_alloc = NULL;
         }
-        if (proc->vmm_space && should_destroy_pml4) {
+        if (proc->vmm_space) {
             vmm_destroy_space(proc->vmm_space);
             proc->vmm_space = NULL;
             proc->pml4_phys = 0;
         } else if (proc->pml4_phys && should_destroy_pml4) {
-            mmu_context_t ctx = { .pml4_phys = proc->pml4_phys, .lock = SPINLOCK_INIT };
-            mmu_destroy_context(&ctx);
+            extern void mmu_destroy_pml4(uintptr_t pml4_phys);
+            mmu_destroy_pml4(proc->pml4_phys);
             proc->pml4_phys = 0;
         }
         process_free_struct(proc);
@@ -183,7 +183,7 @@ typedef struct {
 
 static void collect_pids_cb(process_t *proc, void *arg) {
     get_pids_arg_t *a = (get_pids_arg_t *)arg;
-    if (a->count < a->max) {
+    if (a->count < a->max && proc && proc->pid > 0 && proc->is_user) {
         a->pids[a->count++] = proc->pid;
     }
 }
@@ -1772,8 +1772,8 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     if (old_space && destroy_old) {
         vmm_destroy_space(old_space);
     } else if (old_pml4 && destroy_old) {
-        mmu_context_t ctx = { .pml4_phys = old_pml4, .lock = SPINLOCK_INIT };
-        mmu_destroy_context(&ctx);
+        extern void mmu_destroy_pml4(uintptr_t pml4_phys);
+        mmu_destroy_pml4(old_pml4);
     }
 
     proc->fs_base = 0;
@@ -2045,6 +2045,9 @@ process_t* process_create_thread(registers_t *parent_regs, uint64_t entry_point,
     child->name[len++] = 'd';
     child->name[len] = 0;
     child->vmm_space = parent->vmm_space;
+    if (child->vmm_space) {
+        __atomic_fetch_add(&child->vmm_space->refcount, 1, __ATOMIC_SEQ_CST);
+    }
     child->mmap_current = parent->mmap_current;
     child->pml4_phys = parent->pml4_phys;
     child->pml4_refcount = parent->pml4_refcount;

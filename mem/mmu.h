@@ -31,6 +31,7 @@ void pat_init(void);
 
 mmu_context_t *mmu_create_context(void);
 void mmu_destroy_context(mmu_context_t *ctx);
+void mmu_destroy_pml4(uintptr_t pml4_phys);
 void mmu_switch_context(mmu_context_t *ctx);
 mmu_context_t *mmu_get_current_context(void);
 mmu_context_t *mmu_get_kernel_context(void);

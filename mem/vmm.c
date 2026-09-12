@@ -185,7 +185,7 @@ void vmm_destroy_space(vmm_space_t *space) {
                 if (p) {
                     page_t *pg = pmm_paddr_to_page(p);
                     if (pg && pg != zero_page_desc && !(pg->flags & (PAGE_FLAG_FREE | PAGE_FLAG_SLAB | PAGE_FLAG_KMALLOC_LARGE))) {
-                        pmm_free_page(pg);
+                        pmm_page_unref(pg);
                     }
                 }
             }
@@ -317,7 +317,7 @@ int vmm_unmap(vmm_space_t *space, uintptr_t addr, size_t length) {
                 if (p) {
                     page_t *pg = pmm_paddr_to_page(p);
                     if (pg && pg != zero_page_desc && !(pg->flags & (PAGE_FLAG_FREE | PAGE_FLAG_SLAB | PAGE_FLAG_KMALLOC_LARGE))) {
-                        pmm_free_page(pg);
+                        pmm_page_unref(pg);
                     }
                 }
             }
@@ -453,7 +453,7 @@ uintptr_t vmm_brk(vmm_space_t *space, uintptr_t new_brk) {
                 if (p) {
                     page_t *pg = pmm_paddr_to_page(p);
                     if (pg && pg != zero_page_desc) {
-                        pmm_free_page(pg);
+                        pmm_page_unref(pg);
                     }
                 }
             }
@@ -632,7 +632,7 @@ int vmm_handle_page_fault(vmm_space_t *space, uintptr_t fault_addr, uint32_t err
         }
 
         if (old_page && old_page != zero_page_desc) {
-            pmm_free_page(old_page);
+            pmm_page_unref(old_page);
         }
 
         mmu_tlb_flush_page(page_vaddr);

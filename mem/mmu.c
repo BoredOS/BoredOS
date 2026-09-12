@@ -98,8 +98,16 @@ static page_table_t *alloc_table_frame(uintptr_t *out_phys) {
     return NULL;
 }
 
+static inline bool is_valid_table_phys(uintptr_t phys) {
+    if (!phys || (phys & PAGE_MASK)) return false;
+    page_t *p = pmm_paddr_to_page(phys);
+    if (!p) return false;
+    if (p->flags & PAGE_FLAG_FREE) return false;
+    return true;
+}
+
 static void free_table_frame(uintptr_t phys) {
-    if (!phys) return;
+    if (!is_valid_table_phys(phys)) return;
     page_t *p = pmm_paddr_to_page(phys);
     if (p && !(p->flags & (PAGE_FLAG_FREE | PAGE_FLAG_RESERVED))) {
         pmm_free_page(p);
@@ -168,10 +176,12 @@ mmu_context_t *mmu_create_context(void) {
 }
 
 static void destroy_pt(uintptr_t pt_phys) {
+    if (!is_valid_table_phys(pt_phys)) return;
     free_table_frame(pt_phys);
 }
 
 static void destroy_pd(uintptr_t pd_phys) {
+    if (!is_valid_table_phys(pd_phys)) return;
     page_table_t *pd = (page_table_t *)p2v(pd_phys);
     for (int i = 0; i < 512; i++) {
         uint64_t pde = pd->entries[i];
@@ -183,6 +193,7 @@ static void destroy_pd(uintptr_t pd_phys) {
 }
 
 static void destroy_pdpt(uintptr_t pdpt_phys) {
+    if (!is_valid_table_phys(pdpt_phys)) return;
     page_table_t *pdpt = (page_table_t *)p2v(pdpt_phys);
     for (int i = 0; i < 512; i++) {
         uint64_t pdpte = pdpt->entries[i];
@@ -194,14 +205,16 @@ static void destroy_pdpt(uintptr_t pdpt_phys) {
 }
 
 
-void mmu_destroy_context(mmu_context_t *ctx) {
-    if (!ctx || ctx == &kernel_context || !ctx->pml4_phys) return;
+void mmu_destroy_pml4(uintptr_t pml4_phys) {
+    if (!pml4_phys || pml4_phys == kernel_context.pml4_phys) return;
 
-    if (active_context == ctx) {
+    if ((read_cr3() & PT_ADDR_MASK) == pml4_phys) {
         mmu_switch_context(&kernel_context);
     }
 
-    page_table_t *pml4 = (page_table_t *)p2v(ctx->pml4_phys);
+    if (!is_valid_table_phys(pml4_phys)) return;
+
+    page_table_t *pml4 = (page_table_t *)p2v(pml4_phys);
     for (int i = 0; i < 256; i++) {
         uint64_t pml4e = pml4->entries[i];
         if (pml4e & PT_PRESENT) {
@@ -209,7 +222,12 @@ void mmu_destroy_context(mmu_context_t *ctx) {
         }
     }
 
-    free_table_frame(ctx->pml4_phys);
+    free_table_frame(pml4_phys);
+}
+
+void mmu_destroy_context(mmu_context_t *ctx) {
+    if (!ctx || ctx == &kernel_context || !ctx->pml4_phys) return;
+    mmu_destroy_pml4(ctx->pml4_phys);
     kfree(ctx);
 }
 
@@ -356,13 +374,16 @@ static int mmu_unmap_page_unlocked(mmu_context_t *ctx, uintptr_t virt) {
     size_t l1 = pt_idx(virt);
 
     if (!(pml4->entries[l4] & PT_PRESENT)) return 0;
+    if (!is_valid_table_phys(pml4->entries[l4] & PT_ADDR_MASK)) return 0;
 
     page_table_t *pdpt = p2table(pml4->entries[l4]);
     if (!(pdpt->entries[l3] & PT_PRESENT)) return 0;
     if (pdpt->entries[l3] & PT_HUGE) return -EINVAL;
+    if (!is_valid_table_phys(pdpt->entries[l3] & PT_ADDR_MASK)) return 0;
 
     page_table_t *pd = p2table(pdpt->entries[l3]);
     if (!(pd->entries[l2] & PT_PRESENT)) return 0;
+    if (!is_valid_table_phys(pd->entries[l2] & PT_ADDR_MASK)) return 0;
 
     if (pd->entries[l2] & PT_HUGE) {
         uint64_t old_pde = __atomic_exchange_n(&pd->entries[l2], 0ULL, __ATOMIC_SEQ_CST);
@@ -550,7 +571,7 @@ uintptr_t mmu_virt_to_phys(mmu_context_t *ctx, uintptr_t virt) {
     size_t l2 = pd_idx(virt);
     size_t l1 = pt_idx(virt);
 
-    if (!(pml4->entries[l4] & PT_PRESENT)) {
+    if (!(pml4->entries[l4] & PT_PRESENT) || !is_valid_table_phys(pml4->entries[l4] & PT_ADDR_MASK)) {
         spinlock_release_irqrestore(&ctx->lock, rflags);
         return 0;
     }
@@ -567,6 +588,11 @@ uintptr_t mmu_virt_to_phys(mmu_context_t *ctx, uintptr_t virt) {
         return phys;
     }
 
+    if (!is_valid_table_phys(pdpt->entries[l3] & PT_ADDR_MASK)) {
+        spinlock_release_irqrestore(&ctx->lock, rflags);
+        return 0;
+    }
+
     page_table_t *pd = p2table(pdpt->entries[l3]);
     if (!(pd->entries[l2] & PT_PRESENT)) {
         spinlock_release_irqrestore(&ctx->lock, rflags);
@@ -577,6 +603,11 @@ uintptr_t mmu_virt_to_phys(mmu_context_t *ctx, uintptr_t virt) {
         uintptr_t phys = (pd->entries[l2] & PT_2M_ADDR_MASK) | (virt & 0x1FFFFFULL);
         spinlock_release_irqrestore(&ctx->lock, rflags);
         return phys;
+    }
+
+    if (!is_valid_table_phys(pd->entries[l2] & PT_ADDR_MASK)) {
+        spinlock_release_irqrestore(&ctx->lock, rflags);
+        return 0;
     }
 
     page_table_t *pt = p2table(pd->entries[l2]);
@@ -599,11 +630,13 @@ uint64_t *mmu_get_pte_ptr(mmu_context_t *ctx, uintptr_t virt) {
     size_t l2 = pd_idx(virt);
     size_t l1 = pt_idx(virt);
 
-    if (!(pml4->entries[l4] & PT_PRESENT)) return NULL;
+    if (!(pml4->entries[l4] & PT_PRESENT) || !is_valid_table_phys(pml4->entries[l4] & PT_ADDR_MASK)) return NULL;
     page_table_t *pdpt = p2table(pml4->entries[l4]);
     if (!(pdpt->entries[l3] & PT_PRESENT) || (pdpt->entries[l3] & PT_HUGE)) return NULL;
+    if (!is_valid_table_phys(pdpt->entries[l3] & PT_ADDR_MASK)) return NULL;
     page_table_t *pd = p2table(pdpt->entries[l3]);
     if (!(pd->entries[l2] & PT_PRESENT) || (pd->entries[l2] & PT_HUGE)) return NULL;
+    if (!is_valid_table_phys(pd->entries[l2] & PT_ADDR_MASK)) return NULL;
     page_table_t *pt = p2table(pd->entries[l2]);
     return &pt->entries[l1];
 }
@@ -684,16 +717,19 @@ int mmu_clone_user_cow(mmu_context_t *parent_ctx, mmu_context_t *child_ctx) {
 
     for (size_t l4 = 0; l4 < 256; l4++) {
         if (!(p_pml4->entries[l4] & PT_PRESENT)) continue;
+        if (!is_valid_table_phys(p_pml4->entries[l4] & PT_ADDR_MASK)) continue;
         page_table_t *p_pdpt = p2table(p_pml4->entries[l4]);
 
         for (size_t l3 = 0; l3 < 512; l3++) {
             if (!(p_pdpt->entries[l3] & PT_PRESENT)) continue;
             if (p_pdpt->entries[l3] & PT_HUGE) continue;
+            if (!is_valid_table_phys(p_pdpt->entries[l3] & PT_ADDR_MASK)) continue;
             page_table_t *p_pd = p2table(p_pdpt->entries[l3]);
 
             for (size_t l2 = 0; l2 < 512; l2++) {
                 if (!(p_pd->entries[l2] & PT_PRESENT)) continue;
                 if (p_pd->entries[l2] & PT_HUGE) continue;
+                if (!is_valid_table_phys(p_pd->entries[l2] & PT_ADDR_MASK)) continue;
                 page_table_t *p_pt = p2table(p_pd->entries[l2]);
 
                 for (size_t l1 = 0; l1 < 512; l1++) {
