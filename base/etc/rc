@@ -1,0 +1,19 @@
+# System startup manager invoked by init during single or multi-user boot.
+# Loads configuration defaults, reads rc.conf, and brings up subsystems in order.
+. /etc/rc.subr
+
+echo "Welcome to BoredOS!"
+
+/etc/rc.d/cleanvar start
+/etc/rc.d/hostname start
+/etc/rc.d/timezone start
+/etc/rc.d/netif start
+/etc/rc.d/routing start
+/etc/rc.d/resolv start
+/etc/rc.d/ntp start
+/etc/rc.d/klogd start
+/etc/rc.d/httpd start
+/etc/rc.d/nova start
+/etc/rc.d/local start
+
+echo "System ready."

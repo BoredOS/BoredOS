@@ -1,0 +1,17 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ -n "$hostname" ]; then
+        if [ -f /bin/hostname.elf ]; then
+            hostname.elf "$hostname"
+        fi
+        echo "Hostname set to '$hostname'."
+    fi
+elif [ "$action" = "status" ]; then
+    echo "Configured hostname: $hostname"
+fi

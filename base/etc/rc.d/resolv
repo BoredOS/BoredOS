@@ -1,0 +1,26 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ -n "$nameserver" ]; then
+        if [ ! -f /etc/resolv.conf ]; then
+            echo "nameserver $nameserver" > /etc/resolv.conf
+            echo "Configured fallback DNS resolver with nameserver $nameserver."
+        fi
+    fi
+elif [ "$action" = "forcestart" ]; then
+    if [ -n "$nameserver" ]; then
+        echo "nameserver $nameserver" > /etc/resolv.conf
+        echo "Forced DNS resolver with nameserver $nameserver."
+    fi
+elif [ "$action" = "status" ]; then
+    if [ -f /etc/resolv.conf ]; then
+        cat /etc/resolv.conf
+    else
+        echo "No /etc/resolv.conf configured."
+    fi
+fi

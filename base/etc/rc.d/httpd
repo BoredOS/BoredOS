@@ -1,0 +1,71 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="status"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$httpd_enable" = "YES" ]; then
+        if [ -f /var/run/httpd.pid ]; then
+            read pid < /var/run/httpd.pid
+            if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+                echo "httpd is already running with PID $pid"
+                exit 0
+            fi
+        fi
+        echo "Starting httpd..."
+        port="${httpd_port:-80}"
+        root="${httpd_root:-/Library/WebServer/Documents}"
+        mkdir -p "$root"
+        if [ -f /bin/httpd.elf ]; then
+            httpd.elf -p "$port" -r "$root" > /var/log/httpd.log &
+            echo $! > /var/run/httpd.pid
+            echo "httpd started with PID $! (port $port, root $root)."
+        fi
+    fi
+elif [ "$action" = "forcestart" ]; then
+    if [ -f /var/run/httpd.pid ]; then
+        read pid < /var/run/httpd.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "httpd is already running with PID $pid"
+            exit 0
+        fi
+    fi
+    echo "Starting httpd..."
+    port="${httpd_port:-80}"
+    root="${httpd_root:-/Library/WebServer/Documents}"
+    mkdir -p "$root"
+    if [ -f /bin/httpd.elf ]; then
+        httpd.elf -p "$port" -r "$root" > /var/log/httpd.log &
+        echo $! > /var/run/httpd.pid
+        echo "httpd started with PID $! (port $port, root $root)."
+    fi
+elif [ "$action" = "stop" ]; then
+    if [ -f /var/run/httpd.pid ]; then
+        read pid < /var/run/httpd.pid
+        if [ -n "$pid" ]; then
+            echo "Stopping httpd (PID $pid)..."
+            kill $pid
+            rm -f /var/run/httpd.pid
+            echo "httpd stopped."
+        fi
+    else
+        echo "httpd is not running."
+    fi
+elif [ "$action" = "restart" ]; then
+    /etc/rc.d/httpd stop
+    /etc/rc.d/httpd start
+elif [ "$action" = "status" ]; then
+    if [ -f /var/run/httpd.pid ]; then
+        read pid < /var/run/httpd.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "httpd is running (PID $pid)"
+        else
+            echo "httpd is stopped (stale PID file removed)"
+            rm -f /var/run/httpd.pid
+        fi
+    else
+        echo "httpd is stopped"
+    fi
+fi

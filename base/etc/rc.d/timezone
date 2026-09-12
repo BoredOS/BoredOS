@@ -1,0 +1,30 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    target_zone="$timezone"
+    if [ -z "$target_zone" ]; then
+        target_zone="UTC"
+    fi
+
+    if [ -f "/usr/share/zoneinfo/$target_zone" ]; then
+        cp "/usr/share/zoneinfo/$target_zone" /etc/localtime
+        echo "$target_zone" > /etc/timezone
+        echo "Timezone configured: $target_zone"
+    elif [ ! -f /etc/localtime ] && [ -f /usr/share/zoneinfo/UTC ]; then
+        cp /usr/share/zoneinfo/UTC /etc/localtime
+        echo "UTC" > /etc/timezone
+        echo "Timezone defaulted to UTC."
+    fi
+elif [ "$action" = "status" ]; then
+    if [ -f /etc/timezone ]; then
+        read cur_tz < /etc/timezone
+        echo "Configured timezone: $cur_tz"
+    else
+        echo "Timezone: UTC (default)"
+    fi
+fi

@@ -1,0 +1,17 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ -n "$defaultrouter" ]; then
+        if [ -f /bin/route.elf ]; then
+            echo "Setting default gateway to $defaultrouter..."
+            route.elf add default $defaultrouter
+        fi
+    fi
+elif [ "$action" = "status" ]; then
+    echo "Default gateway: $defaultrouter"
+fi

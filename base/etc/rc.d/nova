@@ -1,0 +1,65 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="status"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$nova_enable" = "YES" ]; then
+        if [ -f /var/run/nova.pid ]; then
+            read pid < /var/run/nova.pid
+            if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+                echo "Nova is already running with PID $pid"
+                exit 0
+            fi
+        fi
+        echo "Starting Nova Desktop Environment..."
+        if [ -f /bin/nova.elf ]; then
+            nova.elf > /var/log/nova.log &
+            echo $! > /var/run/nova.pid
+            echo "Nova started with PID $!."
+        fi
+    fi
+elif [ "$action" = "forcestart" ]; then
+    if [ -f /var/run/nova.pid ]; then
+        read pid < /var/run/nova.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "Nova is already running with PID $pid"
+            exit 0
+        fi
+    fi
+    echo "Starting Nova Desktop Environment..."
+    if [ -f /bin/nova.elf ]; then
+        nova.elf > /var/log/nova.log &
+        echo $! > /var/run/nova.pid
+        echo "Nova started with PID $!."
+    fi
+elif [ "$action" = "stop" ]; then
+    if [ -f /var/run/nova.pid ]; then
+        read pid < /var/run/nova.pid
+        if [ -n "$pid" ]; then
+            echo "Stopping Nova (PID $pid)..."
+            kill $pid
+            rm -f /var/run/nova.pid
+            echo "Nova stopped."
+        fi
+    else
+        echo "Nova is not running."
+    fi
+elif [ "$action" = "restart" ]; then
+    /etc/rc.d/nova stop
+    /etc/rc.d/nova start
+elif [ "$action" = "status" ]; then
+    if [ -f /var/run/nova.pid ]; then
+        read pid < /var/run/nova.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "Nova is running (PID $pid)"
+        else
+            echo "Nova is stopped (stale PID file removed)"
+            rm -f /var/run/nova.pid
+        fi
+    else
+        echo "Nova is stopped"
+    fi
+fi

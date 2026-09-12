@@ -1,0 +1,17 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$local_enable" = "NO" ] || [ "$local_enable" = "no" ]; then
+        exit 0
+    fi
+
+    if [ -f /etc/rc.local ]; then
+        echo "Running /etc/rc.local..."
+        . /etc/rc.local
+    fi
+fi

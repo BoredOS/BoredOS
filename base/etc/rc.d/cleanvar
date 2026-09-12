@@ -1,0 +1,17 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$cleanvar_enable" = "NO" ] || [ "$cleanvar_enable" = "no" ]; then
+        exit 0
+    fi
+
+    echo "Cleaning temporary files and /var/run..."
+    mkdir -p /var/run /var/log /tmp
+    rm -f /var/run/*.pid /var/run/*.sock 2>/dev/null
+    rm -rf /tmp/* 2>/dev/null
+fi

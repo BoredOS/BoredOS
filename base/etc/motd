@@ -1,0 +1,13 @@
+================================================================================
+ BoredOS Live Environment
+================================================================================
+
+  To install BoredOS:
+    - Run 'boredos_install' in your terminal
+
+  Quick diagnostics:
+    - View network:          ifconfig
+    - View disks:            lsblk
+    - Docs:                  tvi /docs/README.md
+
+================================================================================

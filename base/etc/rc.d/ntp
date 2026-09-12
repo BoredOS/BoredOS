@@ -1,0 +1,46 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$ntp_enable" != "YES" ] && [ "$ntp_enable" != "yes" ]; then
+        exit 0
+    fi
+
+    if [ ! -f /bin/sntp.elf ] && [ ! -f /bin/sntp ]; then
+        echo "ntp: sntp utility not found, skipping."
+        exit 0
+    fi
+
+    has_net=""
+    if [ -n "$ifconfig_auto" ] || [ -n "$ifconfig_DEFAULT" ] || [ -f /etc/resolv.conf ]; then
+        has_net="yes"
+    else
+        for dev in em0 re0 vtnet0 eth0; do
+            eval val=\"\$ifconfig_${dev}\"
+            if [ -n "$val" ]; then
+                has_net="yes"
+                break
+            fi
+        done
+    fi
+
+    if [ -z "$has_net" ]; then
+        echo "ntp: Networking is not configured, skipping time sync."
+        exit 0
+    fi
+
+    server="$ntp_server"
+    if [ -z "$server" ]; then
+        server="pool.ntp.org"
+    fi
+    echo "Querying NTP time server $server..."
+    if [ -f /bin/sntp.elf ]; then
+        /bin/sntp.elf "$server"
+    else
+        /bin/sntp "$server"
+    fi
+fi

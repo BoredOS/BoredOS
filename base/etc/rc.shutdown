@@ -1,0 +1,36 @@
+echo "Executing system shutdown tasks..."
+
+for pidfile in /var/run/*.pid; do
+    if [ -f "$pidfile" ]; then
+        srv="${pidfile##*/}"
+        srv="${srv%.pid}"
+        if [ -f "/etc/rc.d/$srv" ]; then
+            /etc/rc.d/"$srv" stop
+        else
+            read pid < "$pidfile"
+            if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+                echo "Stopping $srv (PID $pid)..."
+                kill "$pid"
+            fi
+            rm -f "$pidfile"
+        fi
+    fi
+done
+
+if [ -f /etc/rc.d/netif ]; then
+    /etc/rc.d/netif stop
+fi
+
+if [ -f /bin/umount.elf ]; then
+    /bin/umount.elf /boot 2>/dev/null
+    /bin/umount.elf /mnt/boot 2>/dev/null
+    /bin/umount.elf /mnt 2>/dev/null
+elif [ -f /bin/umount ]; then
+    /bin/umount /boot 2>/dev/null
+    /bin/umount /mnt/boot 2>/dev/null
+    /bin/umount /mnt 2>/dev/null
+fi
+
+sync
+
+echo "Shutdown tasks completed."

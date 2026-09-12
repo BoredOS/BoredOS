@@ -1,0 +1,18 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$motd_enable" = "NO" ] || [ "$motd_enable" = "no" ]; then
+        exit 0
+    fi
+
+    if [ -f /etc/motd ]; then
+        echo ""
+        cat /etc/motd
+        echo ""
+    fi
+fi

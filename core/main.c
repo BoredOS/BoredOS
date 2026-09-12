@@ -43,6 +43,7 @@
 #include "acpi.h"
 #include "ac97.h"
 #include "serial.h"
+#include "spinlock.h"
 
 bool g_headless_mode = false;
 
@@ -119,14 +120,54 @@ static void hcf(void) {
     }
 }
 
+
 static spinlock_t serial_lock = SPINLOCK_INIT;
+
+#define KMSG_BUFFER_SIZE 131072
+static char g_kmsg_buffer[KMSG_BUFFER_SIZE];
+static size_t g_kmsg_len = 0;
+
+static void kmsg_append_locked(const char *str) {
+    if (!str) return;
+    size_t len = strlen(str);
+    if (len == 0) return;
+    if (len >= KMSG_BUFFER_SIZE) {
+        str += (len - (KMSG_BUFFER_SIZE - 1));
+        len = KMSG_BUFFER_SIZE - 1;
+    }
+    if (g_kmsg_len + len > KMSG_BUFFER_SIZE) {
+        size_t drop = (g_kmsg_len + len) - KMSG_BUFFER_SIZE;
+        size_t skip = drop;
+        while (skip < g_kmsg_len && g_kmsg_buffer[skip] != '\n') {
+            skip++;
+        }
+        if (skip < g_kmsg_len) skip++;
+        else skip = drop;
+        memmove(g_kmsg_buffer, g_kmsg_buffer + skip, g_kmsg_len - skip);
+        g_kmsg_len -= skip;
+    }
+    memcpy(g_kmsg_buffer + g_kmsg_len, str, len);
+    g_kmsg_len += len;
+}
+
+size_t kmsg_copy(char *dst, size_t max_len) {
+    if (!dst || max_len == 0) return 0;
+    uint64_t flags = spinlock_acquire_irqsave(&serial_lock);
+    size_t to_copy = g_kmsg_len < max_len ? g_kmsg_len : max_len;
+    memcpy(dst, g_kmsg_buffer, to_copy);
+    spinlock_release_irqrestore(&serial_lock, flags);
+    return to_copy;
+}
 
 void serial_write(const char *str) {
     if (!str) return;
+    uint64_t flags = spinlock_acquire_irqsave(&serial_lock);
     if (!serial_is_log_silenced()) {
         serial_write_str(serial_get_debug_port(), str);
     }
     kconsole_write(str);
+    kmsg_append_locked(str);
+    spinlock_release_irqrestore(&serial_lock, flags);
 }
 
 void serial_write_num_locked(uint32_t n) {
@@ -230,10 +271,15 @@ static bool cmdline_read_value(const char *cmdline, const char *key, char *out, 
 
 static uint8_t g_boot_flags = 0;
 static char g_boot_root_device[32] = {0};
+static char g_boot_init_path[128] = {0};
 
 static void boot_parse_cmdline(const char *cmdline, uint32_t media_type) {
+    (void)media_type;
     g_boot_flags = 0;
     g_boot_root_device[0] = '\0';
+    g_boot_init_path[0] = '\0';
+
+    cmdline_read_value(cmdline, "init=", g_boot_init_path, sizeof(g_boot_init_path));
 
     char root_arg[32];
     if (cmdline_read_value(cmdline, "root=", root_arg, (int)sizeof(root_arg))) {
@@ -252,10 +298,8 @@ static void boot_parse_cmdline(const char *cmdline, uint32_t media_type) {
 
     if (g_boot_flags & BOOT_FLAG_ROOT_SET) {
         g_boot_flags |= BOOT_FLAG_DISK;
-    } else if (media_type == LIMINE_MEDIA_TYPE_OPTICAL || media_type == LIMINE_MEDIA_TYPE_TFTP) {
-        g_boot_flags |= BOOT_FLAG_LIVE;
     } else {
-        g_boot_flags |= BOOT_FLAG_DISK;
+        g_boot_flags |= BOOT_FLAG_LIVE;
     }
 }
 
@@ -317,8 +361,25 @@ static void init_early(void) {
     platform_init();
     serial_init();
     init_graphics();
-    vfs_init();
+
     serial_write("\n");
+    kconsole_set_color(0xFF00FFFF);
+    serial_write("===================\n");
+    serial_write("Welcome to BoredOS!\n");
+    serial_write("===================\n");
+    kconsole_set_color(0xFFFFFFFF);
+    serial_write("Built on " __DATE__ " " __TIME__ "\n");
+
+    if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
+        const char *cmdline = kernel_file_request.response->kernel_file->cmdline;
+        if (cmdline && cmdline[0]) {
+            serial_write("[BOOT] Cmdline: ");
+            serial_write(cmdline);
+            serial_write("\n");
+        }
+    }
+
+    vfs_init();
     log_ok("Platform initialized");
     
     extern uint64_t hhdm_offset;
@@ -353,12 +414,18 @@ static void init_memory(void) {
         extern bool pmm_run_tests(void);
         extern uint64_t hhdm_offset;
 
+        uint64_t total_mem = 0;
+        uint64_t usable_mem = 0;
         pmm_mem_region_t pmm_regions[memmap_request.response->entry_count];
         for (uint64_t i = 0; i < memmap_request.response->entry_count; i++) {
             struct limine_memmap_entry *entry = memmap_request.response->entries[i];
             pmm_regions[i].base = entry->base;
             pmm_regions[i].length = entry->length;
             pmm_regions[i].type = (entry->type == LIMINE_MEMMAP_USABLE) ? PMM_REGION_USABLE : PMM_REGION_RESERVED;
+            total_mem += entry->length;
+            if (entry->type == LIMINE_MEMMAP_USABLE) {
+                usable_mem += entry->length;
+            }
         }
         pmm_boot_map_t boot_map = {
             .regions = pmm_regions,
@@ -367,17 +434,41 @@ static void init_memory(void) {
         };
         pmm_init(&boot_map);
 
-        if (pmm_run_tests()) {
-            log_ok("PMM unit tests passed");
-        } else {
-            log_fail("PMM unit tests failed");
+        char mem_msg[96];
+        char num_buf[16];
+        strcpy(mem_msg, "[MEM] Physical RAM: ");
+        utoa((size_t)(usable_mem / (1024 * 1024)), num_buf);
+        strcat(mem_msg, num_buf);
+        strcat(mem_msg, " MB usable / ");
+        utoa((size_t)(total_mem / (1024 * 1024)), num_buf);
+        strcat(mem_msg, num_buf);
+        strcat(mem_msg, " MB total (");
+        utoa((size_t)memmap_request.response->entry_count, num_buf);
+        strcat(mem_msg, num_buf);
+        strcat(mem_msg, " entries)\n");
+        serial_write(mem_msg);
+
+        const char *cmdline = NULL;
+        if (kernel_file_request.response != NULL && kernel_file_request.response->kernel_file != NULL) {
+            cmdline = kernel_file_request.response->kernel_file->cmdline;
+        }
+        bool run_selftests = cmdline_has_flag(cmdline, "selftest") || cmdline_has_flag(cmdline, "test");
+
+        if (run_selftests) {
+            if (pmm_run_tests()) {
+                log_ok("PMM unit tests passed");
+            } else {
+                log_fail("PMM unit tests failed");
+            }
         }
 
         slab_init();
-        if (slab_run_tests()) {
-            log_ok("SLAB Allocator unit tests passed");
-        } else {
-            log_fail("SLAB Allocator unit tests failed");
+        if (run_selftests) {
+            if (slab_run_tests()) {
+                log_ok("SLAB Allocator unit tests passed");
+            } else {
+                log_fail("SLAB Allocator unit tests failed");
+            }
         }
 
         graphics_alloc_backing_buffer();
@@ -385,35 +476,43 @@ static void init_memory(void) {
         extern void mmu_init(void);
         extern bool mmu_run_tests(void);
         mmu_init();
-        if (mmu_run_tests()) {
-            log_ok("MMU Hardware Driver unit tests passed");
-        } else {
-            log_fail("MMU Hardware Driver unit tests failed");
+        if (run_selftests) {
+            if (mmu_run_tests()) {
+                log_ok("MMU Hardware Driver unit tests passed");
+            } else {
+                log_fail("MMU Hardware Driver unit tests failed");
+            }
         }
 
         extern bool vma_run_tests(void);
-        if (vma_run_tests()) {
-            log_ok("VMA Augmented RB-Tree unit tests passed");
-        } else {
-            log_fail("VMA Augmented RB-Tree unit tests failed");
+        if (run_selftests) {
+            if (vma_run_tests()) {
+                log_ok("VMA Augmented RB-Tree unit tests passed");
+            } else {
+                log_fail("VMA Augmented RB-Tree unit tests failed");
+            }
         }
 
         extern void vmm_init(void);
         extern bool vmm_run_tests(void);
         vmm_init();
-        if (vmm_run_tests()) {
-            log_ok("VMM Demand Paging unit tests passed");
-        } else {
-            log_fail("VMM Demand Paging unit tests failed");
+        if (run_selftests) {
+            if (vmm_run_tests()) {
+                log_ok("VMM Demand Paging unit tests passed");
+            } else {
+                log_fail("VMM Demand Paging unit tests failed");
+            }
         }
 
         extern void pagecache_init(void);
         extern bool pagecache_run_tests(void);
         pagecache_init();
-        if (pagecache_run_tests()) {
-            log_ok("Page Cache unit tests passed");
-        } else {
-            log_fail("Page Cache unit tests failed");
+        if (run_selftests) {
+            if (pagecache_run_tests()) {
+                log_ok("Page Cache unit tests passed");
+            } else {
+                log_fail("Page Cache unit tests failed");
+            }
         }
 
         smp_init_bsp();
@@ -427,9 +526,6 @@ static void init_memory(void) {
 static void init_banner_and_acpi(void) {
     idt_load();
     log_ok("IDT ready");
-    kconsole_set_color(0xFFFFFF55);
-    serial_write("Welcome to BoredOS!\n");
-    kconsole_set_color(0xFFFFFFFF);
     acpi_init();
 }
 
@@ -438,6 +534,9 @@ static void init_subsystems(void) {
 
     extern void futex_init(void);
     futex_init();
+
+    extern void time_init(void);
+    time_init();
 
     fat32_init();
     log_ok("FAT32 ready");
@@ -555,7 +654,7 @@ static void init_rootfs(void) {
 static void init_modules(void) {
     if (module_request.response == NULL) {
         log_fail("Limine module response NULL");
-    } else if (!(g_boot_flags & BOOT_FLAG_DISK)) {
+    } else if (!(g_boot_flags & BOOT_FLAG_DISK) || !vfs_exists("/bin/yawn.elf")) {
         log_ok("Limine modules loaded");
         for (uint64_t i = 0; i < module_request.response->module_count; i++) {
             struct limine_file *mod = module_request.response->modules[i];
@@ -594,9 +693,11 @@ static void init_modules(void) {
                         uncomp_size = 128 * 1024 * 1024; 
                     }
                     
-                    serial_write("[INIT] Decompressing LZ4 initrd (uncompressed size: ");
+                    serial_write("[INIT] Decompressing LZ4 initrd (uncompressed size: 0x");
                     serial_write_hex(uncomp_size);
-                    serial_write(" bytes)...\n");
+                    serial_write(" [");
+                    serial_write_num((uint32_t)(uncomp_size / (1024 * 1024)));
+                    serial_write(" MB])...\n");
                     
                     uint8_t *decomp_buf = (uint8_t *)kmalloc(uncomp_size);
                     if (!decomp_buf) {
@@ -642,18 +743,13 @@ static void init_modules(void) {
 }
 
 static void init_input(void) {
-    uint64_t current_rsp;
-    asm volatile("mov %%rsp, %0" : "=r"(current_rsp));
-    serial_write("[INIT] Stack Alignment: 0x");
-    serial_write_hex(current_rsp);
-    serial_write("\n");
     ps2_init();
     asm("sti");  // Enable interrupts 
     keymap_init();
     lapic_init();
 
     if (smp_request.response != NULL) {
-        uint32_t online = smp_init(smp_request.response);
+        smp_init(smp_request.response);
         log_ok("SMP initialized");
     } else {
         serial_write("[INIT] No SMP response from bootloader\n");
@@ -666,23 +762,14 @@ static void init_tty(void) {
     extern void hostname_init(void);
     hostname_init();
 
-    tty_init();
     pty_init();
-    kconsole_set_active(false);
-
-    /* Spawn the zombie reaper daemon first so it registers via prctl(PR_SET_CHILD_SUBREAPER) */
-    process_create_elf("/bin/job_applications.elf", "", false, -1);
 
     if (!g_headless_mode) {
-        // Spawn shell on active TTY 0 on boot (secondary TTYs spawned on demand)
-        process_create_elf("/bin/bsh.elf", "1", true, 0);
-
         // Route kernel debug output to COM1 and keep shell off COM1
         serial_set_debug_port(COM1_PORT);
         serial_set_log_silenced(false);
     } else {
-        // Headless mode: interactive shell runs on COM1 (ID 10)
-        // COM2 (if present) is used for kernel debug logs; otherwise silence debug output on COM1
+        // Headless mode: COM2 (if present) is used for kernel debug logs; otherwise silence debug output on COM1
         if (serial_is_com2_present()) {
             serial_set_debug_port(COM2_PORT);
             serial_set_log_silenced(false);
@@ -690,8 +777,34 @@ static void init_tty(void) {
             serial_set_debug_port(COM1_PORT);
             serial_set_log_silenced(true);
         }
-        process_create_elf("/bin/bsh.elf", "11", true, 10);
     }
+
+    tty_init();
+    kconsole_set_active(false);
+
+    // Spawn userspace init system as configured by the bootloader
+    const char *init_binary = g_boot_init_path[0] ? g_boot_init_path : "/bin/yawn.elf";
+    serial_write("[INIT] Spawning bootloader-configured init: ");
+    serial_write(init_binary);
+    serial_write("\n");
+    int init_tty_id = g_headless_mode ? 10 : 0;
+    process_t *init_proc = process_create_elf(init_binary, g_headless_mode ? "headless" : "", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, init_tty_id);
+    if (!init_proc) {
+        serial_write("[INIT] Warning: Failed to spawn ");
+        serial_write(init_binary);
+        serial_write(", falling back to emergency rescue shell\n");
+        if (!g_headless_mode) {
+            init_proc = process_create_elf("/bin/bsh.elf", "1", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 0);
+        } else {
+            init_proc = process_create_elf("/bin/bsh.elf", "11", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 10);
+        }
+        if (!init_proc) {
+            serial_write("[INIT] FATAL: Neither /bin/yawn.elf nor /bin/bsh.elf could be spawned!\n");
+            serial_write("[INIT] The root filesystem does not contain these binaries.\n");
+        }
+    }
+
+    lapic_timer_start();
 }
 
 void kmain(void) {

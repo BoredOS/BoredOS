@@ -1,0 +1,20 @@
+# Shared environment for rc scripts.
+# Establishes sensible defaults so the system can boot into a sane state even
+# if rc.conf is missing or empty, then imports user preferences from rc.conf.
+
+cleanvar_enable="YES"
+hostname_enable="YES"
+timezone="UTC"
+ifconfig_lo0="inet 127.0.0.1"
+ntp_enable="NO"
+ntp_server="pool.ntp.org"
+klogd_enable="NO"
+httpd_enable="NO"
+nova_enable="NO"
+motd_enable="YES"
+local_enable="YES"
+
+# Source the main configuration file if present to let user settings take precedence
+if [ -f /etc/rc.conf ]; then
+    . /etc/rc.conf
+fi

@@ -1,0 +1,56 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="status"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$klogd_enable" = "YES" ]; then
+        if [ -f /var/run/klogd.pid ]; then
+            read pid < /var/run/klogd.pid
+            if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+                echo "klogd is already running with PID $pid"
+                exit 0
+            fi
+        fi
+
+        mkdir -p /var/log
+        mkdir -p /var/run
+
+        if [ -e /proc/kmsg ]; then
+            echo "Starting kernel log daemon reading from /proc/kmsg..."
+            cat /proc/kmsg >> /var/log/kernel.log &
+            echo $! > /var/run/klogd.pid
+            echo "klogd started with PID $!."
+        fi
+    fi
+elif [ "$action" = "forcestart" ]; then
+    mkdir -p /var/log
+    mkdir -p /var/run
+    if [ -e /proc/kmsg ]; then
+        echo "Starting kernel log daemon reading from /proc/kmsg..."
+        cat /proc/kmsg >> /var/log/kernel.log &
+        echo $! > /var/run/klogd.pid
+        echo "klogd started with PID $!."
+    fi
+elif [ "$action" = "stop" ]; then
+    if [ -f /var/run/klogd.pid ]; then
+        read pid < /var/run/klogd.pid
+        if [ -n "$pid" ]; then
+            echo "Stopping klogd (PID $pid)..."
+            kill $pid
+            rm -f /var/run/klogd.pid
+            echo "klogd stopped."
+        fi
+    fi
+elif [ "$action" = "status" ]; then
+    if [ -f /var/run/klogd.pid ]; then
+        read pid < /var/run/klogd.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "klogd is running with PID $pid."
+            exit 0
+        fi
+    fi
+    echo "klogd is not running."
+fi

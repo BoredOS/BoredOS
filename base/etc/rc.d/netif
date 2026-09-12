@@ -1,0 +1,83 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="start"
+fi
+
+if [ "$action" = "start" ]; then
+    echo "Configuring network interfaces..."
+
+    if [ -n "$ifconfig_lo0" ]; then
+        if [ -f /bin/ifconfig.elf ]; then
+            ifconfig.elf lo0 127.0.0.1 up
+        fi
+    fi
+
+    # Configure primary ethernet device
+    # Check for explicitly configured device-specific interfaces (em0, re0, vtnet0, etc.)
+    ifdev=""
+    ifcfg=""
+    for dev in em0 re0 vtnet0 eth0; do
+        eval val=\"\$ifconfig_${dev}\"
+        if [ -n "$val" ]; then
+            ifdev="$dev"
+            ifcfg="$val"
+            break
+        fi
+    done
+
+    if [ -z "$ifdev" ]; then
+        if [ -n "$ifconfig_auto" ]; then
+            ifcfg="$ifconfig_auto"
+        elif [ -n "$ifconfig_DEFAULT" ]; then
+            ifcfg="$ifconfig_DEFAULT"
+            for dev in em0 vtnet0 re0 eth0; do
+                ifdev="$dev"
+                break
+            done
+        fi
+    fi
+
+    if [ -n "$ifcfg" ]; then
+        if [ "$ifcfg" = "DHCP" ] || [ "$ifcfg" = "SYNCDHCP" ]; then
+            if [ -n "$ifdev" ]; then
+                echo "Starting DHCP client on $ifdev..."
+                if [ -f /bin/dhclient.elf ]; then
+                    dhclient.elf $ifdev
+                fi
+            else
+                echo "Auto-detecting network interface for DHCP..."
+                if [ -f /bin/dhclient.elf ]; then
+                    dhclient.elf
+                fi
+            fi
+        elif [ -n "$ifdev" ]; then
+            if [ -f /bin/ifconfig.elf ]; then
+                ifconfig.elf $ifdev $ifcfg up
+                echo "Assigned static IP on $ifdev: $ifcfg"
+            fi
+        fi
+    fi
+elif [ "$action" = "stop" ]; then
+    echo "Stopping network interfaces..."
+    if [ -f /bin/ifconfig.elf ] || [ -f /bin/ifconfig ]; then
+        for dev in em0 re0 vtnet0 eth0; do
+            eval val=\"\$ifconfig_${dev}\"
+            if [ -n "$val" ]; then
+                if [ -f /bin/ifconfig.elf ]; then
+                    ifconfig.elf $dev down
+                else
+                    ifconfig $dev down
+                fi
+            fi
+        done
+    fi
+elif [ "$action" = "restart" ]; then
+    /etc/rc.d/netif stop
+    /etc/rc.d/netif start
+elif [ "$action" = "status" ]; then
+    if [ -f /bin/ifconfig.elf ]; then
+        ifconfig.elf
+    fi
+fi

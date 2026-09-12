@@ -1,0 +1,19 @@
+# name    command                 type      status       mode
+# ---------------------------------------------------------------------
+# Virtual consoles (tty1 - tty10)
+tty1      "/bin/bsh.elf 1"        ansi      on           respawn
+tty2      "/bin/bsh.elf 2"        ansi      on           lazy
+tty3      "/bin/bsh.elf 3"        ansi      on           lazy
+tty4      "/bin/bsh.elf 4"        ansi      on           lazy
+tty5      "/bin/bsh.elf 5"        ansi      off          off
+tty6      "/bin/bsh.elf 6"        ansi      off          off
+tty7      "/bin/bsh.elf 7"        ansi      off          off
+tty8      "/bin/bsh.elf 8"        ansi      off          off
+tty9      "/bin/bsh.elf 9"        ansi      off          off
+tty10     "/bin/bsh.elf 10"       ansi      off          off
+
+# Serial ports
+ttyS0     "/bin/bsh.elf 11"       vt100     off          off
+ttyS1     "/bin/bsh.elf 12"       vt100     off          off
+ttyS2     "/bin/bsh.elf 13"       vt100     off          off
+ttyS3     "/bin/bsh.elf 14"       vt100     off          off
