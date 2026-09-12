@@ -41,6 +41,10 @@ void* procfs_open(void *fs_private, const char *path, const char *mode) {
         }
         pid_str[i] = 0;
         h->pid = atoi(pid_str);
+        if (h->pid == 0) {
+            kfree_null(h);
+            return NULL;
+        }
 
         if (path[i] == '/') {
             strcpy(h->type, path + i + 1);
@@ -460,6 +464,7 @@ int procfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entries, in
         uint32_t pids[128];
         int pcount = process_get_all_pids(pids, 128);
         for (int i = 0; i < pcount; i++) {
+            if (pids[i] == 0) continue;
             if (found_so_far >= offset) {
                 itoa(pids[i], entries[out].name);
                 entries[out].is_directory = 1;
@@ -505,10 +510,12 @@ bool procfs_exists(void *fs_private, const char *path) {
         }
         pid_str[i] = 0;
         uint32_t pid = atoi(pid_str);
+        if (pid == 0) return false;
         process_t *proc = process_get_by_pid(pid);
         if (proc) {
+            bool valid = proc->is_user;
             process_put(proc);
-            return true;
+            return valid;
         }
     }
 
@@ -527,7 +534,9 @@ bool procfs_is_dir(void *fs_private, const char *path) {
     if (path[0] >= '0' && path[0] <= '9') {
         int i = 0;
         while (path[i] && path[i] != '/') i++;
-        if (path[i] == '\0') return true; 
+        if (path[i] == '\0') {
+            return procfs_exists(fs_private, path);
+        }
         return false; 
     }
 
