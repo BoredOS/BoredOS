@@ -2,6 +2,8 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "dev_internal.h"
+#include "../../sys/syscall.h"
+#include "../../sys/errno.h"
 
 vfs_file_t* dev_disk_open(const char *devname, const char *mode) {
     (void)mode;
@@ -33,10 +35,29 @@ int dev_disk_read(vfs_file_t *file, void *buf, size_t size) {
     uint32_t total_read = 0;
     uint32_t sector = (uint32_t)(file->position / 512);
     uint32_t offset = (uint32_t)(file->position % 512);
-    uint8_t sector_buf[512];
+    uint8_t sector_buf[512] __attribute__((aligned(512)));
 
     while (total_read < (uint32_t)size) {
         if (sector >= d->total_sectors) break;
+
+        if (offset == 0 && (size - total_read) >= 512 && d->read_sectors && (((uintptr_t)buf + total_read) & 511) == 0) {
+            uint32_t remaining_sectors = (uint32_t)(size - total_read) / 512;
+            if (sector + remaining_sectors > d->total_sectors) {
+                remaining_sectors = d->total_sectors - sector;
+            }
+            if (remaining_sectors > 0) {
+                uint32_t chunk = (remaining_sectors > 128) ? 128 : remaining_sectors;
+                if (d->read_sectors(d, sector, chunk, (uint8_t*)buf + total_read) != 0) {
+                    break;
+                }
+                uint32_t bytes = chunk * 512;
+                total_read += bytes;
+                file->position += bytes;
+                sector += chunk;
+                continue;
+            }
+        }
+
         if (d->read_sector(d, sector, sector_buf) != 0) break;
 
         uint32_t to_copy = 512 - offset;
@@ -62,10 +83,28 @@ int dev_disk_write(vfs_file_t *file, const void *buf, size_t size) {
     uint32_t total_written = 0;
     uint32_t sector = (uint32_t)(file->position / 512);
     uint32_t offset = (uint32_t)(file->position % 512);
-    uint8_t sector_buf[512];
+    uint8_t sector_buf[512] __attribute__((aligned(512)));
 
     while (total_written < (uint32_t)size) {
         if (sector >= d->total_sectors) break;
+
+        if (offset == 0 && (size - total_written) >= 512 && d->write_sectors && (((uintptr_t)buf + total_written) & 511) == 0) {
+            uint32_t remaining_sectors = (uint32_t)(size - total_written) / 512;
+            if (sector + remaining_sectors > d->total_sectors) {
+                remaining_sectors = d->total_sectors - sector;
+            }
+            if (remaining_sectors > 0) {
+                uint32_t chunk = (remaining_sectors > 128) ? 128 : remaining_sectors;
+                if (d->write_sectors(d, sector, chunk, (const uint8_t*)buf + total_written) != 0) {
+                    break;
+                }
+                uint32_t bytes = chunk * 512;
+                total_written += bytes;
+                file->position += bytes;
+                sector += chunk;
+                continue;
+            }
+        }
 
         uint32_t to_copy = 512 - offset;
         if (to_copy > (uint32_t)size - total_written) to_copy = (uint32_t)size - total_written;
@@ -158,4 +197,36 @@ int dev_disk_get_info(const char *dev, vfs_dirent_t *info) {
         return 0;
     }
     return -1;
+}
+
+static inline bool is_valid_ioctl_ptr(const void *ptr, size_t size) {
+    if (!ptr) return false;
+    if ((uintptr_t)ptr >= 0xFFFF800000000000ULL) return true;
+    return is_valid_user_ptr(ptr, size);
+}
+
+int dev_disk_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
+    if (!file || !file->valid || !file->is_device) return -1;
+    Disk *d = (Disk*)file->fs_handle;
+    if (!d) return -1;
+
+    switch (request) {
+        case 0x125F: // BLKRRPART
+            return disk_rescan(d);
+        case 0x80081272: // BLKGETSIZE64
+        case 0x1272:
+            if (!is_valid_ioctl_ptr(arg, sizeof(uint64_t))) return -EFAULT;
+            *(uint64_t*)arg = (uint64_t)d->total_sectors * 512;
+            return 0;
+        case 0x1260: // BLKGETSIZE
+            if (!is_valid_ioctl_ptr(arg, sizeof(unsigned long))) return -EFAULT;
+            *(unsigned long*)arg = d->total_sectors;
+            return 0;
+        case 0x1268: // BLKSSZGET
+            if (!is_valid_ioctl_ptr(arg, sizeof(int))) return -EFAULT;
+            *(int*)arg = 512;
+            return 0;
+        default:
+            return -1;
+    }
 }

@@ -22,7 +22,7 @@
 
 extern vfs_mount_t mounts[VFS_MAX_MOUNTS];
 extern int mount_count;
-extern vfs_file_t open_files[VFS_MAX_OPEN_FILES];
+extern vfs_file_t *open_files_head;
 extern spinlock_t vfs_lock;
 
 vfs_file_t* vfs_alloc_file(void);

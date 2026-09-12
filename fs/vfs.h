@@ -11,7 +11,6 @@
 #define VFS_MAX_PATH 1024
 #define VFS_MAX_NAME 256
 #define VFS_MAX_MOUNTS 64
-#define VFS_MAX_OPEN_FILES 64
 
 #define POLLIN     0x0001
 #define POLLOUT    0x0004
@@ -37,7 +36,7 @@ typedef struct vfs_file vfs_file_t;
 // Directory entry for readdir
 typedef struct vfs_dirent {
     char name[VFS_MAX_NAME];
-    uint32_t size;
+    uint64_t size;
     uint8_t is_directory;
     uint32_t start_cluster;
     uint16_t write_date;
@@ -90,6 +89,8 @@ typedef struct vfs_fs_ops {
 #define DEVICE_TYPE_PTY_SLAVE   11
 #define DEVICE_TYPE_TUN         12
 #define DEVICE_TYPE_RANDOM      13
+#define DEVICE_TYPE_NULL        14
+#define DEVICE_TYPE_ZERO        15
 
 // VFS file handle
 struct vfs_file {
@@ -101,6 +102,8 @@ struct vfs_file {
     int device_type;        // DEVICE_TYPE_BLOCK, TTY, etc.
     uint32_t wb_err;        // errseq_t snapshot
     char path[VFS_MAX_PATH]; // Normalized path
+    struct vfs_file *prev;   // Doubly-linked dynamic list of active open files
+    struct vfs_file *next;
 };
 
 

@@ -150,7 +150,14 @@ static void rng_init_locked(void) {
 vfs_file_t* dev_random_open(const char *devname, const char *mode) {
     (void)mode;
     if (!devname) return NULL;
-    if (strcmp(devname, "random") != 0 && strcmp(devname, "urandom") != 0) {
+    int type = -1;
+    if (strcmp(devname, "random") == 0 || strcmp(devname, "urandom") == 0) {
+        type = DEVICE_TYPE_RANDOM;
+    } else if (strcmp(devname, "null") == 0) {
+        type = DEVICE_TYPE_NULL;
+    } else if (strcmp(devname, "zero") == 0) {
+        type = DEVICE_TYPE_ZERO;
+    } else {
         return NULL;
     }
 
@@ -160,7 +167,7 @@ vfs_file_t* dev_random_open(const char *devname, const char *mode) {
         vf->mount = NULL;
         vf->fs_handle = NULL;
         vf->is_device = true;
-        vf->device_type = DEVICE_TYPE_RANDOM;
+        vf->device_type = type;
         vf->position = 0;
         spinlock_release_irqrestore(&vfs_lock, flags);
         return vf;
@@ -232,12 +239,14 @@ int dev_random_write(vfs_file_t *file, const void *buf, size_t size) {
 
 bool dev_random_exists(const char *dev) {
     if (!dev) return false;
-    return (strcmp(dev, "random") == 0 || strcmp(dev, "urandom") == 0);
+    return (strcmp(dev, "random") == 0 || strcmp(dev, "urandom") == 0 ||
+            strcmp(dev, "null") == 0 || strcmp(dev, "zero") == 0);
 }
 
 int dev_random_get_info(const char *dev, vfs_dirent_t *info) {
     if (!dev || !info) return -1;
-    if (strcmp(dev, "random") == 0 || strcmp(dev, "urandom") == 0) {
+    if (strcmp(dev, "random") == 0 || strcmp(dev, "urandom") == 0 ||
+        strcmp(dev, "null") == 0 || strcmp(dev, "zero") == 0) {
         strcpy(info->name, dev);
         info->size = 0;
         info->is_directory = 0;
@@ -252,23 +261,17 @@ int dev_random_get_info(const char *dev, vfs_dirent_t *info) {
 int dev_random_list_entries(vfs_dirent_t *entries, int max, int count) {
     if (!entries) return count;
 
-    if (count < max) {
-        strcpy(entries[count].name, "random");
-        entries[count].size = 0;
-        entries[count].is_directory = 0;
-        entries[count].start_cluster = 0;
-        entries[count].write_date = 0;
-        entries[count].write_time = 0;
-        count++;
-    }
-    if (count < max) {
-        strcpy(entries[count].name, "urandom");
-        entries[count].size = 0;
-        entries[count].is_directory = 0;
-        entries[count].start_cluster = 0;
-        entries[count].write_date = 0;
-        entries[count].write_time = 0;
-        count++;
+    const char *names[] = {"random", "urandom", "null", "zero"};
+    for (int i = 0; i < 4; i++) {
+        if (count < max) {
+            strcpy(entries[count].name, names[i]);
+            entries[count].size = 0;
+            entries[count].is_directory = 0;
+            entries[count].start_cluster = 0;
+            entries[count].write_date = 0;
+            entries[count].write_time = 0;
+            count++;
+        }
     }
 
     return count;

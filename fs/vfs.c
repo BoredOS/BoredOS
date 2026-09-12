@@ -5,37 +5,40 @@
 
 vfs_mount_t mounts[VFS_MAX_MOUNTS];
 int mount_count = 0;
-vfs_file_t open_files[VFS_MAX_OPEN_FILES];
+vfs_file_t *open_files_head = NULL;
 spinlock_t vfs_lock = SPINLOCK_INIT;
 
 extern void serial_write(const char *str);
 
 vfs_file_t* vfs_alloc_file(void) {
-    for (int i = 0; i < VFS_MAX_OPEN_FILES; i++) {
-        if (!open_files[i].valid) {
-            open_files[i].valid = true;
-            open_files[i].fs_handle = NULL;
-            open_files[i].mount = NULL;
-            open_files[i].position = 0;
-            open_files[i].is_device = false;
-            open_files[i].device_type = 0;
-            open_files[i].path[0] = '\0';
-            return &open_files[i];
-        }
+    vfs_file_t *vf = (vfs_file_t *)kmalloc(sizeof(vfs_file_t));
+    if (!vf) {
+        serial_write("[VFS] Out of memory allocating file handle\n");
+        return NULL;
     }
-    return NULL;
+    memset(vf, 0, sizeof(vfs_file_t));
+    vf->valid = true;
+    vf->next = open_files_head;
+    vf->prev = NULL;
+    if (open_files_head) {
+        open_files_head->prev = vf;
+    }
+    open_files_head = vf;
+    return vf;
 }
 
 void vfs_free_file(vfs_file_t *f) {
-    if (f) {
-        f->valid = false;
-        f->fs_handle = NULL;
-        f->mount = NULL;
-        f->position = 0;
-        f->is_device = false;
-        f->device_type = 0;
-        f->path[0] = '\0';
+    if (!f) return;
+    if (f->prev) {
+        f->prev->next = f->next;
+    } else if (open_files_head == f) {
+        open_files_head = f->next;
     }
+    if (f->next) {
+        f->next->prev = f->prev;
+    }
+    f->valid = false;
+    kfree(f);
 }
 
 void vfs_init(void) {
@@ -46,10 +49,7 @@ void vfs_init(void) {
         mounts[i].fs_private = NULL;
     }
     mount_count = 0;
-
-    for (int i = 0; i < VFS_MAX_OPEN_FILES; i++) {
-        open_files[i].valid = false;
-    }
+    open_files_head = NULL;
     spinlock_release_irqrestore(&vfs_lock, flags);
 
     serial_write("[VFS] Initialized\n");
@@ -137,7 +137,7 @@ void vfs_close(vfs_file_t *file) {
         vfs_dev_close(file);
     } else {
         vfs_mount_t *mount = file->mount;
-        if (mount && mount->ops->close) {
+        if (mount && mount->ops->close && file->fs_handle) {
             mount->ops->close(mount->fs_private, file->fs_handle);
         }
     }
@@ -242,6 +242,16 @@ int vfs_list_directory(const char *path, vfs_dirent_t *entries, int max, int off
     char normalized[VFS_MAX_PATH];
     vfs_normalize_process_path(path, normalized);
 
+    if (strcmp(normalized, "/dev") == 0) {
+        vfs_dirent_t all_devs[256];
+        int total = vfs_dev_list_entries(all_devs, 256, 0);
+        int dev_count = 0;
+        for (int i = offset; i < total && dev_count < max; i++) {
+            entries[dev_count++] = all_devs[i];
+        }
+        return dev_count;
+    }
+
     const char *rel_path = NULL;
     vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
 
@@ -310,11 +320,6 @@ int vfs_list_directory(const char *path, vfs_dirent_t *entries, int max, int off
                     count++;
                 }
             }
-        }
-
-        // Special case: /dev listing for block devices and TTYs
-        if (strcmp(normalized, "/dev") == 0) {
-            count = vfs_dev_list_entries(entries, max, count);
         }
     }
 

@@ -78,12 +78,24 @@ bool vfs_umount(const char *mount_path) {
     char normalized[VFS_MAX_PATH];
     vfs_normalize_path("/", mount_path, normalized);
 
+    const char *dev_target = mount_path;
+    if (strncmp(dev_target, "/dev/", 5) == 0) {
+        dev_target += 5;
+    }
+
     uint64_t flags = spinlock_acquire_irqsave(&vfs_lock);
 
     for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
-        if (mounts[i].active && strcmp(mounts[i].path, normalized) == 0) {
-            for (int f = 0; f < VFS_MAX_OPEN_FILES; f++) {
-                if (open_files[f].valid && open_files[f].mount == &mounts[i]) {
+        if (!mounts[i].active) continue;
+
+        bool match = (strcmp(mounts[i].path, normalized) == 0);
+        if (!match && dev_target[0] && mounts[i].device[0] && strcmp(mounts[i].device, dev_target) == 0) {
+            match = true;
+        }
+
+        if (match) {
+            for (vfs_file_t *f = open_files_head; f; f = f->next) {
+                if (f->valid && f->mount == &mounts[i]) {
                     spinlock_release_irqrestore(&vfs_lock, flags);
                     serial_write("[VFS] Cannot unmount: files still open\n");
                     return false;
@@ -94,6 +106,10 @@ bool vfs_umount(const char *mount_path) {
                 mounts[i].ops->unmount(mounts[i].fs_private);
             }
 
+            char unmounted_path[256];
+            strncpy(unmounted_path, mounts[i].path, sizeof(unmounted_path) - 1);
+            unmounted_path[sizeof(unmounted_path) - 1] = '\0';
+
             mounts[i].active = false;
             mounts[i].ops = NULL;
             mounts[i].fs_private = NULL;
@@ -102,7 +118,7 @@ bool vfs_umount(const char *mount_path) {
             spinlock_release_irqrestore(&vfs_lock, flags);
 
             serial_write("[VFS] Unmounted: ");
-            serial_write(normalized);
+            serial_write(unmounted_path);
             serial_write("\n");
             return true;
         }

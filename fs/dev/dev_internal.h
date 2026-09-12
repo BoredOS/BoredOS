@@ -72,6 +72,7 @@ uint64_t    dev_disk_file_size(vfs_file_t *file);
 int         dev_disk_list_entries(vfs_dirent_t *entries, int max, int count);
 bool        dev_disk_exists(const char *dev);
 int         dev_disk_get_info(const char *dev, vfs_dirent_t *info);
+int         dev_disk_ioctl(vfs_file_t *file, uint64_t request, void *arg);
 
 // --- Random Sub-Driver (fs/dev/dev_random.c) ---
 vfs_file_t* dev_random_open(const char *devname, const char *mode);

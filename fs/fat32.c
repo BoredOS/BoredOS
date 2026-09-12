@@ -26,7 +26,7 @@ typedef struct fat32_volume {
     uint32_t partition_offset;
     bool mounted;
     uint32_t cached_fat_sector;
-    uint8_t cached_fat_buf[512];
+    uint8_t cached_fat_buf[512] __attribute__((aligned(512)));
     uint32_t last_allocated_cluster;
     spinlock_t lock;
 } fat32_volume_t;
@@ -203,17 +203,17 @@ static bool fat32_mount_vol(fat32_volume_t *vol, Disk *disk) {
     if (vol->mounted) return true;
     
     uint32_t part_offset = 0;
-    uint8_t *sect0 = (uint8_t *)kmalloc(512);
-    if (!sect0) return false;
+    uint8_t sect0[512] __attribute__((aligned(512)));
     
     if (disk->read_sector(disk, part_offset, sect0) != 0) {
-        kfree_null(sect0);
         return false;
     }
     
     fat32_boot_sector_t *bpb = (fat32_boot_sector_t *)sect0;
     if (bpb->boot_signature_value != 0xAA55) {
-        kfree_null(sect0);
+        return false;
+    }
+    if (bpb->bytes_per_sector != 512 || bpb->sectors_per_cluster == 0 || bpb->sectors_per_fat_32 == 0) {
         return false;
     }
     
@@ -225,7 +225,7 @@ static bool fat32_mount_vol(fat32_volume_t *vol, Disk *disk) {
     vol->root_cluster = bpb->root_cluster;
     vol->fat_size = bpb->sectors_per_fat_32;
     vol->num_fats = bpb->num_fats;
-    vol->total_sectors = bpb->total_sectors_32;
+    vol->total_sectors = bpb->total_sectors_32 ? bpb->total_sectors_32 : bpb->total_sectors_16;
     vol->mounted = true;
     vol->cached_fat_sector = 0xFFFFFFFF;
     vol->last_allocated_cluster = 2;
@@ -234,15 +234,14 @@ static bool fat32_mount_vol(fat32_volume_t *vol, Disk *disk) {
     serial_write(disk->devname);
     serial_write("\n");
     
-    kfree_null(sect0);
     return true;
 }
 
 static void fat32_update_dir_entry_size(fat32_volume_t *vol, fat32_file_handle_t *handle) {
     if (handle->is_directory) return;
     if (handle->dir_sector != 0 && handle->dir_offset != 0xFFFFFFFF && handle->dir_offset < 512) {
-        uint8_t *dir_buf = (uint8_t *)kmalloc(512);
-        if (dir_buf && vol->disk->read_sector(vol->disk, handle->dir_sector, dir_buf) == 0) {
+        uint8_t dir_buf[512] __attribute__((aligned(512)));
+        if (vol->disk->read_sector(vol->disk, handle->dir_sector, dir_buf) == 0) {
             fat32_dir_entry_t *entry = (fat32_dir_entry_t *)(dir_buf + handle->dir_offset);
             if (handle->start_cluster != 0) {
                 entry->start_cluster_high = (handle->start_cluster >> 16);
@@ -251,7 +250,6 @@ static void fat32_update_dir_entry_size(fat32_volume_t *vol, fat32_file_handle_t
             entry->file_size = handle->size;
             vol->disk->write_sector(vol->disk, handle->dir_sector, dir_buf);
         }
-        kfree_null(dir_buf);
     }
 }
 
@@ -278,7 +276,7 @@ static void fat32_set_fat_entry(fat32_volume_t *vol, uint32_t cluster, uint32_t 
     uint32_t sector_offset = offset / 512;
     uint32_t byte_offset = offset % 512;
 
-    uint8_t buf[512];
+    uint8_t buf[512] __attribute__((aligned(512)));
 
     for (uint32_t i = 0; i < vol->num_fats; i++) {
         uint32_t sector = vol->fat_begin_lba + (i * vol->fat_size) + sector_offset;
@@ -1468,6 +1466,14 @@ int vfs_fat32_sync_fs(void *fs_private) {
     return 0;
 }
 
+int vfs_fat32_unmount(void *fs_private) {
+    fat32_volume_t *vol = (fat32_volume_t *)fs_private;
+    if (!vol) return 0;
+    vfs_fat32_sync_fs(fs_private);
+    vol->mounted = false;
+    return 0;
+}
+
 static struct vfs_fs_ops fat32_ops = {
     .open = vfs_fat32_open,
     .close = vfs_fat32_close,
@@ -1485,7 +1491,8 @@ static struct vfs_fs_ops fat32_ops = {
     .get_position = vfs_fat_get_position,
     .get_size = vfs_fat_get_size,
     .statfs = vfs_fat32_statfs,
-    .sync_fs = vfs_fat32_sync_fs
+    .sync_fs = vfs_fat32_sync_fs,
+    .unmount = vfs_fat32_unmount
 };
 
 struct vfs_fs_ops *fat32_get_ops(void) {
@@ -1577,18 +1584,15 @@ void fat32_close_nolock(fat32_file_handle_t *handle) {
             fat32_volume_t *vol = (fat32_volume_t *)handle->volume;
             Disk *d = vol->disk;
             if (d && handle->dir_sector != 0) {
-                 uint8_t *buf = (uint8_t *)kmalloc(512);
-                 if (buf) {
-                     if (d->read_sector(d, handle->dir_sector, buf) == 0) {
-                         fat32_dir_entry_t *entry = (fat32_dir_entry_t *)(buf + handle->dir_offset);
-                         entry->file_size = handle->size;
-                         if (handle->start_cluster != 0) {
-                             entry->start_cluster_high = (handle->start_cluster >> 16);
-                             entry->start_cluster_low = (handle->start_cluster & 0xFFFF);
-                         }
-                         d->write_sector(d, handle->dir_sector, buf);
+                 uint8_t buf[512] __attribute__((aligned(512)));
+                 if (d->read_sector(d, handle->dir_sector, buf) == 0) {
+                     fat32_dir_entry_t *entry = (fat32_dir_entry_t *)(buf + handle->dir_offset);
+                     entry->file_size = handle->size;
+                     if (handle->start_cluster != 0) {
+                         entry->start_cluster_high = (handle->start_cluster >> 16);
+                         entry->start_cluster_low = (handle->start_cluster & 0xFFFF);
                      }
-                     kfree_null(buf);
+                     d->write_sector(d, handle->dir_sector, buf);
                  }
             }
             fat32_sync_if_root(vol);

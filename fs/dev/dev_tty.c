@@ -23,6 +23,12 @@ vfs_file_t* dev_tty_open(const char *devname, const char *mode) {
     if (str_starts_with(devname, "ttyS")) {
         int s_id = atoi(devname + 4);
         if (s_id >= 0 && s_id < SERIAL_TTY_COUNT) {
+            tty_t *t = tty_get(GRAPHICAL_TTY_COUNT + s_id);
+            if (t && !t->opened) {
+                t->opened = true;
+                extern int signal_send_to_pid(int pid, int sig);
+                signal_send_to_pid(1, 1 /* SIGHUP */);
+            }
             vfs_file_t *vf = vfs_alloc_file();
             if (vf) {
                 vf->mount = &mounts[0];
@@ -49,18 +55,24 @@ vfs_file_t* dev_tty_open(const char *devname, const char *mode) {
         }
     }
 
-    // Graphical / Virtual TTYs: /dev/tty1..ttyX
     if (str_starts_with(devname, "tty")) {
         int id = atoi(devname + 3);
-        if (id >= 1 && id <= TTY_COUNT) {
-            if (g_headless_mode && id <= 10) {
+        if (id >= 0 && id <= TTY_COUNT) {
+            int target_tty = (id == 0) ? tty_get_active_id() : (id - 1);
+            if (g_headless_mode && target_tty < 10) {
                 spinlock_release_irqrestore(&vfs_lock, flags);
                 return NULL;
+            }
+            tty_t *t = tty_get(target_tty);
+            if (t && !t->opened) {
+                t->opened = true;
+                extern int signal_send_to_pid(int pid, int sig);
+                signal_send_to_pid(1, 1 /* SIGHUP */);
             }
             vfs_file_t *vf = vfs_alloc_file();
             if (vf) {
                 vf->mount = NULL;
-                vf->fs_handle = (void*)(uintptr_t)(id - 1);
+                vf->fs_handle = (void*)(uintptr_t)target_tty;
                 vf->is_device = true;
                 vf->device_type = DEVICE_TYPE_TTY;
                 spinlock_release_irqrestore(&vfs_lock, flags);

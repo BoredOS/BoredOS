@@ -16,6 +16,7 @@
 
 extern void serial_write(const char *str);
 extern void serial_write_hex(uint64_t value);
+extern void serial_write_num(uint32_t n);
 
 void qsort(void *base, size_t nmemb, size_t size,
            int (*compar)(const void *, const void *)) {
@@ -302,8 +303,16 @@ static int vfs_ext4_write(void *fs_private, void *file_handle,
     int r = ext4_fwrite(&h->file, buf, size, &wcnt);
     spinlock_release_irqrestore(&h->vol->lock, flags);
 
-    if (r != EOK && wcnt == 0)
+    if (r != EOK && wcnt == 0) {
+        serial_write("[EXT4] write failed r=");
+        serial_write_num((uint32_t)r);
+        serial_write(" wcnt=");
+        serial_write_num((uint32_t)wcnt);
+        serial_write(" size=");
+        serial_write_num((uint32_t)size);
+        serial_write("\n");
         return -1;
+    }
 
     if (wcnt > INT_MAX)
         return -1;

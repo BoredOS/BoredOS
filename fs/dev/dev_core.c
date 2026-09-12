@@ -36,6 +36,8 @@ void vfs_dev_close(vfs_file_t *file) {
             dev_shm_close(file);
             break;
         case DEVICE_TYPE_RANDOM:
+        case DEVICE_TYPE_NULL:
+        case DEVICE_TYPE_ZERO:
             break;
         default:
             break;
@@ -72,6 +74,13 @@ int vfs_dev_read(vfs_file_t *file, void *buf, size_t size) {
         case DEVICE_TYPE_RANDOM:
             return dev_random_read(file, buf, size);
 
+        case DEVICE_TYPE_NULL:
+            return 0; // EOF
+
+        case DEVICE_TYPE_ZERO:
+            if (buf && size > 0) memset(buf, 0, size);
+            return (int)size;
+
         default:
             return -1;
     }
@@ -105,6 +114,10 @@ int vfs_dev_write(vfs_file_t *file, const void *buf, size_t size) {
         case DEVICE_TYPE_RANDOM:
             return dev_random_write(file, buf, size);
 
+        case DEVICE_TYPE_NULL:
+        case DEVICE_TYPE_ZERO:
+            return (int)size; // Discard data successfully
+
         default:
             return -1;
     }
@@ -130,6 +143,9 @@ int vfs_dev_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
         case DEVICE_TYPE_TUN:
             return dev_net_ioctl(file, request, arg);
 
+        case DEVICE_TYPE_BLOCK:
+            return dev_disk_ioctl(file, request, arg);
+
         default:
             return -1;
     }
@@ -147,6 +163,10 @@ int vfs_dev_seek(vfs_file_t *file, int64_t offset, int whence) {
 
         case DEVICE_TYPE_BLOCK:
             return dev_disk_seek(file, offset, whence);
+
+        case DEVICE_TYPE_NULL:
+        case DEVICE_TYPE_ZERO:
+            return 0;
 
         default:
             return -29; // -ESPIPE

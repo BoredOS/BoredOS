@@ -1,4 +1,8 @@
+// Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "vfs.h"
+#include "vfs_internal.h"
 #include "process.h"
 #include "syscall.h"
 #include "disk.h"
@@ -274,6 +278,31 @@ int procfs_read(void *fs_private, void *handle, void *buf, size_t size) {
             utoa(used_kb, temp);
             strcpy(out + strlen(out), temp);
             strcpy(out + strlen(out), " kB\n");
+        } else if (strcmp(h->type, "mounts") == 0) {
+            uint64_t flags = spinlock_acquire_irqsave(&vfs_lock);
+            for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+                if (mounts[i].active) {
+                    const char *dev = mounts[i].device[0] ? mounts[i].device : "none";
+                    if (dev[0] != '/' && (strncmp(dev, "sd", 2) == 0 || strncmp(dev, "hd", 2) == 0 || strncmp(dev, "nvme", 4) == 0)) {
+                        strcpy(out + strlen(out), "/dev/");
+                    }
+                    strcpy(out + strlen(out), dev);
+                    strcpy(out + strlen(out), " ");
+                    strcpy(out + strlen(out), mounts[i].path[0] ? mounts[i].path : "/");
+                    strcpy(out + strlen(out), " ");
+                    strcpy(out + strlen(out), mounts[i].fs_type[0] ? mounts[i].fs_type : "unknown");
+                    strcpy(out + strlen(out), " rw 0 0\n");
+                }
+            }
+            spinlock_release_irqrestore(&vfs_lock, flags);
+        } else if (strcmp(h->type, "kmsg") == 0 || strcmp(h->type, "dmesg") == 0) {
+            kfree_null(out);
+            out = (char *)kmalloc(131072);
+            if (!out) return -1;
+            out[0] = 0;
+            extern size_t kmsg_copy(char *dst, size_t max_len);
+            size_t n = kmsg_copy(out, 131071);
+            out[n] = 0;
         }
 
     } else {
@@ -415,9 +444,9 @@ int procfs_readdir(void *fs_private, const char *path, vfs_dirent_t *entries, in
 
     if (path[0] == '\0') {
         const char *top_level[] = {
-            "version", "uptime", "cpuinfo", "meminfo", "datetime", "devices"
+            "version", "uptime", "cpuinfo", "meminfo", "datetime", "devices", "mounts", "kmsg", "dmesg"
         };
-        for (int i = 0; i < 6; i++) {
+        for (int i = 0; i < 9; i++) {
             if (found_so_far >= offset) {
                 strcpy(entries[out].name, top_level[i]);
                 entries[out].is_directory = 0;
@@ -486,6 +515,7 @@ bool procfs_exists(void *fs_private, const char *path) {
     if (strcmp(path, "version") == 0 || strcmp(path, "uptime") == 0) return true;
     if (strcmp(path, "cpuinfo") == 0 || strcmp(path, "meminfo") == 0) return true;
     if (strcmp(path, "datetime") == 0 || strcmp(path, "devices") == 0) return true;
+    if (strcmp(path, "mounts") == 0 || strcmp(path, "kmsg") == 0 || strcmp(path, "dmesg") == 0) return true;
 
     return false;
 }
