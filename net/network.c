@@ -1,3 +1,6 @@
+// Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "network.h"
 #include "lwip/init.h"
 #include "lwip/timeouts.h"
@@ -17,6 +20,7 @@
 #include "nic.h"
 #include "spinlock.h"
 #include "process.h"
+#include "../sys/errno.h"
 
 #define SO_REUSEADDR    2
 #define SO_SNDBUF       7
@@ -92,39 +96,35 @@ int network_init(void) {
         spinlock_release_irqrestore(&net_init_lock, rflags);
         return 0;
     }
-    
-    // First, find and initialize the generic NIC device if not already done
-    if (nic_init() != 0) {
-        spinlock_release_irqrestore(&net_init_lock, rflags);
-        return -1; // No supported NIC found
-    }
 
     lwip_init();
 #if LWIP_DNS
     dns_init(); // Explicitly init DNS just in case
 #endif
-    
-    ip4_addr_t ipaddr, netmask, gw;
-    ip4_addr_set_zero(&ipaddr);
-    ip4_addr_set_zero(&netmask);
-    ip4_addr_set_zero(&gw);
-    
-    if (netif_add(&nic_netif, &ipaddr, &netmask, &gw, NULL, nic_netif_init, ethernet_input) == NULL) {
-        spinlock_release_irqrestore(&net_init_lock, rflags);
-        return -1;
+
+    // Find and initialize the generic NIC device if present
+    if (nic_init() == 0) {
+        ip4_addr_t ipaddr, netmask, gw;
+        ip4_addr_set_zero(&ipaddr);
+        ip4_addr_set_zero(&netmask);
+        ip4_addr_set_zero(&gw);
+        
+        if (netif_add(&nic_netif, &ipaddr, &netmask, &gw, NULL, nic_netif_init, ethernet_input) != NULL) {
+            netif_set_default(&nic_netif);
+            netif_set_up(&nic_netif);
+            
+            extern process_t* process_create(void (*entry_point)(void), bool is_user);
+            process_create(net_worker_loop, false);
+
+            extern void serial_write(const char *str);
+            serial_write("[NET] Network interface initialized and background net thread spawned\n");
+        }
+    } else {
+        extern void serial_write(const char *str);
+        serial_write("[NET] No supported NIC found; running network stack in loopback/standalone mode\n");
     }
-    
-    netif_set_default(&nic_netif);
-    netif_set_up(&nic_netif);
-    
+
     lwip_initialized = 1;
-
-    extern process_t* process_create(void (*entry_point)(void), bool is_user);
-    process_create(net_worker_loop, false);
-
-    extern void serial_write(const char *str);
-    serial_write("[NET] Network interface initialized and background net thread spawned\n");
-
     spinlock_release_irqrestore(&net_init_lock, rflags);
     return 0;
 }
@@ -438,12 +438,18 @@ static err_t tcp_socket_accept_callback(void *arg, struct tcp_pcb *new_pcb, err_
     }
 }
 
-int network_socket_bind(void *s, uint32_t ip_val, uint16_t port) {
-    extern void serial_write(const char *str);
-    extern void serial_write_num(uint64_t n);
-    serial_write("[network] bind: entered\n");
+static int map_lwip_bind_error(err_t err) {
+    if (err == ERR_OK) return 0;
+    if (err == ERR_USE) return -EADDRINUSE;
+    if (err == ERR_MEM) return -ENOMEM;
+    if (err == ERR_VAL || err == ERR_ARG) return -EINVAL;
+    return -1;
+}
 
+int network_socket_bind(void *s, uint32_t ip_val, uint16_t port) {
     process_fd_socket_t *sock = (process_fd_socket_t *)s;
+    if (!sock) return -1;
+    if (!lwip_initialized && network_init() != 0) return -1;
     uint64_t flags = spinlock_acquire_irqsave(&network_lock);
 
     if (sock->type == 2) {
@@ -451,7 +457,7 @@ int network_socket_bind(void *s, uint32_t ip_val, uint16_t port) {
             sock->pcb = udp_new();
             if (!sock->pcb) {
                 spinlock_release_irqrestore(&network_lock, flags);
-                return -1;
+                return -ENOMEM;
             }
             ip_set_option((struct udp_pcb *)sock->pcb, SOF_BROADCAST);
             udp_recv((struct udp_pcb *)sock->pcb, udp_socket_recv_callback, sock);
@@ -461,21 +467,15 @@ int network_socket_bind(void *s, uint32_t ip_val, uint16_t port) {
         ip_2_ip4(&bind_ip)->addr = ip_val;
         err_t err = udp_bind((struct udp_pcb *)sock->pcb, &bind_ip, port);
         spinlock_release_irqrestore(&network_lock, flags);
-        return err == ERR_OK ? 0 : -1;
+        return map_lwip_bind_error(err);
     }
 
-    serial_write("[network] bind: sock->pcb is ");
-    if (sock->pcb) {
-        serial_write("not NULL\n");
-    } else {
-        serial_write("NULL, calling tcp_new...\n");
+    if (!sock->pcb) {
         sock->pcb = tcp_new();
         if (!sock->pcb) {
-            serial_write("[network] bind: tcp_new returned NULL!\n");
             spinlock_release_irqrestore(&network_lock, flags);
-            return -1;
+            return -ENOMEM;
         }
-        serial_write("[network] bind: tcp_new succeeded\n");
         tcp_arg((struct tcp_pcb *)sock->pcb, sock);
     }
 
@@ -483,22 +483,9 @@ int network_socket_bind(void *s, uint32_t ip_val, uint16_t port) {
     IP_SET_TYPE_VAL(bind_ip, IPADDR_TYPE_V4);
     ip_2_ip4(&bind_ip)->addr = ip_val;
 
-    serial_write("[network] bind: calling tcp_bind...\n");
     err_t err = tcp_bind((struct tcp_pcb *)sock->pcb, &bind_ip, port);
-    serial_write("[network] bind: tcp_bind returned ");
-    if (err < 0) {
-        serial_write("-");
-        serial_write_num(-err);
-    } else {
-        serial_write_num(err);
-    }
-    serial_write("\n");
-
-    if (err != ERR_OK) {
-        serial_write("[network] tcp_bind failed\n");
-    }
     spinlock_release_irqrestore(&network_lock, flags);
-    return (int)err;
+    return map_lwip_bind_error(err);
 }
 
 int network_socket_listen(void *s, int backlog) {
@@ -530,6 +517,7 @@ int network_socket_listen(void *s, int backlog) {
 int network_socket_connect(void *s, uint32_t ip_val, uint16_t port) {
     process_fd_socket_t *sock = (process_fd_socket_t *)s;
     if (!sock) return -1;
+    if (!lwip_initialized && network_init() != 0) return -1;
     uint64_t flags = spinlock_acquire_irqsave(&network_lock);
 
     if (sock->type == 2) {
@@ -1027,7 +1015,7 @@ int network_if_ioctl(unsigned long cmd, void *arg) {
         case 0x8912: { // SIOCGIFCONF
             extern const char* nic_get_active_name(void);
             const char* nic_name = nic_get_active_name();
-            if (!nic_name) nic_name = "eth0";
+            if (!nic_name) nic_name = "em0";
 
             struct {
                 int ifc_len;
@@ -1154,22 +1142,22 @@ int network_socket_bind_v6(void *s, const ipv6_address_t *ip6, uint16_t port) {
     if (sock->type == 2) {
         if (!sock->pcb) {
             sock->pcb = udp_new();
-            if (!sock->pcb) { spinlock_release_irqrestore(&network_lock, flags); return -1; }
+            if (!sock->pcb) { spinlock_release_irqrestore(&network_lock, flags); return -ENOMEM; }
             udp_recv((struct udp_pcb *)sock->pcb, udp_socket_recv_callback, sock);
         }
         err_t err = udp_bind((struct udp_pcb *)sock->pcb, &bind_ip, port);
         spinlock_release_irqrestore(&network_lock, flags);
-        return err == ERR_OK ? 0 : -1;
+        return map_lwip_bind_error(err);
     }
 
     if (!sock->pcb) {
         sock->pcb = tcp_new();
-        if (!sock->pcb) { spinlock_release_irqrestore(&network_lock, flags); return -1; }
+        if (!sock->pcb) { spinlock_release_irqrestore(&network_lock, flags); return -ENOMEM; }
         tcp_arg((struct tcp_pcb *)sock->pcb, sock);
     }
     err_t err = tcp_bind((struct tcp_pcb *)sock->pcb, &bind_ip, port);
     spinlock_release_irqrestore(&network_lock, flags);
-    return err == ERR_OK ? 0 : -1;
+    return map_lwip_bind_error(err);
 }
 
 int network_socket_connect_v6(void *s, const ipv6_address_t *ip6, uint16_t port) {
