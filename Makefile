@@ -107,7 +107,13 @@ LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERS
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
 
-.PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux userland usr-fetch
+.PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux userland usr-fetch \
+        run-serial run-hd-serial run-serial-mac run-serial-linux run-serial-windows run-hd-serial-mac run-hd-serial-linux run-hd-serial-windows \
+        bochs run-bochs run-bochs-hd run-bochs-serial run-bochs-hd-serial \
+        run-bochs-mac run-bochs-linux run-bochs-windows \
+        run-bochs-hd-mac run-bochs-hd-linux run-bochs-hd-windows \
+        run-bochs-serial-mac run-bochs-serial-linux run-bochs-serial-windows \
+        run-bochs-hd-serial-mac run-bochs-hd-serial-linux run-bochs-hd-serial-windows disk.img
 
 all: usr-fetch
 	$(call PRINT_STEP,STARTING BOREDOS BUILD)
@@ -383,21 +389,48 @@ disk.qcow2:
 	$(call PRINT_STEP,CREATING 10GB EXPANDABLE DISK IMAGE)
 	qemu-img create -f qcow2 disk.qcow2 10G
 
+disk.img:
+	@if [ -f disk.qcow2 ]; then \
+		printf "$(YELLOW)[DISK]$(RESET) Converting disk.qcow2 to raw disk.img for Bochs...\n"; \
+		qemu-img convert -f qcow2 -O raw disk.qcow2 disk.img; \
+	else \
+		printf "$(YELLOW)[DISK]$(RESET) Creating 10GB raw disk.img for Bochs...\n"; \
+		qemu-img create -f raw disk.img 10G; \
+	fi
+
 ifeq ($(HOST_OS),Darwin)
 run: run-mac
 run-hd: run-hd-mac
 run-serial: run-serial-mac
 run-hd-serial: run-hd-serial-mac
+
+bochs: run-bochs-mac
+run-bochs: run-bochs-mac
+run-bochs-hd: run-bochs-hd-mac
+run-bochs-serial: run-bochs-serial-mac
+run-bochs-hd-serial: run-bochs-hd-serial-mac
 else ifeq ($(HOST_OS),Linux)
 run: run-linux
 run-hd: run-hd-linux
 run-serial: run-serial-linux
 run-hd-serial: run-hd-serial-linux
+
+bochs: run-bochs-linux
+run-bochs: run-bochs-linux
+run-bochs-hd: run-bochs-hd-linux
+run-bochs-serial: run-bochs-serial-linux
+run-bochs-hd-serial: run-bochs-hd-serial-linux
 else
 run: run-windows
 run-hd: run-hd-windows
 run-serial: run-serial-windows
 run-hd-serial: run-hd-serial-windows
+
+bochs: run-bochs-windows
+run-bochs: run-bochs-windows
+run-bochs-hd: run-bochs-hd-windows
+run-bochs-serial: run-bochs-serial-windows
+run-bochs-hd-serial: run-bochs-hd-serial-windows
 endif
 
 run-windows: $(ISO_IMAGE) disk.qcow2
@@ -552,4 +585,127 @@ run-hd-serial-windows: disk.qcow2
 		-drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max
 
+# ==============================================================================
+# BOCHS CONFIGURATION AND TARGETS
+# ==============================================================================
+
+BOCHS_SHARE ?= $(shell \
+	if [ -d /opt/homebrew/share/bochs ]; then echo /opt/homebrew/share/bochs; \
+	elif [ -d /usr/local/share/bochs ]; then echo /usr/local/share/bochs; \
+	elif [ -d /usr/share/bochs ]; then echo /usr/share/bochs; \
+	fi)
+
+BOCHS_BIOS ?= $(shell \
+	if [ -n "$(BOCHS_SHARE)" ] && [ -f "$(BOCHS_SHARE)/BIOS-bochs-latest" ]; then echo "$(BOCHS_SHARE)/BIOS-bochs-latest"; \
+	else echo "BIOS-bochs-latest"; fi)
+
+BOCHS_VGABIOS ?= $(shell \
+	if [ -n "$(BOCHS_SHARE)" ] && [ -f "$(BOCHS_SHARE)/VGABIOS-lgpl-latest.bin" ]; then echo "$(BOCHS_SHARE)/VGABIOS-lgpl-latest.bin"; \
+	elif [ -n "$(BOCHS_SHARE)" ] && [ -f "$(BOCHS_SHARE)/VGABIOS-lgpl-latest" ]; then echo "$(BOCHS_SHARE)/VGABIOS-lgpl-latest"; \
+	else echo "VGABIOS-lgpl-latest.bin"; fi)
+
+BOCHS_SMP ?= 1
+BOCHS_IPS ?= 15000000
+
+# $(1): Boot device ("cdrom" or "disk")
+# $(2): Display library ("sdl2", "x", "win32", or "nogui")
+# $(3): COM1 mode ("file", "term", etc.)
+# $(4): COM1 dev target (e.g. "kernel_debug.log", "/dev/stdout", "CON")
+define GEN_BOCHSRC
+	@mkdir -p $(BUILD_DIR)
+	@rm -f $(BUILD_DIR)/bochsrc
+	@printf "megs: 2048\n" >> $(BUILD_DIR)/bochsrc
+	@printf "cpu: count=$(BOCHS_SMP), ips=$(BOCHS_IPS)\n" >> $(BUILD_DIR)/bochsrc
+	@printf "romimage: file=$(BOCHS_BIOS)\n" >> $(BUILD_DIR)/bochsrc
+	@printf "vgaromimage: file=$(BOCHS_VGABIOS)\n" >> $(BUILD_DIR)/bochsrc
+	@printf "pci: enabled=1, chipset=i440fx\n" >> $(BUILD_DIR)/bochsrc
+	@printf "vga: extension=vbe, update_freq=15\n" >> $(BUILD_DIR)/bochsrc
+	@printf "mouse: enabled=1, type=ps2\n" >> $(BUILD_DIR)/bochsrc
+	@printf "display_library: $(2)\n" >> $(BUILD_DIR)/bochsrc
+	@printf "ata0: enabled=1, ioaddr1=0x1f0, ioaddr2=0x3f0, irq=14\n" >> $(BUILD_DIR)/bochsrc
+	@if [ "$(1)" = "cdrom" ]; then \
+		printf "ata0-master: type=cdrom, path=\"$(ISO_IMAGE)\", status=inserted\n" >> $(BUILD_DIR)/bochsrc; \
+		if [ -f disk.img ]; then \
+			printf "ata0-slave: type=disk, path=\"disk.img\", mode=flat\n" >> $(BUILD_DIR)/bochsrc; \
+		fi; \
+		printf "boot: cdrom\n" >> $(BUILD_DIR)/bochsrc; \
+	else \
+		printf "ata0-master: type=disk, path=\"disk.img\", mode=flat\n" >> $(BUILD_DIR)/bochsrc; \
+		if [ -f $(ISO_IMAGE) ]; then \
+			printf "ata0-slave: type=cdrom, path=\"$(ISO_IMAGE)\", status=inserted\n" >> $(BUILD_DIR)/bochsrc; \
+		fi; \
+		printf "boot: disk\n" >> $(BUILD_DIR)/bochsrc; \
+	fi
+	@printf "com1: enabled=1, mode=$(3), dev=$(4)\n" >> $(BUILD_DIR)/bochsrc
+	@printf "com2: enabled=1, mode=file, dev=kernel_debug.log\n" >> $(BUILD_DIR)/bochsrc
+	@printf "log: bochs.log\n" >> $(BUILD_DIR)/bochsrc
+	@printf "panic: action=ask\n" >> $(BUILD_DIR)/bochsrc
+	@printf "error: action=report\n" >> $(BUILD_DIR)/bochsrc
+	@printf "info: action=report\n" >> $(BUILD_DIR)/bochsrc
+endef
+
+# --- Bochs on macOS ---
+run-bochs-mac: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS IN BOCHS ON MACOS)
+	$(call GEN_BOCHSRC,cdrom,sdl2,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-mac: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE IN BOCHS ON MACOS)
+	$(call GEN_BOCHSRC,disk,sdl2,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-serial-mac: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS OVER SERIAL IN BOCHS ON MACOS)
+	$(call GEN_BOCHSRC,cdrom,nogui,file,/dev/stdout)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-serial-mac: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS OVER SERIAL FROM HARD DRIVE IN BOCHS ON MACOS)
+	$(call GEN_BOCHSRC,disk,nogui,file,/dev/stdout)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+# --- Bochs on Linux ---
+run-bochs-linux: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS IN BOCHS ON LINUX)
+	$(call GEN_BOCHSRC,cdrom,x,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-linux: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE IN BOCHS ON LINUX)
+	$(call GEN_BOCHSRC,disk,x,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-serial-linux: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS OVER SERIAL IN BOCHS ON LINUX)
+	$(call GEN_BOCHSRC,cdrom,nogui,file,/dev/stdout)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-serial-linux: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS OVER SERIAL FROM HARD DRIVE IN BOCHS ON LINUX)
+	$(call GEN_BOCHSRC,disk,nogui,file,/dev/stdout)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+# --- Bochs on Windows ---
+run-bochs-windows: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS IN BOCHS ON WINDOWS)
+	$(call GEN_BOCHSRC,cdrom,win32,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-windows: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE IN BOCHS ON WINDOWS)
+	$(call GEN_BOCHSRC,disk,win32,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-serial-windows: $(ISO_IMAGE) disk.img
+	$(call PRINT_STEP,RUNNING BOREDOS OVER SERIAL IN BOCHS ON WINDOWS)
+	$(call GEN_BOCHSRC,cdrom,nogui,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
+run-bochs-hd-serial-windows: disk.img
+	$(call PRINT_STEP,BOOTING BOREDOS OVER SERIAL FROM HARD DRIVE IN BOCHS ON WINDOWS)
+	$(call GEN_BOCHSRC,disk,nogui,file,kernel_debug.log)
+	bochs -q -f $(BUILD_DIR)/bochsrc
+
 endif
+

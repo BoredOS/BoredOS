@@ -6,15 +6,10 @@
 - UEFI firmware
 - A running BoredOS live environment (ISO)
 
-## TUI installer
-You can install BoredOS via a TUI installer, named boredos_install.
-This TUI installer does all the formatting, copying and package installation for you.
-You can simply install BoredOS by running the following in your terminal:
-```
+## Installer
+You can install BoredOS via the installer, `boredos_install`.
+This installer handles partitioning, formatting, system copying, and package installation.
+You can install BoredOS by running the following command in your terminal:
+```sh
 boredos_install
 ```
-
-# GUI installer
-The Nova compositor (which is included by default) includes a GUI installer that
-does the exact same as the TUI installer, just fancier.
-You can run this GUI installer by starting it in the start menu under the utilities section.

@@ -29,9 +29,6 @@ Fields shown by the default output:
 - volume label when available
 - `[ESP]` flag for EFI System Partitions
 
-> [!NOTE]
-> Mount points are not shown yet because BoredOS does not currently expose mountpoint information through the disk info syscall.
-
 ## Options
 
 | Option | Description |
@@ -96,11 +93,10 @@ Example output:
 
 ## How It Works
 
-`lsblk` reads disk metadata through the disk syscalls exposed by BoredOS:
+`lsblk` enumerates block device nodes in `/dev` (such as `sda`, `sdb`, and `nvme*`):
 
-- `sys_disk_get_count()` gets the number of registered block devices.
-- `sys_disk_get_info()` reads each device's name, size, type, FAT32 status, label, and flags.
-
-The command treats non-partition entries as parent disks, then groups partition entries under the matching disk name. For example, `sda1` is displayed under `/dev/sda`.
+- Disks and partitions are opened and inspected using standard `ioctl` geometry queries and filesystem superblock probing.
+- Partition entries are grouped under their corresponding parent disk device (for example, `sda1` is displayed under `/dev/sda`).
+- Mount points are cross-referenced with `/proc/mounts`.
 
 Sizes are calculated from sector counts using 512-byte sectors, then formatted as `KB`, `MB`, or `GB`.

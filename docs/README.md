@@ -17,6 +17,7 @@ Explains the logical layout of the kernel and internal components.
 #### System
 -   [`Core`](architecture/system/core.md): Kernel source layout and the boot process (Limine, Multiboot2).
 -   [`Processes & Scheduling`](architecture/system/processes.md): Multitasking, context switching, and ELF loading.
+-   [`YAWN Init System`](architecture/system/yawn.md): PID 1 initialization, terminal supervision, run control, and service management.
 -   [`TTY & Virtual Terminals`](architecture/system/tty.md): 10 virtual consoles, virtual framebuffers, active blitting, and keyboard/mouse multiplexing.
 -   [`Interrupts & Exceptions`](architecture/system/interrupts.md): IDT, GDT, and exception handling.
 

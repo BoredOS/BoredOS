@@ -22,3 +22,5 @@ boredos.dump
 # Others
 .gitignore
 kernel_debug.log
+bochs.log
+disk.img.lock
