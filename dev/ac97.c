@@ -1,5 +1,6 @@
-// Copyright (c) 2026 Christiaan (chris@boreddev.nl)
+// Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 
 #include "ac97.h"
 #include "pci.h"
@@ -340,20 +341,10 @@ uint64_t ac97_handler(registers_t *regs) {
 }
 
 void ac97_init(void) {
-    serial_write("[AC97] Scanning PCI for AC97 audio controller...\n");
-
     // AC97 audio is PCI class 0x04 (Multimedia), subclass 0x01 (Audio).
     if (!pci_find_device_by_class(0x04, 0x01, &ac97_dev)) {
-        serial_write("[AC97] No AC97 audio controller found\n");
         return;
     }
-
-    serial_write("[AC97] Found AC97 audio controller (");
-    serial_write("vendor=0x");
-    serial_write_hex(ac97_dev.vendor_id);
-    serial_write(", device=0x");
-    serial_write_hex(ac97_dev.device_id);
-    serial_write(")\n");
 
     // Enable I/O space access (bit 0) and Bus Mastering (bit 2) in the PCI Command register.
     uint32_t cmd = pci_read_config(ac97_dev.bus, ac97_dev.device, ac97_dev.function, PCI_COMMAND_REGISTER);
@@ -369,18 +360,11 @@ void ac97_init(void) {
         return;
     }
 
-    serial_write("[AC97] NAM Base: 0x");
-    serial_write_hex(nam_base);
-    serial_write(", NABM Base: 0x");
-    serial_write_hex(nabm_base);
-    serial_write("\n");
-
     // NABM+0x2C: Global Control register. Set bit 1 (GIE) to release cold reset.
     outl(nabm_base + 0x2C, 0x00000002);
     k_delay(USEC_PER_SEC / 2);
     uint32_t gc = inl(nabm_base + 0x2C);
     if (!(gc & 0x02)) {
-        serial_write("[AC97] Warning: Cold reset bit not set, attempting warm reset...\n");
         outl(nabm_base + 0x2C, inl(nabm_base + 0x2C) | 0x04); // Bit 2 = warm reset
         k_delay(500 * USEC_PER_MSEC);
     }
@@ -445,9 +429,6 @@ void ac97_init(void) {
 
     uint32_t intr = pci_read_config(ac97_dev.bus, ac97_dev.device, ac97_dev.function, 0x3C);
     uint8_t irq = intr & 0xFF;
-    serial_write("[AC97] PCI Interrupt Line (IRQ): ");
-    serial_write_num(irq);
-    serial_write("\n");
 
     if (irq > 0 && irq < 16) {
         idt_register_irq_handler(irq, ac97_handler);
@@ -457,24 +438,27 @@ void ac97_init(void) {
             outb(0xA1, inb(0xA1) & ~(1 << (irq - 8)));
             outb(0x21, inb(0x21) & ~(1 << 2)); // Unmask Cascade IRQ 2 on Master PIC
         }
-
-        serial_write("[AC97] Registered IRQ handler on IRQ ");
-        serial_write_num(irq);
-        serial_write("\n");
     } else {
         serial_write("[AC97] Warning: Invalid or missing IRQ line\n");
     }
 
     // Spawn the kernel mixer thread
     process_t *mixer_proc = process_create(ac97_mixer_thread, false);
-    if (mixer_proc) {
-        serial_write("[AC97] Mixer thread spawned successfully\n");
-    } else {
+    if (!mixer_proc) {
         serial_write("[AC97] Failed to spawn mixer thread\n");
     }
 
-    serial_write("[AC97] Initialization successful! Variable rate audio: ");
-    serial_write(vra_supported ? "yes\n" : "no\n");
+    char msg[96];
+    char num_buf[16];
+    strcpy(msg, "[AC97] Audio controller ready (IO: 0x");
+    itoa_hex((uint64_t)nam_base, msg + strlen(msg));
+    strcat(msg, ", IRQ ");
+    utoa((size_t)irq, num_buf);
+    strcat(msg, num_buf);
+    strcat(msg, ", VRA: ");
+    strcat(msg, vra_supported ? "yes" : "no");
+    strcat(msg, ")\n");
+    serial_write(msg);
 }
 
 bool ac97_present(void) {

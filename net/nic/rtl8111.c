@@ -6,6 +6,7 @@
 #include "kutils.h"
 #include "kconsole.h"
 #include "platform.h"
+#include "vmm.h"
 
 #define RTL8111_MAC0          0x00
 #define RTL8111_TDSAR         0x20
@@ -82,7 +83,9 @@ int rtl8111_init(pci_device_t* pci_dev) {
 
     if (mmio_phys == 0) return -1;
 
-    mmio_base_addr = p2v(mmio_phys);
+    void *mmio_ptr = ioremap(mmio_phys, 0x1000);
+    if (!mmio_ptr) return -1;
+    mmio_base_addr = (uint64_t)(uintptr_t)mmio_ptr;
 
     extern void serial_write(const char *str);
     serial_write("[RTL8111] MMIO Base: 0x");

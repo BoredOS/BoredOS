@@ -21,10 +21,14 @@ extern void serial_print_hex(uint64_t n);
 
 // --- Timer Handler ---
 volatile uint64_t kernel_ticks = 0;
+volatile uint64_t last_tick_tsc = 0;
 
 uint64_t timer_handler(registers_t *regs) {
     if (smp_this_cpu_id() == 0) {
         kernel_ticks++;
+        uint32_t lo, hi;
+        asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+        last_tick_tsc = ((uint64_t)hi << 32) | lo;
         network_process_frames();
 
         extern void k_beep_process(void);
@@ -35,7 +39,11 @@ uint64_t timer_handler(registers_t *regs) {
         }
     }
 
-    outb(0x20, 0x20);
+    if (!(inb(0x21) & 0x01)) {
+        outb(0x20, 0x20);
+    }
+    extern void lapic_eoi(void);
+    lapic_eoi();
     extern uint64_t process_schedule(uint64_t current_rsp);
     return process_schedule((uint64_t)regs);
 }

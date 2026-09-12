@@ -6,6 +6,7 @@
 #include "kutils.h"
 #include "kconsole.h"
 #include "platform.h"
+#include "vmm.h"
 
 #define RTL8139_MAC_0         0x00
 #define RTL8139_TSD0          0x10
@@ -62,7 +63,9 @@ int rtl8139_init(pci_device_t* pci_dev) {
     if (bar1 == 0 || bar1 == 0xFFFFFFFF) return -1;
     if (bar1 & 1) return -1; // Should not be I/O space
 
-    mmio_base_addr = p2v(bar1 & ~0xF);
+    void *mmio_ptr = ioremap(bar1 & ~0xF, 0x1000);
+    if (!mmio_ptr) return -1;
+    mmio_base_addr = (uint64_t)(uintptr_t)mmio_ptr;
 
     extern void serial_write(const char *str);
     serial_write("[RTL8139] MMIO Base: 0x");

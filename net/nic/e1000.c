@@ -9,6 +9,7 @@
 #include "platform.h"
 #include "kutils.h"
 #include "kconsole.h"
+#include "vmm.h"
 #include "idt.h"
 
 static e1000_device_t e1000_dev;
@@ -32,7 +33,8 @@ int e1000_init(pci_device_t* pci_dev) {
     if (bar0 == 0 || bar0 == 0xFFFFFFFF) return -1;
     if (bar0 & 1) return -1;
     uint64_t mmio_base_phys = (uint64_t)(bar0 & ~0xF);
-    volatile uint32_t* mmio_base = (volatile uint32_t*)(uintptr_t)p2v(mmio_base_phys);
+    volatile uint32_t* mmio_base = (volatile uint32_t*)ioremap(mmio_base_phys, 0x20000);
+    if (!mmio_base) return -1;
     e1000_dev.mmio_base = mmio_base;
     e1000_dev.pci_dev = *pci_dev;
     e1000_dev.initialized = 0;

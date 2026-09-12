@@ -42,7 +42,7 @@ static void disk_load_fat32_label(Disk *disk) {
 
     if (!disk || !disk->read_sector) return;
 
-    buffer = (uint8_t*)kmalloc(512);
+    buffer = (uint8_t*)kmalloc_aligned(512, 512);
     if (!buffer) return;
 
     if (disk->read_sector(disk, 0, buffer) == 0 && buffer[510] == 0x55 && buffer[511] == 0xAA) {
@@ -455,7 +455,7 @@ static bool is_fat32_bpb(const uint8_t *sector) {
 }
 
 static bool disk_probe_ext4(Disk *disk, uint32_t lba) {
-    uint8_t *pbuf = (uint8_t*)kmalloc(512);
+    uint8_t *pbuf = (uint8_t*)kmalloc_aligned(512, 512);
     if (!pbuf) return false;
     bool ext4 = false;
     if (disk->read_sector(disk, lba + 2, pbuf) == 0) {
@@ -467,7 +467,7 @@ static bool disk_probe_ext4(Disk *disk, uint32_t lba) {
 }
 
 static bool disk_probe_fat32(Disk *disk, uint32_t lba) {
-    uint8_t *pbuf = (uint8_t*)kmalloc(512);
+    uint8_t *pbuf = (uint8_t*)kmalloc_aligned(512, 512);
     if (!pbuf) return false;
     bool fat32 = false;
     if (disk->read_sector(disk, lba, pbuf) == 0)
@@ -478,7 +478,7 @@ static bool disk_probe_fat32(Disk *disk, uint32_t lba) {
 
 // Parse MBR and register each partition as a child block device
 static void parse_mbr_partitions(Disk *disk) {
-    uint8_t *buffer = (uint8_t*)kmalloc(512);
+    uint8_t *buffer = (uint8_t*)kmalloc_aligned(512, 512);
     if (!buffer) return;
 
     if (disk->read_sector(disk, 0, buffer) != 0) {
@@ -715,7 +715,7 @@ static void disk_remove_partitions(Disk *parent) {
 }
 
 static void parse_gpt_partitions(Disk *disk) {
-    uint8_t *buffer = (uint8_t*)kmalloc(512);
+    uint8_t *buffer = (uint8_t*)kmalloc_aligned(512, 512);
     if (!buffer) return;
 
     if (disk->read_sector(disk, 1, buffer) != 0) {
@@ -739,21 +739,36 @@ static void parse_gpt_partitions(Disk *disk) {
     uint32_t entry_size = hdr->size_of_partition_entry;
     uint64_t entry_lba = hdr->partition_entry_lba;
 
-    uint8_t *entry_buf = (uint8_t*)kmalloc(512);
+    if (num_entries == 0 || entry_size < 128) {
+        kfree_null(buffer);
+        return;
+    }
+
+    uint8_t *entry_buf = (uint8_t*)kmalloc_aligned(512, 512);
     if (!entry_buf) { kfree_null(buffer); return; }
 
     int part_num = 1;
     int part_count = 0;
+    uint32_t last_lba_offset = 0xFFFFFFFF;
+
     for (uint32_t i = 0; i < num_entries && i < 128; i++) {
         uint32_t entry_lba_offset = (uint32_t)entry_lba + (i * entry_size) / 512;
         uint32_t entry_sector_offset = (i * entry_size) % 512;
 
-        if (disk->read_sector(disk, entry_lba_offset, entry_buf) != 0) break;
+        if (entry_lba_offset != last_lba_offset) {
+            if (disk->read_sector(disk, entry_lba_offset, entry_buf) != 0) {
+                serial_write("[DISK] Failed to read GPT entry sector\n");
+                break;
+            }
+            last_lba_offset = entry_lba_offset;
+        }
 
         GPT_Entry *entry = (GPT_Entry *)(entry_buf + entry_sector_offset);
 
         bool zero = true;
-        for (int j = 0; j < 16; j++) if (entry->type_guid[j] != 0) { zero = false; break; }
+        for (int j = 0; j < 16; j++) {
+            if (entry->type_guid[j] != 0) { zero = false; break; }
+        }
         if (zero) continue;
 
         uint32_t start = (uint32_t)entry->start_lba;
@@ -767,7 +782,9 @@ static void parse_gpt_partitions(Disk *disk) {
             0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B
         };
         bool is_esp = true;
-        for (int j = 0; j < 16; j++) if (entry->type_guid[j] != esp_guid[j]) { is_esp = false; break; }
+        for (int j = 0; j < 16; j++) {
+            if (entry->type_guid[j] != esp_guid[j]) { is_esp = false; break; }
+        }
 
         bool is_ext4 = disk_probe_ext4(disk, start);
         bool fat32 = !is_ext4 && (is_esp || disk_probe_fat32(disk, start));
@@ -795,7 +812,7 @@ int disk_rescan(Disk *disk) {
     serial_write(disk->devname);
     serial_write("\n");
 
-    uint8_t *buffer = (uint8_t*)kmalloc(512);
+    uint8_t *buffer = (uint8_t*)kmalloc_aligned(512, 512);
     if (buffer) {
         if (disk->read_sector(disk, 1, buffer) == 0) {
             GPT_Header *hdr = (GPT_Header*)buffer;

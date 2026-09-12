@@ -9,6 +9,7 @@
 #include "platform.h"
 #include "slab.h"
 #include "mmu.h"
+#include "vmm.h"
 #include "kutils.h"
 #include <string.h>
 
@@ -160,51 +161,44 @@ static int lpss_i2c_private_init(volatile uint8_t *base) {
 static bool is_lpss_i2c_device(pci_device_t *dev) {
     if (dev->vendor_id != 0x8086) return false;  // Intel only
 
-    // Standard I2C class
-    if (dev->class_code == PCI_CLASS_SERIAL_BUS_CONTROLLER && dev->subclass == PCI_SUBCLASS_I2C)
-        return true;
+    uint16_t id = dev->device_id;
+    bool match_id = false;
+    // Sky Lake / Kaby Lake
+    if (id >= 0x9D60 && id <= 0x9D6F) match_id = true;
+    else if (id >= 0xA160 && id <= 0xA16F) match_id = true;
+    // Whiskey / Coffee / Comet Lake
+    else if (id >= 0x9DE8 && id <= 0x9DEB) match_id = true;
+    else if (id >= 0xA368 && id <= 0xA36B) match_id = true;
+    else if (id >= 0x02E8 && id <= 0x02EB) match_id = true;
+    else if (id >= 0x06E8 && id <= 0x06EB) match_id = true;
+    // Ice Lake / Tiger Lake / Alder Lake / Raptor Lake
+    else if (id >= 0x34E8 && id <= 0x34EB) match_id = true;
+    else if (id >= 0x9A00 && id <= 0x9AFF) match_id = true;
+    else if (id >= 0xA000 && id <= 0xA0FF) match_id = true;
+    else if (id >= 0x43E8 && id <= 0x43EB) match_id = true;
+    else if (id >= 0x51E8 && id <= 0x51EB) match_id = true;
+    else if (id >= 0x54E8 && id <= 0x54EB) match_id = true;
+    else if (id >= 0x7A50 && id <= 0x7A7D) match_id = true;
+    else if (id >= 0x7E50 && id <= 0x7E51) match_id = true;
 
-    // Signal Processing / Other (0x1180) - used by some LPSS implementations
-    if (dev->class_code == 0x11 && dev->subclass == 0x80) {
-        uint16_t id = dev->device_id;
-        // Sky Lake / Kaby Lake
-        if (id >= 0x9D60 && id <= 0x9D6F) return true;
-        if (id >= 0xA160 && id <= 0xA16F) return true;
-        // Whiskey / Coffee / Comet Lake
-        if (id >= 0x9DE8 && id <= 0x9DEB) return true;
-        if (id >= 0xA368 && id <= 0xA36B) return true;
-        if (id >= 0x02E8 && id <= 0x02EB) return true;
-        if (id >= 0x06E8 && id <= 0x06EB) return true;
-        // Ice Lake / Tiger Lake / Alder Lake / Raptor Lake
-        if (id >= 0x34E8 && id <= 0x34EB) return true;
-        if (id >= 0x9A00 && id <= 0x9AFF) return true;
-        if (id >= 0xA000 && id <= 0xA0FF) return true;
-        if (id >= 0x43E8 && id <= 0x43EB) return true;
-        if (id >= 0x51E8 && id <= 0x51EB) return true;
-        if (id >= 0x54E8 && id <= 0x54EB) return true;
-        if (id >= 0x7A50 && id <= 0x7A7D) return true;
-        if (id >= 0x7E50 && id <= 0x7E51) return true;
+    if (!match_id) return false;
+
+    // Check for Signal Processing (0x11, 0x80) or Serial Bus Controller (0x0C)
+    if ((dev->class_code == 0x11 && dev->subclass == 0x80) ||
+        (dev->class_code == PCI_CLASS_SERIAL_BUS_CONTROLLER && dev->subclass == PCI_SUBCLASS_I2C)) {
+        return true;
     }
 
     return false;
 }
 
 static int map_bar0_to_kernel(uint64_t bar0_phys, uintptr_t *kernel_addr) {
-    if (!kernel_addr) return -EINVAL;
-    if (bar0_phys == 0) return -EINVAL;
+    if (!kernel_addr || bar0_phys == 0) return -1;
 
-    // Map 4KB pages starting from bar0_phys
-    // Assume bar0 is at least 4KB
-    uint64_t virt_base = p2v(bar0_phys);
-    
-    // Map first 0x2000 bytes (8KB) to cover search range + registers
-    if (mmu_map_page(mmu_get_kernel_context(), virt_base, bar0_phys,
-                     MMU_PROT_READ | MMU_PROT_WRITE | MMU_FLAG_NOCACHE) != 0 ||
-        mmu_map_page(mmu_get_kernel_context(), virt_base + 0x1000, bar0_phys + 0x1000,
-                     MMU_PROT_READ | MMU_PROT_WRITE | MMU_FLAG_NOCACHE) != 0)
-        return false;
+    void *ptr = ioremap(bar0_phys, 0x2000);
+    if (!ptr) return -1;
 
-    *kernel_addr = virt_base;
+    *kernel_addr = (uintptr_t)ptr;
     return 0;
 }
 
@@ -237,7 +231,7 @@ static int scan_pci_for_lpss_i2c(void) {
                         pci_write_config(dev->bus, dev->device, dev->function, cap_ptr + 4, pmcsr);
                         
                         // Intel requirement: Wait at least 10ms after D3->D0
-                        for(volatile int j=0; j<10000000; j++); 
+                        k_sleep(10);
                     }
                     break;
                 }
@@ -417,11 +411,8 @@ static int match_acpi_devices(void) {
 }
 
 int i2c_lpss_init(void) {
-    serial_write("[I2C-LPSS] Initializing...\n");
-
     int count = scan_pci_for_lpss_i2c();
     if (count <= 0) {
-        serial_write("[I2C-LPSS] No controllers found\n");
         return 0;
     }
 

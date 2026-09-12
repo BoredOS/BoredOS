@@ -27,7 +27,8 @@ typedef struct {
 
 #define PCI_SUBCLASS_SATA                 0x06
 #define PCI_SUBCLASS_IDE                  0x01
-#define PCI_SUBCLASS_I2C                  0x03
+#define PCI_SUBCLASS_USB                  0x03
+#define PCI_SUBCLASS_I2C                  0x80
 
 #define PCI_COMMAND_REGISTER (0x04)
 #define PCI_COMMAND_IO_SPACE (1u << 0)

@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include "spinlock.h"
 #include "kutils.h"
+#include "vmm.h"
 
 
 extern void serial_write(const char *str);
@@ -45,27 +46,49 @@ static int ahci_disk_sync(Disk *disk);
 static int ahci_find_free_slot(HBA_PORT *port);
 
 static void ahci_stop_cmd(HBA_PORT *port) {
-    // Clear ST (Start)
+    // 1. Clear ST (Start)
     port->cmd &= ~HBA_PORT_CMD_ST;
 
-    // Clear FRE (FIS Receive Enable)
-    port->cmd &= ~HBA_PORT_CMD_FRE;
-
-    // Wait until FR and CR clear
+    // 2. Wait until CR (Command List Running) clears
     int timeout = 500000;
-    while (timeout-- > 0) {
-        if (port->cmd & HBA_PORT_CMD_FR) continue;
-        if (port->cmd & HBA_PORT_CMD_CR) continue;
-        break;
+    while ((port->cmd & HBA_PORT_CMD_CR) && timeout-- > 0) {
+        k_delay(10);
     }
 }
 
 static void ahci_start_cmd(HBA_PORT *port) {
     // Wait until CR clears
-    while (port->cmd & HBA_PORT_CMD_CR);
+    int timeout = 500000;
+    while ((port->cmd & HBA_PORT_CMD_CR) && timeout-- > 0) {
+        k_delay(10);
+    }
 
-    // Set FRE and ST
+    // Set FRE then ST
     port->cmd |= HBA_PORT_CMD_FRE;
+    port->cmd |= HBA_PORT_CMD_ST;
+}
+
+static void ahci_recover_port(HBA_PORT *port) {
+
+    ahci_stop_cmd(port);
+
+    port->serr = 0xFFFFFFFF;
+    port->is = 0xFFFFFFFF;
+
+    if (port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) {
+        extern void serial_write(const char *str);
+        serial_write("[AHCI] Port hung on BSY/DRQ, issuing COMRESET\n");
+        port->sctl = (port->sctl & ~0x0F) | 0x01;
+        k_delay(1000);
+        port->sctl = (port->sctl & ~0x0F);
+        int timeout = 500000;
+        while ((port->ssts & 0x0F) != 0x03 && timeout-- > 0) {
+            k_delay(10);
+        }
+        port->serr = 0xFFFFFFFF;
+        port->is = 0xFFFFFFFF;
+    }
+
     port->cmd |= HBA_PORT_CMD_ST;
 }
 
@@ -92,6 +115,12 @@ static void ahci_port_rebase(ahci_port_state_t *ps) {
     HBA_PORT *port = ps->port;
 
     ahci_stop_cmd(port);
+
+    port->cmd &= ~HBA_PORT_CMD_FRE;
+    int fr_timeout = 500000;
+    while ((port->cmd & HBA_PORT_CMD_FR) && fr_timeout-- > 0) {
+        k_delay(10);
+    }
 
     // Allocate command list (1KB, 1024-byte aligned)
     ps->cmd_list = (HBA_CMD_HEADER*)kmalloc_aligned(1024, 1024);
@@ -151,10 +180,24 @@ static int ahci_identify(int port_num, uint32_t *sectors, char *model) {
         return -1;
     }
 
+    int busy_timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --busy_timeout > 0) {
+        k_delay(50);
+    }
+    if (busy_timeout <= 0) {
+        spinlock_release_irqrestore(&ps->lock, rflags);
+        return -1;
+    }
+
     HBA_CMD_HEADER *cmd_hdr = &ps->cmd_list[slot];
+    memset(cmd_hdr, 0, sizeof(HBA_CMD_HEADER));
+    uint64_t ctba_phys = v2p((uint64_t)ps->cmd_tbl);
+    cmd_hdr->ctba = (uint32_t)(ctba_phys & 0xFFFFFFFF);
+    cmd_hdr->ctbau = (uint32_t)(ctba_phys >> 32);
     cmd_hdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmd_hdr->w = 0;
     cmd_hdr->prdtl = 1;
+    cmd_hdr->prdbc = 0;
 
     uint8_t *buf = (uint8_t*)kmalloc_aligned(512, 512);
     if (!buf) {
@@ -183,19 +226,24 @@ static int ahci_identify(int port_num, uint32_t *sectors, char *model) {
     fis->c = 1;
     fis->command = ATA_CMD_IDENTIFY;
 
+    port->is = 0xFFFFFFFF;
+    asm volatile("mfence" ::: "memory");
     port->ci = (1 << slot);
 
-    int timeout = 1000000;
+    int timeout = 2000000;
     while (timeout-- > 0) {
         if (!(port->ci & (1 << slot))) break;
-        if (port->is & (1 << 30)) {
+        if (port->is & HBA_PORT_IS_TFES) {
+            ahci_recover_port(port);
             kfree_null(buf);
             spinlock_release_irqrestore(&ps->lock, rflags);
             return -1;
         }
+        k_delay(50);
     }
 
     if (timeout <= 0) {
+        ahci_recover_port(port);
         kfree_null(buf);
         spinlock_release_irqrestore(&ps->lock, rflags);
         return -1;
@@ -205,20 +253,19 @@ static int ahci_identify(int port_num, uint32_t *sectors, char *model) {
     uint32_t s28 = *((uint32_t*)&wbuf[60]);
     uint64_t s48 = *((uint64_t*)&wbuf[100]);
 
-    if (s48 > 0) *sectors = (uint32_t)s48;
-    else *sectors = s28;
+    bool lba48 = ((wbuf[83] & 0xC000) == 0x4000) && ((wbuf[83] & (1 << 10)) != 0);
+    if (lba48 && s48 > 0) {
+        if (s48 > 0xFFFFFFFFULL) *sectors = 0xFFFFFFFF;
+        else *sectors = (uint32_t)s48;
+    } else {
+        *sectors = s28;
+    }
 
     for (int i = 0; i < 20; i++) {
         model[i*2] = (char)(wbuf[27+i] >> 8);
         model[i*2+1] = (char)(wbuf[27+i] & 0xFF);
     }
     model[40] = 0;
-
-    for (int i = 0; i < 40; i += 2) {
-        char tmp = model[i];
-        model[i] = model[i+1];
-        model[i+1] = tmp;
-    }
 
     kfree_null(buf);
     spinlock_release_irqrestore(&ps->lock, rflags);
@@ -233,7 +280,13 @@ static int ahci_fill_prdt(HBA_CMD_TBL *cmd_tbl, const void *buffer,
     int prd_idx = 0;
 
     while (remaining > 0 && prd_idx < AHCI_MAX_PRDT) {
-        uint64_t phys = mmu_virt_to_phys(ctx, buf_addr);
+        uint64_t phys = 0;
+        if ((buf_addr >= 0xFFFF800000000000ULL && buf_addr < 0xFFFFC00000000000ULL) ||
+            (buf_addr >= 0xFFFFFFFF80000000ULL)) {
+            phys = v2p(buf_addr);
+        } else {
+            phys = mmu_virt_to_phys(ctx, buf_addr);
+        }
         if (!phys)
             return -1;
 
@@ -281,7 +334,6 @@ static int ahci_read_sectors_single(ahci_port_state_t *ps, int port_num, uint64_
 
     uint64_t rflags = spinlock_acquire_irqsave(&ps->lock);
     HBA_PORT *port = ps->port;
-    port->is = 0xFFFFFFFF;
 
     int slot = ahci_find_free_slot(port);
     if (slot < 0) {
@@ -289,10 +341,24 @@ static int ahci_read_sectors_single(ahci_port_state_t *ps, int port_num, uint64_
         return -1;
     }
 
+    int busy_timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --busy_timeout > 0) {
+        k_delay(50);
+    }
+    if (busy_timeout <= 0) {
+        spinlock_release_irqrestore(&ps->lock, rflags);
+        return -1;
+    }
+
     HBA_CMD_HEADER *cmd_hdr = &ps->cmd_list[slot];
+    memset(cmd_hdr, 0, sizeof(HBA_CMD_HEADER));
+    uint64_t ctba_phys = v2p((uint64_t)ps->cmd_tbl);
+    cmd_hdr->ctba = (uint32_t)(ctba_phys & 0xFFFFFFFF);
+    cmd_hdr->ctbau = (uint32_t)(ctba_phys >> 32);
     cmd_hdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmd_hdr->w = 0;
     cmd_hdr->prdtl = 1;
+    cmd_hdr->prdbc = 0;
 
     HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
     memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL));
@@ -320,22 +386,43 @@ static int ahci_read_sectors_single(ahci_port_state_t *ps, int port_num, uint64_
     fis->countl = (uint8_t)(count);
     fis->counth = (uint8_t)(count >> 8);
 
+    port->is = 0xFFFFFFFF;
+    asm volatile("mfence" ::: "memory");
     port->ci = (1 << slot);
 
-    int timeout = 1000000;
+    int timeout = 3000000;
     while (timeout-- > 0) {
-        if (!(port->ci & (1 << slot))) break;
-        if (port->is & (1 << 30)) {
+        if (port->is & HBA_PORT_IS_TFES) {
+            serial_write("[AHCI] Read TFES error on port ");
+            serial_write_num(port_num);
+            serial_write(" tfd=0x");
+            serial_write_hex(port->tfd);
+            serial_write(" serr=0x");
+            serial_write_hex(port->serr);
             serial_write("\n");
+            ahci_recover_port(port);
             spinlock_release_irqrestore(&ps->lock, rflags);
             return -1;
         }
+        if (!(port->ci & (1 << slot))) {
+            if (port->tfd & ATA_SR_ERR) {
+                serial_write("[AHCI] Read TFD ERR bit set: 0x");
+                serial_write_hex(port->tfd);
+                serial_write("\n");
+                ahci_recover_port(port);
+                spinlock_release_irqrestore(&ps->lock, rflags);
+                return -1;
+            }
+            break;
+        }
+        k_delay(50);
     }
 
     if (timeout <= 0) {
         serial_write("[AHCI] Read timeout on port ");
         serial_write_num(port_num);
         serial_write("\n");
+        ahci_recover_port(port);
         spinlock_release_irqrestore(&ps->lock, rflags);
         return -1;
     }
@@ -373,7 +460,6 @@ static int ahci_write_sectors_single(ahci_port_state_t *ps, int port_num, uint64
 
     uint64_t rflags = spinlock_acquire_irqsave(&ps->lock);
     HBA_PORT *port = ps->port;
-    port->is = 0xFFFFFFFF;
 
     int slot = ahci_find_free_slot(port);
     if (slot < 0) {
@@ -381,10 +467,24 @@ static int ahci_write_sectors_single(ahci_port_state_t *ps, int port_num, uint64
         return -1;
     }
 
+    int busy_timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --busy_timeout > 0) {
+        k_delay(50);
+    }
+    if (busy_timeout <= 0) {
+        spinlock_release_irqrestore(&ps->lock, rflags);
+        return -1;
+    }
+
     HBA_CMD_HEADER *cmd_hdr = &ps->cmd_list[slot];
+    memset(cmd_hdr, 0, sizeof(HBA_CMD_HEADER));
+    uint64_t ctba_phys = v2p((uint64_t)ps->cmd_tbl);
+    cmd_hdr->ctba = (uint32_t)(ctba_phys & 0xFFFFFFFF);
+    cmd_hdr->ctbau = (uint32_t)(ctba_phys >> 32);
     cmd_hdr->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmd_hdr->w = 1;
     cmd_hdr->prdtl = 1;
+    cmd_hdr->prdbc = 0;
 
     HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
     memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL));
@@ -412,24 +512,43 @@ static int ahci_write_sectors_single(ahci_port_state_t *ps, int port_num, uint64
     fis->countl = (uint8_t)(count);
     fis->counth = (uint8_t)(count >> 8);
 
+    port->is = 0xFFFFFFFF;
+    asm volatile("mfence" ::: "memory");
     port->ci = (1 << slot);
 
-    int timeout = 1000000;
+    int timeout = 3000000;
     while (timeout-- > 0) {
-        if (!(port->ci & (1 << slot))) break;
-        if (port->is & (1 << 30)) {
-            serial_write("[AHCI] Write error on port ");
+        if (port->is & HBA_PORT_IS_TFES) {
+            serial_write("[AHCI] Write TFES error on port ");
             serial_write_num(port_num);
+            serial_write(" tfd=0x");
+            serial_write_hex(port->tfd);
+            serial_write(" serr=0x");
+            serial_write_hex(port->serr);
             serial_write("\n");
+            ahci_recover_port(port);
             spinlock_release_irqrestore(&ps->lock, rflags);
             return -1;
         }
+        if (!(port->ci & (1 << slot))) {
+            if (port->tfd & ATA_SR_ERR) {
+                serial_write("[AHCI] Write TFD ERR bit set: 0x");
+                serial_write_hex(port->tfd);
+                serial_write("\n");
+                ahci_recover_port(port);
+                spinlock_release_irqrestore(&ps->lock, rflags);
+                return -1;
+            }
+            break;
+        }
+        k_delay(50);
     }
 
     if (timeout <= 0) {
         serial_write("[AHCI] Write timeout on port ");
         serial_write_num(port_num);
         serial_write("\n");
+        ahci_recover_port(port);
         spinlock_release_irqrestore(&ps->lock, rflags);
         return -1;
     }
@@ -462,6 +581,13 @@ typedef struct {
 } AHCIDriverData;
 
 static int ahci_disk_read_sector(Disk *disk, uint32_t sector, uint8_t *buffer) {
+    if (((uintptr_t)buffer & 511) != 0) {
+        uint8_t aligned_buf[512] __attribute__((aligned(512)));
+        int ret = ahci_disk_read_sector(disk, sector, aligned_buf);
+        if (ret == 0) memcpy(buffer, aligned_buf, 512);
+        return ret;
+    }
+
     AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
 
     // For partitions, add offset and use parent's port
@@ -475,6 +601,12 @@ static int ahci_disk_read_sector(Disk *disk, uint32_t sector, uint8_t *buffer) {
 }
 
 static int ahci_disk_write_sector(Disk *disk, uint32_t sector, const uint8_t *buffer) {
+    if (((uintptr_t)buffer & 511) != 0) {
+        uint8_t aligned_buf[512] __attribute__((aligned(512)));
+        memcpy(aligned_buf, buffer, 512);
+        return ahci_disk_write_sector(disk, sector, aligned_buf);
+    }
+
     AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
 
     if (disk->is_partition && disk->parent) {
@@ -487,6 +619,12 @@ static int ahci_disk_write_sector(Disk *disk, uint32_t sector, const uint8_t *bu
 }
 
 static int ahci_disk_read_sectors(Disk *disk, uint32_t sector, uint32_t count, uint8_t *buffer) {
+    if (((uintptr_t)buffer & 511) != 0) {
+        for (uint32_t i = 0; i < count; i++) {
+            if (ahci_disk_read_sector(disk, sector + i, buffer + (i * 512)) != 0) return -1;
+        }
+        return 0;
+    }
     AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
     if (disk->is_partition && disk->parent) {
         AHCIDriverData *pdata = (AHCIDriverData*)disk->parent->driver_data;
@@ -496,6 +634,12 @@ static int ahci_disk_read_sectors(Disk *disk, uint32_t sector, uint32_t count, u
 }
 
 static int ahci_disk_write_sectors(Disk *disk, uint32_t sector, uint32_t count, const uint8_t *buffer) {
+    if (((uintptr_t)buffer & 511) != 0) {
+        for (uint32_t i = 0; i < count; i++) {
+            if (ahci_disk_write_sector(disk, sector + i, buffer + (i * 512)) != 0) return -1;
+        }
+        return 0;
+    }
     AHCIDriverData *data = (AHCIDriverData*)disk->driver_data;
     if (disk->is_partition && disk->parent) {
         AHCIDriverData *pdata = (AHCIDriverData*)disk->parent->driver_data;
@@ -539,8 +683,7 @@ void ahci_init(void) {
     pci_enable_mmio(&pci_dev);
 
     // Read ABAR (BAR5)
-    uint32_t abar_raw = pci_get_bar(&pci_dev, 5);
-    uint64_t abar_phys = abar_raw & 0xFFFFF000;  // Mask out lower bits
+    uint64_t abar_phys = ((uint64_t)pci_get_bar(&pci_dev, 5)) & ~0xFFFULL;
 
     if (abar_phys == 0) {
         serial_write("[AHCI] Invalid ABAR address\n");
@@ -551,15 +694,11 @@ void ahci_init(void) {
     serial_write_hex((uint32_t)abar_phys);
     serial_write("\n");
 
-    uint64_t abar_virt = p2v(abar_phys);
-    for (uint64_t offset = 0; offset < 0x2000; offset += 4096) {
-        if (mmu_map_page(mmu_get_kernel_context(), abar_virt + offset,
-                         abar_phys + offset,
-                         MMU_PROT_READ | MMU_PROT_WRITE | MMU_FLAG_NOCACHE) != 0)
-            return;
+    abar = (HBA_MEM *)ioremap(abar_phys, 0x2000);
+    if (!abar) {
+        serial_write("[AHCI] Failed to ioremap ABAR\n");
+        return;
     }
-
-    abar = (HBA_MEM*)abar_virt;
 
     // Enable AHCI mode
     abar->ghc |= (1 << 31);  // AE (AHCI Enable)
@@ -657,41 +796,62 @@ void ahci_init(void) {
 }
 
 int ahci_flush_cache(int port_num) {
-    HBA_PORT *port = &abar->ports[port_num];
+    if (port_num < 0 || port_num >= MAX_AHCI_PORTS) return -1;
     ahci_port_state_t *ps = &ports[port_num];
-
-    if (port_num < 0 || port_num >= 32 || !ps->active) return -1;
+    if (!ps->active || !ps->port) return -1;
+    HBA_PORT *port = ps->port;
 
     uint64_t rflags = spinlock_acquire_irqsave(&ps->lock);
 
-    port->is = 0xFFFFFFFF; // Clear interrupts
     int slot = ahci_find_free_slot(port);
     if (slot == -1) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
 
-    HBA_CMD_HEADER *cmd_header = (HBA_CMD_HEADER*)p2v(port->clb);
-    cmd_header += slot;
-    cmd_header->cfl = sizeof(FIS_REG_H2D) / 4;
+    int busy_timeout = 1000000;
+    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --busy_timeout > 0) {
+        k_delay(50);
+    }
+    if (busy_timeout <= 0) {
+        spinlock_release_irqrestore(&ps->lock, rflags);
+        return -1;
+    }
+
+    HBA_CMD_HEADER *cmd_header = &ps->cmd_list[slot];
+    memset(cmd_header, 0, sizeof(HBA_CMD_HEADER));
+    uint64_t ctba_phys = v2p((uint64_t)ps->cmd_tbl);
+    cmd_header->ctba = (uint32_t)(ctba_phys & 0xFFFFFFFF);
+    cmd_header->ctbau = (uint32_t)(ctba_phys >> 32);
+    cmd_header->cfl = sizeof(FIS_REG_H2D) / sizeof(uint32_t);
     cmd_header->w = 0;
     cmd_header->prdtl = 0;
+    cmd_header->prdbc = 0;
 
-    HBA_CMD_TBL *cmd_tbl = (HBA_CMD_TBL*)p2v(cmd_header->ctba);
-    for (int i = 0; i < 256; i++) ((uint8_t*)cmd_tbl)[i] = 0;
+    HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
+    memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL));
 
     FIS_REG_H2D *fis = (FIS_REG_H2D*)(&cmd_tbl->cfis);
     fis->fis_type = FIS_TYPE_REG_H2D;
     fis->c = 1;
-    fis->command = 0xEA; // FLUSH CACHE EXT
+    fis->command = ATA_CMD_FLUSH_CACHE_EXT;
 
-    // Wait for port to be ready
-    int timeout = 1000000;
-    while ((port->tfd & (ATA_SR_BSY | ATA_SR_DRQ)) && --timeout > 0);
-    if (timeout == 0) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
-
+    port->is = 0xFFFFFFFF;
+    asm volatile("mfence" ::: "memory");
     port->ci = (1 << slot);
 
-    while (1) {
+    int timeout = 3000000;
+    while (timeout-- > 0) {
         if ((port->ci & (1 << slot)) == 0) break;
-        if (port->is & HBA_PORT_IS_TFES) { spinlock_release_irqrestore(&ps->lock, rflags); return -1; }
+        if (port->is & HBA_PORT_IS_TFES) {
+            ahci_recover_port(port);
+            spinlock_release_irqrestore(&ps->lock, rflags);
+            return -1;
+        }
+        k_delay(50);
+    }
+
+    if (timeout <= 0) {
+        ahci_recover_port(port);
+        spinlock_release_irqrestore(&ps->lock, rflags);
+        return -1;
     }
 
     spinlock_release_irqrestore(&ps->lock, rflags);

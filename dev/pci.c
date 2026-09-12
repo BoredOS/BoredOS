@@ -19,7 +19,7 @@ void pci_write_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t off
 
 int pci_device_exists(uint8_t bus, uint8_t device, uint8_t function) {
     uint16_t vendor_id = pci_get_vendor_id(bus, device, function);
-    return vendor_id != 0xFFFF;
+    return vendor_id != 0xFFFF && vendor_id != 0x0000;
 }
 
 uint16_t pci_get_vendor_id(uint8_t bus, uint8_t device, uint8_t function) {
@@ -49,7 +49,7 @@ uint8_t pci_get_prog_if(uint8_t bus, uint8_t device, uint8_t function) {
 
 int pci_enumerate_devices(pci_device_t* devices, int max_devices) {
     int count = 0;
-    for (uint8_t bus = 0; bus < 256 && count < max_devices; bus++) {
+    for (int bus = 0; bus < 256 && count < max_devices; bus++) {
         for (uint8_t dev = 0; dev < 32 && count < max_devices; dev++) {
             if (pci_device_exists(bus, dev, 0)) {
                 uint32_t config_val = pci_read_config(bus, dev, 0, 0x0C);
