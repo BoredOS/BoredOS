@@ -581,8 +581,8 @@ void graphics_present_framebuffer(void) {
     spinlock_release_irqrestore(&graphics_lock, flags);
 }
 
-void graphics_copy_buffer(uint32_t *src) {
-    if (!g_fb || !src) return;
+void graphics_copy_region(uint32_t *src, int y_start, int h) {
+    if (!g_fb || !src || h <= 0) return;
     extern bool g_in_panic;
     extern bool tty_get_blit_enabled(void);
     if (!g_in_panic && !tty_get_blit_enabled()) return;
@@ -591,9 +591,23 @@ void graphics_copy_buffer(uint32_t *src) {
     int height = g_fb->height;
     int pitch = g_fb->pitch;
     
-    for (int y = 0; y < height; y++) {
+    if (y_start < 0) {
+        h += y_start;
+        y_start = 0;
+    }
+    if (y_start + h > height) {
+        h = height - y_start;
+    }
+    if (h <= 0) return;
+
+    for (int y = y_start; y < y_start + h; y++) {
         memcpy(dst + (y * pitch), src + (y * width), width * 4);
     }
+}
+
+void graphics_copy_buffer(uint32_t *src) {
+    if (!g_fb || !src) return;
+    graphics_copy_region(src, 0, g_fb->height);
 }
 
 

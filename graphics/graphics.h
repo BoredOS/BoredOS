@@ -67,6 +67,7 @@ void graphics_clear_dirty_no_lock(void);
 void graphics_flip_buffer(void);
 void graphics_clear_back_buffer(uint32_t color);
 void graphics_scroll_back_buffer(int lines);
-
+void graphics_copy_buffer(uint32_t *src);
+void graphics_copy_region(uint32_t *src, int y_start, int h);
 
 #endif

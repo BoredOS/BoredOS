@@ -10,6 +10,8 @@
 #include "graphics.h"
 #include "kutils.h"
 #include "process.h"
+#include "syscall.h"
+#include "errno.h"
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -19,6 +21,19 @@ static spinlock_t g_tty_global_lock = SPINLOCK_INIT;
 static uint32_t *g_active_tty_vfb = NULL;
 
 #include "kutils.h"
+
+extern bool g_headless_mode;
+
+#define CONSOLE_BOOT_LOG_SIZE 65536
+static char g_console_boot_log[CONSOLE_BOOT_LOG_SIZE];
+static size_t g_console_boot_log_len = 0;
+static bool g_console_boot_log_active = true;
+
+struct vt_bootlog {
+    char *buf;
+    size_t size;
+    size_t written;
+};
 
 static void tty_queue_init(tty_queue_t *q) {
     q->head = 0;
@@ -67,6 +82,7 @@ void tty_init(void) {
     for (int i = 0; i < TTY_COUNT; i++) {
         g_ttys[i].id = i;
         g_ttys[i].used = true;
+        g_ttys[i].opened = (i == 0); // tty1 opened by default at boot
         if (i >= GRAPHICAL_TTY_COUNT) {
             int dev_id = i - GRAPHICAL_TTY_COUNT;
             serial_device_t *dev = serial_get_device(dev_id);
@@ -85,9 +101,14 @@ void tty_init(void) {
             g_ttys[i].grid = (i == 0 && cols > 0 && rows > 0) ? (tty_cell_t *)kmalloc(cols * rows * sizeof(tty_cell_t)) : NULL;
         }
         g_ttys[i].dirty = true;
+        g_ttys[i].dirty_row_start = 0;
+        g_ttys[i].dirty_row_end = rows > 0 ? rows - 1 : 0;
         g_ttys[i].cursor_x = 0;
         g_ttys[i].cursor_y = 0;
+        g_ttys[i].last_cursor_x = -1;
+        g_ttys[i].last_cursor_y = -1;
         g_ttys[i].cursor_visible = true;
+        g_ttys[i].last_cursor_visible = false;
         g_ttys[i].fg_color = 0xFFFFFFFF;
         g_ttys[i].bg_color = 0xFF000000;
         g_ttys[i].blit_enabled = !g_ttys[i].is_serial;
@@ -131,6 +152,8 @@ static void ensure_tty_grid(tty_t *t) {
             t->grid[j].bg = t->bg_color ? t->bg_color : 0xFF000000;
         }
         t->dirty = true;
+        t->dirty_row_start = 0;
+        t->dirty_row_end = rows - 1;
     }
 }
 
@@ -146,13 +169,17 @@ void tty_switch(int id) {
     uint64_t flags = spinlock_acquire_irqsave(&g_tty_global_lock);
     g_active_tty = id;
     g_ttys[id].dirty = true;
+    int cur_rows = g_ttys[id].height / 8;
+    g_ttys[id].dirty_row_start = 0;
+    g_ttys[id].dirty_row_end = cur_rows > 0 ? cur_rows - 1 : 0;
+    bool newly_opened = !g_ttys[id].opened;
+    g_ttys[id].opened = true;
     int fg_pid = g_ttys[id].fg_pid;
     spinlock_release_irqrestore(&g_tty_global_lock, flags);
 
-    if (fg_pid <= 0) {
-        char args[32];
-        itoa(id + 1, args);
-        process_create_elf("/bin/bsh.elf", args, true, id);
+    if (newly_opened || fg_pid <= 0) {
+        extern int signal_send_to_pid(int pid, int sig);
+        signal_send_to_pid(1, 28 /* SIGWINCH */);
     }
 }
 
@@ -178,6 +205,10 @@ static void tty_draw_rect(tty_t *t, int x, int y, int w, int h, uint32_t color) 
         }
     }
     t->dirty = true;
+    int dr_s = start_row < 0 ? 0 : start_row;
+    int dr_e = (start_row + num_rows - 1) >= rows ? rows - 1 : (start_row + num_rows - 1);
+    if (t->dirty_row_start > dr_s) t->dirty_row_start = dr_s;
+    if (t->dirty_row_end < dr_e) t->dirty_row_end = dr_e;
 }
 
 static bool get_box_drawing_glyph(uint32_t codepoint, uint8_t glyph[8]) {
@@ -331,7 +362,7 @@ static void tty_render_char_to_vfb(uint32_t *dest, int width, int height, int x,
     }
 }
 
-static void tty_render_grid_to_vfb(tty_t *t, uint32_t *dest) {
+static void __attribute__((unused)) tty_render_grid_to_vfb(tty_t *t, uint32_t *dest) {
     int cols = t->width / 8;
     int rows = t->height / 8;
     for (int r = 0; r < rows; r++) {
@@ -341,15 +372,26 @@ static void tty_render_grid_to_vfb(tty_t *t, uint32_t *dest) {
         }
     }
 }
+static void tty_mark_row_dirty(tty_t *t, int row) {
+    int rows = t->height / 8;
+    if (row < 0 || row >= rows) return;
+    t->dirty = true;
+    if (row < t->dirty_row_start) t->dirty_row_start = row;
+    if (row > t->dirty_row_end) t->dirty_row_end = row;
+}
+
 static void tty_write_cell(tty_t *t, int col, int row, uint32_t codepoint, uint32_t fg, uint32_t bg) {
     int cols = t->width / 8;
     int rows = t->height / 8;
     if (col < 0 || col >= cols || row < 0 || row >= rows) return;
     int idx = row * cols + col;
+    if (t->grid[idx].codepoint == codepoint && t->grid[idx].fg == fg && t->grid[idx].bg == bg) {
+        return;
+    }
     t->grid[idx].codepoint = codepoint;
     t->grid[idx].fg = fg;
     t->grid[idx].bg = bg;
-    t->dirty = true;
+    tty_mark_row_dirty(t, row);
 }
 
 static uint32_t g_cursor_backup[8 * 8];
@@ -392,9 +434,22 @@ static void tty_scroll(tty_t *t) {
     }
     t->cursor_y -= 8;
     t->dirty = true;
+    t->dirty_row_start = 0;
+    t->dirty_row_end = rows - 1;
 }
 
 void tty_write(int id, const char *data, size_t len) {
+    if ((id == 0 || (g_headless_mode && id == 10)) && g_console_boot_log_active && data && len > 0) {
+        uint64_t bflags = spinlock_acquire_irqsave(&g_tty_global_lock);
+        size_t avail = CONSOLE_BOOT_LOG_SIZE - g_console_boot_log_len;
+        size_t to_copy = len < avail ? len : avail;
+        if (to_copy > 0) {
+            memcpy(g_console_boot_log + g_console_boot_log_len, data, to_copy);
+            g_console_boot_log_len += to_copy;
+        }
+        spinlock_release_irqrestore(&g_tty_global_lock, bflags);
+    }
+
     if (pty_is_pty_id(id)) {
         pty_write_output(id, data, len);
         return;
@@ -793,6 +848,7 @@ int tty_create(void) {
 #define KDSETMODE   0x4B3A
 #define KD_TEXT     0x00
 #define KD_GRAPHICS 0x01
+#define TIOCSCTTY   0x540E
 #define TIOCGPGRP   0x540F
 #define TIOCSPGRP   0x5410
 
@@ -801,19 +857,26 @@ int tty_ioctl(int id, uint64_t request, void *arg) {
     if (!t) return -1;
     
     if (request == TIOCGWINSZ) {
-        if (!arg) return -1;
+        if (!arg || !is_valid_user_ptr(arg, sizeof(struct winsize))) return -EFAULT;
         struct winsize *ws = (struct winsize *)arg;
         ws->ws_row = t->height / 8;
         ws->ws_col = t->width / 8;
         ws->ws_xpixel = t->width;
         ws->ws_ypixel = t->height;
         return 0;
+    } else if (request == TIOCSCTTY) {
+        process_t *proc = process_get_current();
+        if (proc) {
+            proc->tty_id = id;
+            t->fg_pid = proc->pid;
+        }
+        return 0;
     } else if (request == TIOCGPGRP) {
-        if (!arg) return -1;
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
         *(int *)arg = t->fg_pid;
         return 0;
     } else if (request == TIOCSPGRP) {
-        if (!arg) return -1;
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
         t->fg_pid = *(int *)arg;
         return 0;
     } else if (request == KDSETMODE) {
@@ -827,19 +890,81 @@ int tty_ioctl(int id, uint64_t request, void *arg) {
         }
         return 0;
     } else if (request == KDGETMODE) {
-        if (!arg) return -1;
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
         *(int *)arg = t->kd_mode;
         return 0;
-    } else if (request == 0x5606) { // VT_ACTIVATE
-        tty_switch(id);
+    } else if (request == 0x5606 /* VT_ACTIVATE */) {
+        int target = id;
+        if (arg) {
+            uintptr_t val = (uintptr_t)arg;
+            if (val < TTY_COUNT) {
+                target = (int)val;
+            } else if (is_valid_user_ptr(arg, sizeof(int))) {
+                target = *(int *)arg;
+            }
+            if (target > 0 && target <= GRAPHICAL_TTY_COUNT) {
+                target = target - 1;
+            }
+        }
+        tty_switch(target);
+        return 0;
+    } else if (request == 0x5607) { // VT_GETACTIVE
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
+        *(int *)arg = tty_get_active_id();
+        return 0;
+    } else if (request == 0x5603 /* VT_GETSTATE */) {
+        struct vt_stat_k {
+            uint16_t v_active;
+            uint16_t v_signal;
+            uint16_t v_state;
+        };
+        if (!arg || !is_valid_user_ptr(arg, sizeof(struct vt_stat_k))) return -EFAULT;
+        uint16_t state = 0;
+        for (int i = 0; i < TTY_COUNT; i++) {
+            if (g_ttys[i].opened || i == g_active_tty) {
+                state |= (1U << i);
+            }
+        }
+        struct vt_stat_k *vs = (struct vt_stat_k *)arg;
+        vs->v_active = (uint16_t)(g_active_tty + 1);
+        vs->v_signal = 0;
+        vs->v_state = state;
+        return 0;
+    } else if (request == 0x5420 /* TIOCISOPEN */) {
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
+        *(int *)arg = (t->opened || id == g_active_tty) ? 1 : 0;
         return 0;
     } else if (request == 0x541F /* TIOCISSERIAL */) {
-        if (!arg) return -1;
+        if (!arg || !is_valid_user_ptr(arg, sizeof(int))) return -EFAULT;
         *(int *)arg = t->is_serial ? 1 : 0;
+        return 0;
+    } else if (request == 0x5608 /* VT_GETBOOTLOG */) {
+        if (!arg || !is_valid_user_ptr(arg, sizeof(struct vt_bootlog))) return -EFAULT;
+        struct vt_bootlog *bl = (struct vt_bootlog *)arg;
+        if (!bl->buf || bl->size == 0 || !is_valid_user_ptr(bl->buf, bl->size)) return -EFAULT;
+        uint64_t bflags = spinlock_acquire_irqsave(&g_tty_global_lock);
+        size_t to_copy = g_console_boot_log_len < bl->size ? g_console_boot_log_len : bl->size;
+        memcpy(bl->buf, g_console_boot_log, to_copy);
+        bl->written = to_copy;
+        spinlock_release_irqrestore(&g_tty_global_lock, bflags);
+        return 0;
+    } else if (request == 0x5609 /* VT_STOPBOOTLOG */) {
+        uint64_t bflags = spinlock_acquire_irqsave(&g_tty_global_lock);
+        g_console_boot_log_active = false;
+        spinlock_release_irqrestore(&g_tty_global_lock, bflags);
         return 0;
     }
     
     return -1;
+}
+
+size_t tty_copy_boot_log(char *dst, size_t max_len) {
+    if (!dst || max_len == 0) return 0;
+    uint64_t bflags = spinlock_acquire_irqsave(&g_tty_global_lock);
+    size_t to_copy = g_console_boot_log_len < max_len ? g_console_boot_log_len : max_len;
+    memcpy(dst, g_console_boot_log, to_copy);
+    spinlock_release_irqrestore(&g_tty_global_lock, bflags);
+    return to_copy;
 }
 
 int tty_destroy(int id) {
@@ -917,14 +1042,54 @@ void tty_blit_active(void) {
     tty_t *t = tty_get(g_active_tty);
     if (!t || !t->blit_enabled || t->kd_mode == KD_GRAPHICS || !g_active_tty_vfb) return;
     uint64_t flags = spinlock_acquire_irqsave(&t->lock);
-    if (t->dirty) {
-        tty_render_grid_to_vfb(t, g_active_tty_vfb);
-        t->dirty = false;
+
+    // Track cursor movement or visibility change
+    if (t->cursor_x != t->last_cursor_x || t->cursor_y != t->last_cursor_y || t->cursor_visible != t->last_cursor_visible) {
+        int old_r = t->last_cursor_y / 8;
+        int new_r = t->cursor_y / 8;
+        tty_mark_row_dirty(t, old_r);
+        tty_mark_row_dirty(t, new_r);
+        t->last_cursor_x = t->cursor_x;
+        t->last_cursor_y = t->cursor_y;
+        t->last_cursor_visible = t->cursor_visible;
     }
-    extern void graphics_copy_buffer(uint32_t *src);
+
+    if (!t->dirty) {
+        spinlock_release_irqrestore(&t->lock, flags);
+        return;
+    }
+
+    int rows = t->height / 8;
+    int r_start = t->dirty_row_start;
+    int r_end = t->dirty_row_end;
+    if (r_start < 0) r_start = 0;
+    if (r_end >= rows) r_end = rows - 1;
+    if (r_end < r_start) {
+        r_start = 0;
+        r_end = rows - 1;
+    }
+
+    int cols = t->width / 8;
+    for (int r = r_start; r <= r_end; r++) {
+        for (int c = 0; c < cols; c++) {
+            tty_cell_t cell = t->grid[r * cols + c];
+            tty_render_char_to_vfb(g_active_tty_vfb, t->width, t->height, c * 8, r * 8, cell.codepoint, cell.fg, cell.bg);
+        }
+    }
+
+    extern void graphics_copy_region(uint32_t *src, int y_start, int h);
     tty_composite_cursor_vfb(t, g_active_tty_vfb);
-    graphics_copy_buffer(g_active_tty_vfb);
+
+    int y_start = r_start * 8;
+    int h = (r_end - r_start + 1) * 8;
+    graphics_copy_region(g_active_tty_vfb, y_start, h);
+
     tty_restore_cursor_vfb(t, g_active_tty_vfb);
+
+    t->dirty = false;
+    t->dirty_row_start = rows;
+    t->dirty_row_end = -1;
+
     spinlock_release_irqrestore(&t->lock, flags);
 }
 

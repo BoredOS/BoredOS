@@ -48,14 +48,18 @@ typedef struct {
 typedef struct {
     int id;
     bool used;
+    bool opened;
     bool is_serial;
     uint16_t serial_port;
     serial_device_t *serial_dev;
     tty_cell_t *grid;
     bool dirty;
+    int dirty_row_start, dirty_row_end;
     int width, height;
     int cursor_x, cursor_y;
+    int last_cursor_x, last_cursor_y;
     bool cursor_visible;
+    bool last_cursor_visible;
     uint32_t fg_color, bg_color;
     bool blit_enabled;
     int kd_mode;
@@ -105,10 +109,10 @@ int tty_get_foreground(int id);
 
 void tty_blit_active(void);
 void tty_set_blit_enabled(bool enabled);
-void tty_set_blit_enabled_for_id(int id, bool enabled);
 bool tty_get_blit_enabled(void);
 struct poll_table;
 int tty_poll(int id, struct poll_table *pt);
+size_t tty_copy_boot_log(char *dst, size_t max_len);
 
 #endif
 

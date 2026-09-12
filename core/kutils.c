@@ -274,13 +274,35 @@ void k_delay(int iterations) {
     }
 }
 
+static inline uint64_t read_tsc(void) {
+    uint32_t lo, hi;
+    asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
+    return ((uint64_t)hi << 32) | lo;
+}
+
 void k_sleep(int ms) {
     uint32_t ticks = (uint32_t)ms;
     if (ticks == 0 && ms > 0) ticks = 1;
     
+    uint64_t rflags;
+    asm volatile("pushfq; pop %0" : "=r"(rflags));
+    bool irqs_enabled = (rflags & (1ULL << 9)) != 0;
+
+    if (!irqs_enabled) {
+        k_delay(ms * 10000);
+        return;
+    }
+
     uint32_t target = get_ticks() + ticks;
+    uint32_t start_ticks = get_ticks();
+    uint64_t start_tsc = read_tsc();
+
     while (get_ticks() < target) {
         __asm__ __volatile__("hlt");
+        uint64_t cur_tsc = read_tsc();
+        if (get_ticks() == start_ticks && (cur_tsc - start_tsc) > 5000000000ULL) {
+            break;
+        }
     }
 }
 
