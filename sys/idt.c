@@ -215,7 +215,7 @@ static void pic_remap(void) {
 }
 
 // Set up PIT (Programmable Interval Timer) for 1000Hz (1ms intervals)
-static void pit_setup(void) {
+void pit_setup(void) {
     uint16_t divisor = 1193182 / 1000;  // 1000Hz (1ms ticks)
     
     // Mode 2: Rate Generator (more appropriate for periodic interrupts)
@@ -234,6 +234,13 @@ void idt_init(void) {
         idt[i] = (struct idt_entry){0};
     }
 
+    // Populate all entries from 32 to 255 with default handler stub
+    // to protect against any stray interrupts or unhandled hardware vectors
+    extern void isr_default_wrapper(void);
+    for (int i = 32; i < IDT_ENTRIES; i++) {
+        idt_set_gate(i, isr_default_wrapper, cs, 0x8E);
+    }
+
     pic_remap();
     
     // Unmask IRQ 0 (Timer), IRQ 1 (Keyboard), IRQ 2 (Cascade), IRQ 3 (COM2), IRQ 4 (COM1)
@@ -247,14 +254,23 @@ void idt_register_interrupts(void) {
     uint16_t cs;
     asm volatile ("mov %%cs, %0" : "=r"(cs));
     
-    extern void isr3_wrapper(void);
-    extern void isr4_wrapper(void);
-
+    // Hardware IRQs (Master: 32-39, Slave: 40-47)
     idt_set_gate(32, isr0_wrapper, cs, 0x8E);  // Timer (IRQ 0)
     idt_set_gate(33, isr1_wrapper, cs, 0x8E);  // Keyboard (IRQ 1)
+    idt_set_gate(34, isr2_wrapper, cs, 0x8E);  // Cascade (IRQ 2)
     idt_set_gate(35, isr3_wrapper, cs, 0x8E);  // COM2 (IRQ 3)
     idt_set_gate(36, isr4_wrapper, cs, 0x8E);  // COM1 (IRQ 4)
+    idt_set_gate(37, isr5_wrapper, cs, 0x8E);  // PCI (IRQ 5)
+    idt_set_gate(38, isr6_wrapper, cs, 0x8E);  // Floppy / PCI (IRQ 6)
+    idt_set_gate(39, isr7_wrapper, cs, 0x8E);  // Spurious / Real IRQ 7
+    idt_set_gate(40, isr8_wrapper, cs, 0x8E);  // RTC (IRQ 8)
+    idt_set_gate(41, isr9_wrapper, cs, 0x8E);  // PCI (IRQ 9)
+    idt_set_gate(42, isr10_wrapper, cs, 0x8E); // PCI (IRQ 10)
+    idt_set_gate(43, isr11_wrapper, cs, 0x8E); // PCI (IRQ 11)
     idt_set_gate(44, isr12_wrapper, cs, 0x8E); // Mouse (IRQ 12)
+    idt_set_gate(45, isr13_wrapper, cs, 0x8E); // Coprocessor (IRQ 13)
+    idt_set_gate(46, isr14_wrapper, cs, 0x8E); // Primary ATA (IRQ 14)
+    idt_set_gate(47, isr15_wrapper, cs, 0x8E); // Spurious / Real IRQ 15
 
     // Exceptions
     extern void exc0_wrapper(void);
@@ -343,6 +359,10 @@ void idt_register_interrupts(void) {
     // Syscall Handler (vector 128) - DPL 3 for user access
     extern void isr128_wrapper(void);
     idt_set_gate(128, isr128_wrapper, cs, 0xEE);
+
+    // Local APIC Spurious Interrupt (Vector 255 / 0xFF)
+    extern void isr_spurious_lapic_wrapper(void);
+    idt_set_gate(255, isr_spurious_lapic_wrapper, cs, 0x8E);
 }
 
 void idt_load(void) {
@@ -391,5 +411,48 @@ uint64_t irq_dispatch(int irq, registers_t *regs) {
 uint64_t pci_irq_handler(registers_t *regs) {
     int irq = (int)regs->int_no - 32;
     return irq_dispatch(irq, regs);
+}
+
+uint64_t spurious_irq7_handler(registers_t *regs) {
+    outb(0x20, 0x0B);
+    uint8_t isr = inb(0x20);
+
+    if (isr & (1 << 7)) {
+        return irq_dispatch(7, regs);
+    }
+    // Spurious IRQ 7: Master PIC did NOT set the ISR bit.
+    // Do NOT send EOI to the PIC!
+    return (uint64_t)regs;
+}
+
+uint64_t spurious_irq15_handler(registers_t *regs) {
+    outb(0xA0, 0x0B);
+    uint8_t isr = inb(0xA0);
+
+    if (isr & (1 << 7)) {
+        // Genuine IRQ 15
+        return irq_dispatch(15, regs);
+    }
+    // Spurious IRQ 15: Slave PIC did NOT set the ISR bit.
+    // However, Master PIC was notified via cascade IRQ 2,
+    // so Master PIC needs EOI, but Slave PIC must NOT get EOI.
+    outb(0x20, 0x20);
+    return (uint64_t)regs;
+}
+
+uint64_t lapic_spurious_handler(registers_t *regs) {
+    // LAPIC spurious interrupts do not require an EOI
+    return (uint64_t)regs;
+}
+
+uint64_t unhandled_interrupt_handler(registers_t *regs) {
+    uint64_t vec = regs->int_no;
+    if (vec >= 32 && vec <= 47) {
+        int irq = (int)vec - 32;
+        return irq_dispatch(irq, regs);
+    }
+    extern void lapic_eoi(void);
+    lapic_eoi();
+    return (uint64_t)regs;
 }
 

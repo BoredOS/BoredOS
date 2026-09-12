@@ -90,9 +90,6 @@ static void ap_entry(struct limine_smp_info *info) {
     uint64_t kernel_cr3 = mmu_get_kernel_context()->pml4_phys;
     asm volatile("mov %0, %%cr3" : : "r"(kernel_cr3));
 
-    extern void lapic_enable(void);
-    lapic_enable();
-
     cpu_states[my_id].self = &cpu_states[my_id];
     cpu_states[my_id].online = true;
     cpu_states[my_id].kernel_syscall_stack = cpu_states[my_id].kernel_stack;
@@ -100,11 +97,19 @@ static void ap_entry(struct limine_smp_info *info) {
     wrmsr(MSR_GS_BASE, (uint64_t)&cpu_states[my_id]);
     wrmsr(MSR_KERNEL_GS_BASE, (uint64_t)&cpu_states[my_id]);
 
-    serial_write("[SMP] AP ");
-    serial_write_num(my_id);
-    serial_write(" online (LAPIC ");
-    serial_write_num(cpu_states[my_id].lapic_id);
-    serial_write(")\n");
+    extern void lapic_enable(void);
+    lapic_enable();
+
+    char ap_msg[64];
+    char num_buf[16];
+    strcpy(ap_msg, "[SMP] AP ");
+    utoa(my_id, num_buf);
+    strcat(ap_msg, num_buf);
+    strcat(ap_msg, " online (LAPIC ");
+    utoa(cpu_states[my_id].lapic_id, num_buf);
+    strcat(ap_msg, num_buf);
+    strcat(ap_msg, ")\n");
+    serial_write(ap_msg);
 
     extern void work_queue_drain_loop(void);
     process_t *ap_idle = process_create(work_queue_drain_loop, false); 
@@ -225,11 +230,16 @@ uint32_t smp_init(struct limine_smp_response *smp_resp) {
             wrmsr(MSR_GS_BASE, (uint64_t)&cpu_states[i]);
             wrmsr(MSR_KERNEL_GS_BASE, (uint64_t)&cpu_states[i]);
             
-            serial_write("[SMP] BSP CPU ");
-            serial_write_num(i);
-            serial_write(" (LAPIC ");
-            serial_write_num(cpu->lapic_id);
-            serial_write(") online\n");
+            char bsp_msg[64];
+            char num_buf[16];
+            strcpy(bsp_msg, "[SMP] BSP CPU ");
+            utoa(i, num_buf);
+            strcat(bsp_msg, num_buf);
+            strcat(bsp_msg, " (LAPIC ");
+            utoa(cpu->lapic_id, num_buf);
+            strcat(bsp_msg, num_buf);
+            strcat(bsp_msg, ") online\n");
+            serial_write(bsp_msg);
         } else {
             void *ap_stack = kmalloc_aligned(KERNEL_STACK_SIZE, KERNEL_STACK_ALIGNMENT);
             if (!ap_stack) {
@@ -242,11 +252,16 @@ uint32_t smp_init(struct limine_smp_response *smp_resp) {
 
             cpu->extra_argument = i;
 
-            serial_write("[SMP] Starting AP ");
-            serial_write_num(i);
-            serial_write(" (LAPIC ");
-            serial_write_num(cpu->lapic_id);
-            serial_write(")...\n");
+            char start_msg[64];
+            char num_buf[16];
+            strcpy(start_msg, "[SMP] Starting AP ");
+            utoa(i, num_buf);
+            strcat(start_msg, num_buf);
+            strcat(start_msg, " (LAPIC ");
+            utoa(cpu->lapic_id, num_buf);
+            strcat(start_msg, num_buf);
+            strcat(start_msg, ")...\n");
+            serial_write(start_msg);
 
             __atomic_store_n(&cpu->goto_address, ap_entry, __ATOMIC_SEQ_CST);
         }
@@ -263,11 +278,16 @@ uint32_t smp_init(struct limine_smp_response *smp_resp) {
         asm volatile("pause");
     }
 
-    serial_write("[SMP] All ");
-    serial_write_num(online_count);
-    serial_write(" of ");
-    serial_write_num(total_cpus);
-    serial_write(" CPUs online\n");
+    char all_msg[64];
+    char num_buf[16];
+    strcpy(all_msg, "[SMP] All ");
+    utoa(online_count, num_buf);
+    strcat(all_msg, num_buf);
+    strcat(all_msg, " of ");
+    utoa(total_cpus, num_buf);
+    strcat(all_msg, num_buf);
+    strcat(all_msg, " CPUs online\n");
+    serial_write(all_msg);
 
     return online_count;
 }

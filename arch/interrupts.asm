@@ -4,15 +4,22 @@
 section .text
 global isr0_wrapper
 global isr1_wrapper
+global isr2_wrapper
 global isr3_wrapper
 global isr4_wrapper
 global isr5_wrapper
+global isr6_wrapper
+global isr7_wrapper
 global isr8_wrapper
 global isr9_wrapper
 global isr10_wrapper
 global isr11_wrapper
 global isr12_wrapper
+global isr13_wrapper
 global isr14_wrapper
+global isr15_wrapper
+global isr_spurious_lapic_wrapper
+global isr_default_wrapper
 global isr128_wrapper
 global isr_sched_ipi_wrapper
 global isr_tlb_ipi_wrapper
@@ -27,6 +34,10 @@ extern serial_com1_handler
 extern serial_com2_handler
 extern ac97_handler
 extern pci_irq_handler
+extern spurious_irq7_handler
+extern spurious_irq15_handler
+extern lapic_spurious_handler
+extern unhandled_interrupt_handler
 
 ; Helper to send EOI (End of Interrupt) to PIC
 send_eoi:
@@ -109,6 +120,9 @@ isr0_wrapper:
 isr1_wrapper:
     ISR_NOERRCODE keyboard_handler, 33
 
+isr2_wrapper:
+    ISR_NOERRCODE pci_irq_handler, 34
+
 isr3_wrapper:
     ISR_NOERRCODE serial_com2_handler, 35
 
@@ -117,6 +131,15 @@ isr4_wrapper:
 
 isr5_wrapper:
     ISR_NOERRCODE pci_irq_handler, 37
+
+isr6_wrapper:
+    ISR_NOERRCODE pci_irq_handler, 38
+
+isr7_wrapper:
+    ISR_NOERRCODE spurious_irq7_handler, 39
+
+isr8_wrapper:
+    ISR_NOERRCODE pci_irq_handler, 40
 
 isr9_wrapper:
     ISR_NOERRCODE pci_irq_handler, 41
@@ -127,9 +150,23 @@ isr10_wrapper:
 isr11_wrapper:
     ISR_NOERRCODE pci_irq_handler, 43
 
-
 isr12_wrapper:
     ISR_NOERRCODE mouse_handler, 44
+
+isr13_wrapper:
+    ISR_NOERRCODE pci_irq_handler, 45
+
+isr14_wrapper:
+    ISR_NOERRCODE pci_irq_handler, 46
+
+isr15_wrapper:
+    ISR_NOERRCODE spurious_irq15_handler, 47
+
+isr_spurious_lapic_wrapper:
+    ISR_NOERRCODE lapic_spurious_handler, 255
+
+isr_default_wrapper:
+    ISR_NOERRCODE unhandled_interrupt_handler, 254
 
 isr_sched_ipi_wrapper:
     ISR_NOERRCODE sched_ipi_handler, 65

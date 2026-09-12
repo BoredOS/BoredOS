@@ -5,15 +5,18 @@
 #define LAPIC_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 // IPI vector used for scheduling on APs
 #define IPI_SCHED_VECTOR 0x41
 
-// Initialize LAPIC access (maps registers via HHDM)
+bool try_enable_x2apic(void);
+
 void lapic_init(void);
 
-// Enable LAPIC (set SVR bit 8)
 void lapic_enable(void);
+
+void lapic_timer_start(void);
 
 // Send End-of-Interrupt to the local APIC
 void lapic_eoi(void);
