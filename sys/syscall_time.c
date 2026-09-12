@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 
 struct timespec {
@@ -27,40 +26,122 @@ static inline uint64_t rdtsc_time(void) {
   return ((uint64_t)high << 32) | low;
 }
 
-static uint64_t get_time_ns_highres(void) {
+uint64_t get_time_ns_highres(void) {
   extern volatile uint64_t kernel_ticks;
-  static uint64_t last_tick = 0;
-  static uint64_t last_tsc = 0;
+  extern volatile uint64_t last_tick_tsc;
   static uint64_t cycles_per_ms = 3000000;
+  static uint64_t last_calib_tick = 0;
+  static uint64_t last_calib_tsc = 0;
 
   uint64_t cur_tick = kernel_ticks;
   uint64_t cur_tsc = rdtsc_time();
 
-  if (cur_tick != last_tick) {
-    uint64_t dt = cur_tick - last_tick;
-    uint64_t dc = cur_tsc - last_tsc;
-    if (dt > 0 && dc > 0 && dt < 100) {
-      cycles_per_ms = dc / (dt * 10);
-      if (cycles_per_ms < 100000) cycles_per_ms = 100000;
+  if (last_calib_tsc == 0) {
+    last_calib_tick = cur_tick;
+    last_calib_tsc = cur_tsc;
+  } else if (cur_tick - last_calib_tick >= 100) {
+    uint64_t dt = cur_tick - last_calib_tick;
+    uint64_t dc = (cur_tsc > last_calib_tsc) ? (cur_tsc - last_calib_tsc) : 0;
+    if (dt > 0 && dc > 0) {
+      uint64_t cpm = dc / dt;
+      if (cpm >= 100000 && cpm <= 100000000ULL) {
+        cycles_per_ms = cpm;
+      }
     }
-    last_tick = cur_tick;
-    last_tsc = cur_tsc;
+    last_calib_tick = cur_tick;
+    last_calib_tsc = cur_tsc;
   }
 
-  uint64_t ms = cur_tick * 10ULL;
-  uint64_t sub_ms_cycles = (cur_tsc >= last_tsc) ? (cur_tsc - last_tsc) : 0;
-  uint64_t sub_ms_ns = (sub_ms_cycles * 1000000ULL) / (cycles_per_ms ? cycles_per_ms : 3000000ULL);
-  if (sub_ms_ns >= 10000000ULL) sub_ms_ns = 9999999ULL;
+  uint64_t tick_ref = last_tick_tsc;
+  uint64_t delta_tsc = (cur_tsc > tick_ref && tick_ref > 0) ? (cur_tsc - tick_ref) : 0;
+  uint64_t sub_ms_ns = (delta_tsc * 1000000ULL) / (cycles_per_ms ? cycles_per_ms : 3000000ULL);
+  if (sub_ms_ns >= 1000000ULL) {
+    sub_ms_ns = 999999ULL;
+  }
 
-  return (ms * 1000000ULL) + sub_ms_ns;
+  return (cur_tick * 1000000ULL) + sub_ms_ns;
+}
+
+int64_t g_realtime_offset_sec = 0;
+
+static uint64_t rtc_to_epoch_sec(int year, int month, int day, int hour, int minute, int second) {
+  static const int days_before_month[12] = {
+    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+  };
+  if (year < 1970 || month < 1 || month > 12 || day < 1) return 0;
+  int y = year;
+  int m = month - 1;
+  int leap_years = (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400;
+  int is_leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+  uint64_t days = (uint64_t)(y - 1970) * 365 + leap_years + days_before_month[m] + (day - 1);
+  if (is_leap && m >= 2) days++;
+  return days * 86400ULL + (uint64_t)hour * 3600ULL + (uint64_t)minute * 60ULL + (uint64_t)second;
+}
+
+static void epoch_sec_to_datetime(uint64_t sec, int *year, int *month, int *day, int *hour, int *minute, int *second) {
+  *second = sec % 60; sec /= 60;
+  *minute = sec % 60; sec /= 60;
+  *hour = sec % 24; sec /= 24;
+  int days = (int)sec;
+  int y = 1970;
+  while (1) {
+    int leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+    int days_in_year = leap ? 366 : 365;
+    if (days < days_in_year) break;
+    days -= days_in_year;
+    y++;
+  }
+  *year = y;
+  int leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+  static const int days_in_months[2][12] = {
+    { 31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 },
+    { 31, 29, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31 }
+  };
+  int m = 0;
+  while (m < 12 && days >= days_in_months[leap][m]) {
+    days -= days_in_months[leap][m];
+    m++;
+  }
+  *month = m + 1;
+  *day = days + 1;
+}
+
+void time_init(void) {
+  extern void rtc_get_datetime(int *year, int *month, int *day, int *hour, int *minute, int *second);
+  int y = 0, m = 0, d = 0, h = 0, min = 0, s = 0;
+  rtc_get_datetime(&y, &m, &d, &h, &min, &s);
+  uint64_t rtc_sec = rtc_to_epoch_sec(y, m, d, h, min, s);
+  uint64_t uptime_ns = get_time_ns_highres();
+  g_realtime_offset_sec = (int64_t)rtc_sec - (int64_t)(uptime_ns / 1000000000ULL);
 }
 
 uint64_t handle_sys_clock_gettime(const syscall_args_t *args) {
+  int clock_id = (int)args->arg1;
   struct timespec *tp = (struct timespec *)args->arg2;
   if (!is_valid_user_ptr(tp, sizeof(struct timespec))) return (uint64_t)-14; /* EFAULT */
   uint64_t ns = get_time_ns_highres();
-  tp->tv_sec = (int64_t)(ns / 1000000000ULL);
+  if (clock_id == 0 /* CLOCK_REALTIME */ || clock_id == 5 /* CLOCK_REALTIME_COARSE */) {
+    tp->tv_sec = (int64_t)(ns / 1000000000ULL) + g_realtime_offset_sec;
+  } else {
+    tp->tv_sec = (int64_t)(ns / 1000000000ULL);
+  }
   tp->tv_nsec = (int64_t)(ns % 1000000000ULL);
+  return 0;
+}
+
+uint64_t handle_sys_clock_settime(const syscall_args_t *args) {
+  int clock_id = (int)args->arg1;
+  const struct timespec *tp = (const struct timespec *)args->arg2;
+  if (!is_valid_user_ptr(tp, sizeof(struct timespec))) return (uint64_t)-14;
+  if (clock_id != 0 /* CLOCK_REALTIME */) return (uint64_t)-22; /* EINVAL */
+
+  uint64_t ns = get_time_ns_highres();
+  g_realtime_offset_sec = tp->tv_sec - (int64_t)(ns / 1000000000ULL);
+
+  extern void rtc_set_datetime(int year, int month, int day, int hour, int minute, int second);
+  int y, m, d, h, min, s;
+  epoch_sec_to_datetime((uint64_t)tp->tv_sec, &y, &m, &d, &h, &min, &s);
+  rtc_set_datetime(y, m, d, h, min, s);
   return 0;
 }
 
@@ -77,10 +158,21 @@ uint64_t handle_sys_gettimeofday(const syscall_args_t *args) {
   struct timeval *tv = (struct timeval *)args->arg1;
   if (is_valid_user_ptr(tv, sizeof(struct timeval))) {
     uint64_t ns = get_time_ns_highres();
-    tv->tv_sec = (int64_t)(ns / 1000000000ULL);
+    tv->tv_sec = (int64_t)(ns / 1000000000ULL) + g_realtime_offset_sec;
     tv->tv_usec = (int64_t)((ns % 1000000000ULL) / 1000ULL);
   }
   return 0;
+}
+
+uint64_t handle_sys_settimeofday(const syscall_args_t *args) {
+  const struct timeval *tv = (const struct timeval *)args->arg1;
+  if (!tv) return 0;
+  if (!is_valid_user_ptr(tv, sizeof(struct timeval))) return (uint64_t)-14;
+  struct timespec ts = { .tv_sec = tv->tv_sec, .tv_nsec = tv->tv_usec * 1000 };
+  syscall_args_t sargs = *args;
+  sargs.arg1 = 0; // CLOCK_REALTIME
+  sargs.arg2 = (uint64_t)&ts;
+  return handle_sys_clock_settime(&sargs);
 }
 
 uint64_t handle_sys_times(const syscall_args_t *args) {
@@ -231,12 +323,23 @@ uint64_t handle_sys_futex(const syscall_args_t *args) {
   int op = (int)args->arg2;
   uint32_t val = (uint32_t)args->arg3;
 
+  const struct timespec *timeout = (const struct timespec *)args->arg4;
+
   if (!uaddr || !is_valid_user_ptr(uaddr, sizeof(uint32_t)))
     return (uint64_t)-EFAULT;
 
   int cmd = op & 0x7F;
 
   if (cmd == 0 || cmd == 9) { // FUTEX_WAIT or FUTEX_WAIT_BITSET
+    if (timeout && is_valid_user_ptr(timeout, sizeof(struct timespec))) {
+      process_t *proc = process_get_current();
+      if (proc) {
+        uint64_t ms = (uint64_t)timeout->tv_sec * 1000ULL + (uint64_t)timeout->tv_nsec / 1000000ULL;
+        if (ms == 0 && timeout->tv_nsec > 0) ms = 1;
+        extern uint32_t get_ticks(void);
+        proc->sleep_until = get_ticks() + (uint32_t)ms;
+      }
+    }
     int rc = kernel_futex_wait(uaddr, val);
     return (uint64_t)rc;
   }

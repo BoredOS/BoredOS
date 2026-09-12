@@ -5,6 +5,8 @@
 #define SYSCALL_H
 
 #include <stdint.h>
+#include <stdbool.h>
+#include <stddef.h>
 
 typedef struct registers_t registers_t;
 // MSRs used for syscalls in x86_64
@@ -21,6 +23,8 @@ typedef enum {
     SYS_OPEN = 2,
     SYS_CLOSE = 3,
     SYS_STAT = 4,
+    SYS_FSTAT = 5,
+    SYS_LSTAT = 6,
     SYS_POLL = 7,
     SYS_LSEEK = 8,
     SYS_MMAP = 9,
@@ -34,6 +38,7 @@ typedef enum {
     SYS_SCHED_YIELD = 24,
     SYS_DUP = 32,
     SYS_DUP2 = 33,
+    SYS_PAUSE = 34,
     SYS_NANOSLEEP = 35,
     SYS_GETPID = 39,
     SYS_SOCKET = 41,
@@ -64,11 +69,24 @@ typedef enum {
     SYS_UNLINK = 87,
     SYS_GETTIMEOFDAY = 96,
     SYS_TIMES = 100,
+    SYS_GETUID = 102,
+    SYS_GETGID = 104,
+    SYS_SETUID = 105,
+    SYS_SETGID = 106,
+    SYS_GETEUID = 107,
+    SYS_GETEGID = 108,
+    SYS_SETREUID = 113,
+    SYS_SETREGID = 114,
+    SYS_SETRESUID = 117,
+    SYS_GETRESUID = 118,
+    SYS_SETRESGID = 119,
+    SYS_GETRESGID = 120,
     SYS_STATFS = 137,
     SYS_FSTATFS = 138,
     SYS_PRCTL = 157,
     SYS_ARCH_PRCTL = 158,
     SYS_SYNC = 162,
+    SYS_SETTIMEOFDAY = 164,
     SYS_MOUNT = 165,
     SYS_UMOUNT2 = 166,
     SYS_REBOOT = 169,
@@ -76,11 +94,13 @@ typedef enum {
     SYS_FUTEX = 202,
     SYS_GETDENTS64 = 217,
     SYS_SET_TID_ADDRESS = 218,
+    SYS_CLOCK_SETTIME = 227,
     SYS_CLOCK_GETTIME = 228,
     SYS_CLOCK_GETRES = 229,
     SYS_EXIT_GROUP = 231,
     SYS_FACCESSAT = 269,
-    SYS_SYNCFS = 306
+    SYS_SYNCFS = 306,
+    SYS_SPAWN = 317
 } syscall_t;
 
 // Futex operations (mlibc FutexWait/FutexWake)
@@ -92,5 +112,6 @@ uint64_t syscall_handler_c(registers_t *regs);
 int kernel_futex_wait(uint32_t *uaddr, uint32_t expected);
 int kernel_futex_wake(uint32_t *uaddr, int count);
 int signal_send_to_pid(int pid, int sig);
+bool is_valid_user_ptr(const void *ptr, size_t size);
 
 #endif // SYSCALL_H

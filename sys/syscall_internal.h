@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #ifndef SYSCALL_INTERNAL_H
 #define SYSCALL_INTERNAL_H
 
@@ -130,6 +129,8 @@ uint64_t handle_sys_write(const syscall_args_t *args);
 uint64_t handle_sys_open(const syscall_args_t *args);
 uint64_t handle_sys_close(const syscall_args_t *args);
 uint64_t handle_sys_stat(const syscall_args_t *args);
+uint64_t handle_sys_fstat(const syscall_args_t *args);
+uint64_t handle_sys_lstat(const syscall_args_t *args);
 uint64_t handle_sys_lseek(const syscall_args_t *args);
 uint64_t handle_sys_poll(const syscall_args_t *args);
 uint64_t handle_sys_ioctl(const syscall_args_t *args);
@@ -152,10 +153,12 @@ uint64_t handle_sys_syncfs(const syscall_args_t *args);
 
 // Process / Signal Syscall Handlers (syscall_proc.c)
 uint64_t handle_sys_fork(const syscall_args_t *args);
+uint64_t handle_sys_spawn(const syscall_args_t *args);
 uint64_t sys_cmd_clone_process(const syscall_args_t *args);
 uint64_t handle_sys_execve(const syscall_args_t *args);
 uint64_t handle_sys_wait4(const syscall_args_t *args);
 uint64_t handle_sys_exit_group(const syscall_args_t *args);
+uint64_t handle_sys_pause(const syscall_args_t *args);
 uint64_t handle_sys_kill(const syscall_args_t *args);
 uint64_t handle_sys_rt_sigaction(const syscall_args_t *args);
 uint64_t handle_sys_rt_sigprocmask(const syscall_args_t *args);
@@ -166,6 +169,18 @@ uint64_t handle_sys_set_tid_address(const syscall_args_t *args);
 uint64_t handle_sys_sched_yield(const syscall_args_t *args);
 uint64_t handle_sys_arch_prctl(const syscall_args_t *args);
 uint64_t handle_sys_prctl(const syscall_args_t *args);
+uint64_t handle_sys_getuid(const syscall_args_t *args);
+uint64_t handle_sys_getgid(const syscall_args_t *args);
+uint64_t handle_sys_setuid(const syscall_args_t *args);
+uint64_t handle_sys_setgid(const syscall_args_t *args);
+uint64_t handle_sys_geteuid(const syscall_args_t *args);
+uint64_t handle_sys_getegid(const syscall_args_t *args);
+uint64_t handle_sys_setreuid(const syscall_args_t *args);
+uint64_t handle_sys_setregid(const syscall_args_t *args);
+uint64_t handle_sys_setresuid(const syscall_args_t *args);
+uint64_t handle_sys_getresuid(const syscall_args_t *args);
+uint64_t handle_sys_setresgid(const syscall_args_t *args);
+uint64_t handle_sys_getresgid(const syscall_args_t *args);
 
 // Memory Syscall Handlers (syscall_mem.c)
 uint64_t handle_sys_mmap(const syscall_args_t *args);
@@ -190,12 +205,16 @@ uint64_t handle_sys_setsockopt(const syscall_args_t *args);
 uint64_t handle_sys_getsockopt(const syscall_args_t *args);
 
 // Time / Futex Syscall Handlers (syscall_time.c)
+void time_init(void);
 uint64_t handle_sys_nanosleep(const syscall_args_t *args);
 uint64_t handle_sys_gettimeofday(const syscall_args_t *args);
+uint64_t handle_sys_settimeofday(const syscall_args_t *args);
 uint64_t handle_sys_times(const syscall_args_t *args);
 uint64_t handle_sys_clock_gettime(const syscall_args_t *args);
+uint64_t handle_sys_clock_settime(const syscall_args_t *args);
 uint64_t handle_sys_clock_getres(const syscall_args_t *args);
 uint64_t handle_sys_futex(const syscall_args_t *args);
+uint64_t get_time_ns_highres(void);
 
 // System / Device Syscall Handlers (syscall_system.c)
 uint64_t handle_sys_reboot(const syscall_args_t *args);

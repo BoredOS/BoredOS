@@ -16,6 +16,9 @@
 #define PROC_STATE_BLOCKED 1
 #define PROC_STATE_ZOMBIE  2
 
+#define USER_STACK_TOP       0x00007FFFFFFFF000ULL
+#define USER_STACK_INIT_SIZE (2UL * 1024 * 1024)
+
 #define CPU_AFFINITY_ANY   0xFFFFFFFF
 
 #define PROC_FD_KIND_NONE 0
@@ -146,6 +149,9 @@ typedef struct {
     size_t size;
 } elf_segment_info_t;
 
+typedef uint32_t uid_t;
+typedef uint32_t gid_t;
+
 typedef struct process {
     uint32_t pid;
     uint32_t refcount;
@@ -158,6 +164,13 @@ typedef struct process {
     uint64_t kernel_stack; 
     bool is_user;
     int state;
+
+    uid_t uid;
+    uid_t euid;
+    uid_t suid;
+    gid_t gid;
+    gid_t egid;
+    gid_t sgid;
     
     uint64_t heap_start;
     uint64_t heap_end;
@@ -248,9 +261,14 @@ typedef struct {
     bool is_idle;
 } ProcessInfo;
 
+#define SPAWN_FLAG_TERMINAL    0x1
+#define SPAWN_FLAG_INHERIT_TTY 0x2
+#define SPAWN_FLAG_TTY_ID      0x4
+#define SPAWN_FLAG_BACKGROUND  0x8
+
 void process_init(void);
 process_t* process_create(void (*entry_point)(void), bool is_user);
-process_t* process_create_elf(const char* filepath, const char* args_str, bool terminal_proc, int tty_id);
+process_t* process_create_elf(const char* filepath, const char* args_str, uint64_t flags, int tty_id);
 process_t* process_create_thread(registers_t *parent_regs, uint64_t entry_point, uint64_t user_sp, uint64_t flags);
 int process_exec_replace_current(registers_t *regs, const char* filepath, const char* args_str);
 void process_close_fd_inner(process_t *proc, int fd);

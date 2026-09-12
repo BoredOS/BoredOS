@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 
 struct user_iovec {
@@ -120,12 +119,15 @@ static uint64_t fs_cmd_unix_socket_bind(const syscall_args_t *args) {
     extern int unix_socket_bind(void *sock, const char *path);
     return unix_socket_bind(sock, path);
   } else if (sock->domain == AF_INET6) {
-    if (addrlen < 24) return -1;
+    if (addrlen < 24) return -EINVAL;
     uint16_t sin6_port = *(const uint16_t *)((const char *)addr + 2);
     uint16_t port = ((sin6_port & 0xFF) << 8) | ((sin6_port >> 8) & 0xFF);
-    return network_socket_bind_v6(sock, (const ipv6_address_t *)((const char *)addr + 8), port);
+    int bind_err = network_socket_bind_v6(sock, (const ipv6_address_t *)((const char *)addr + 8), port);
+    if (bind_err < 0) return bind_err;
+    sock->is_bound = 1;
+    return 0;
   } else {
-    if (addrlen < 8) return -1;
+    if (addrlen < 8) return -EINVAL;
     uint16_t sin_port = *(const uint16_t *)((const char *)addr + 2);
     uint16_t port = ((sin_port & 0xFF) << 8) | ((sin_port >> 8) & 0xFF);
     uint32_t ip_val = *(const uint32_t *)((const char *)addr + 4);

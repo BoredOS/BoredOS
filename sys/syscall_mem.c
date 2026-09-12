@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 
 typedef struct vfs_page_cache_node {
@@ -121,7 +120,19 @@ uint64_t handle_sys_mmap(const syscall_args_t *args) {
       if (prot & PROT_EXEC)  mmu_prot |= MMU_PROT_EXEC;
       void *res = vmm_map(proc->vmm_space, addr, aligned_len, mmu_prot, 0, NULL, 0);
       if (!res) return (uint64_t)MAP_FAILED;
-      return (uint64_t)res;
+      uint64_t virt_res = (uint64_t)res;
+      if (flags & 0x08000 /* MAP_POPULATE */) {
+        for (uint64_t off = 0; off < aligned_len; off += 4096) {
+          page_t *p = pmm_alloc_page(PAGE_FLAG_ZERO);
+          if (p) {
+            mmu_map_page(proc->vmm_space->mmu_ctx, virt_res + off, pmm_page_to_paddr(p), mmu_prot);
+          } else {
+            vmm_unmap(proc->vmm_space, virt_res, aligned_len);
+            return (uint64_t)MAP_FAILED;
+          }
+        }
+      }
+      return virt_res;
     }
   }
 

@@ -1,9 +1,13 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 #include "fat32.h"
+#include "kutils.h"
+#undef RB_BLACK
+#undef RB_RED
+#undef RB_ROOT
+#include "ext4fs.h"
 
 int fs_alloc_fd_slot(process_t *proc, int start) {
   for (int i = start; i < MAX_PROCESS_FDS; i++) {
@@ -335,30 +339,6 @@ static uint64_t fs_cmd_delete(const syscall_args_t *args) {
   if (vfs_delete(normalized))
     return 0;
   return (uint64_t)-ENOENT;
-}
-
-static uint64_t fs_cmd_get_info(const syscall_args_t *args) {
-  process_t *proc = process_get_current();
-  const char *path = (const char *)args->arg2;
-  FAT32_FileInfo *u_info = (FAT32_FileInfo *)args->arg3;
-  if (!path || !is_valid_user_string(path, 1024) || !u_info || !is_valid_user_ptr(u_info, sizeof(FAT32_FileInfo)))
-    return (uint64_t)-EFAULT;
-
-  char normalized[VFS_MAX_PATH];
-  vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
-
-  vfs_dirent_t v_info;
-  int res = vfs_get_info(normalized, &v_info);
-  if (res == 0) {
-    memset(u_info, 0, sizeof(FAT32_FileInfo));
-    strncpy(u_info->name, v_info.name, sizeof(u_info->name) - 1);
-    u_info->size = v_info.size;
-    u_info->is_directory = v_info.is_directory;
-    u_info->start_cluster = v_info.start_cluster;
-    u_info->write_date = v_info.write_date;
-    u_info->write_time = v_info.write_time;
-  }
-  return (uint64_t)res;
 }
 
 static uint64_t fs_cmd_mkdir(const syscall_args_t *args) {
@@ -752,11 +732,218 @@ uint64_t handle_sys_close(const syscall_args_t *args) {
   return fs_cmd_close(&shifted);
 }
 
+struct stat_k {
+  uint64_t st_dev;
+  uint64_t st_ino;
+  uint64_t st_nlink;
+  uint32_t st_mode;
+  uint32_t st_uid;
+  uint32_t st_gid;
+  uint32_t __pad0;
+  uint64_t st_rdev;
+  int64_t  st_size;
+  int64_t  st_blksize;
+  int64_t  st_blocks;
+  struct {
+    int64_t tv_sec;
+    int64_t tv_nsec;
+  } st_atim;
+  struct {
+    int64_t tv_sec;
+    int64_t tv_nsec;
+  } st_mtim;
+  struct {
+    int64_t tv_sec;
+    int64_t tv_nsec;
+  } st_ctim;
+  int64_t __unused[3];
+};
+
+#ifndef S_IFMT
+#define S_IFMT   0170000
+#define S_IFSOCK 0140000
+#define S_IFLNK  0120000
+#define S_IFREG  0100000
+#define S_IFBLK  0060000
+#define S_IFDIR  0040000
+#define S_IFCHR  0020000
+#define S_IFIFO  0010000
+#endif
+
+extern int64_t g_realtime_offset_sec;
+
+static int64_t fat_datetime_to_unix(uint16_t date, uint16_t time) {
+  if (date == 0) {
+    extern uint64_t get_time_ns_highres(void);
+    return (int64_t)(get_time_ns_highres() / 1000000000ULL) + g_realtime_offset_sec;
+  }
+  int year = ((date >> 9) & 0x7F) + 1980;
+  int month = (date >> 5) & 0x0F;
+  int day = date & 0x1F;
+  int hour = (time >> 11) & 0x1F;
+  int minute = (time >> 5) & 0x3F;
+  int second = (time & 0x1F) * 2;
+  static const int days_before_month[12] = {
+    0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334
+  };
+  if (month < 1) month = 1;
+  if (month > 12) month = 12;
+  if (day < 1) day = 1;
+  int y = year;
+  int m = month - 1;
+  int leap_years = (y - 1969) / 4 - (y - 1901) / 100 + (y - 1601) / 400;
+  int is_leap = ((y % 4 == 0) && (y % 100 != 0)) || (y % 400 == 0);
+  uint64_t days = (uint64_t)(y - 1970) * 365 + leap_years + days_before_month[m] + (day - 1);
+  if (is_leap && m >= 2) days++;
+  return (int64_t)(days * 86400ULL + (uint64_t)hour * 3600ULL + (uint64_t)minute * 60ULL + (uint64_t)second);
+}
+
 uint64_t handle_sys_stat(const syscall_args_t *args) {
-  syscall_args_t shifted = *args;
-  shifted.arg2 = args->arg1; // path
-  shifted.arg3 = args->arg2; // info
-  return fs_cmd_get_info(&shifted);
+  const char *path = (const char *)args->arg1;
+  struct stat_k *st = (struct stat_k *)args->arg2;
+
+  if (!path || !is_valid_user_string(path, 1024) || !st || !is_valid_user_ptr(st, sizeof(struct stat_k)))
+    return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  char normalized[VFS_MAX_PATH];
+  vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
+
+  memset(st, 0, sizeof(struct stat_k));
+  st->st_blksize = 512;
+
+  bool is_dir = vfs_is_directory(normalized);
+  vfs_dirent_t v_info;
+  memset(&v_info, 0, sizeof(v_info));
+  int res = vfs_get_info(normalized, &v_info);
+
+  if (res != 0 && !is_dir) {
+    return (uint64_t)-ENOENT;
+  }
+
+  if (is_dir || v_info.is_directory) {
+    st->st_mode = S_IFDIR | 0755;
+    st->st_nlink = 2;
+    st->st_size = 4096;
+    st->st_blocks = 8;
+    st->st_ino = v_info.start_cluster ? v_info.start_cluster : 1;
+  } else if (strncmp(normalized, "/dev/", 5) == 0) {
+    if (k_strstr(normalized, "sd") || k_strstr(normalized, "hd") || k_strstr(normalized, "nvme") || k_strstr(normalized, "ram")) {
+      st->st_mode = S_IFBLK | 0660;
+    } else {
+      st->st_mode = S_IFCHR | 0666;
+    }
+    st->st_nlink = 1;
+    st->st_size = v_info.size;
+    st->st_blocks = (v_info.size + 511) / 512;
+    st->st_rdev = 0x0103;
+    st->st_ino = v_info.start_cluster ? v_info.start_cluster : 2;
+  } else {
+    st->st_mode = S_IFREG | 0644;
+    st->st_nlink = 1;
+    st->st_size = (int64_t)v_info.size;
+    st->st_blocks = (int64_t)((v_info.size + 511) / 512);
+    st->st_ino = v_info.start_cluster ? v_info.start_cluster : 3;
+  }
+
+  int64_t sec = fat_datetime_to_unix(v_info.write_date, v_info.write_time);
+  st->st_atim.tv_sec = sec;
+  st->st_mtim.tv_sec = sec;
+  st->st_ctim.tv_sec = sec;
+  return 0;
+}
+
+uint64_t handle_sys_fstat(const syscall_args_t *args) {
+  int fd = (int)args->arg1;
+  struct stat_k *st = (struct stat_k *)args->arg2;
+
+  if (!st || !is_valid_user_ptr(st, sizeof(struct stat_k)))
+    return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  if (!proc || fd < 0 || fd >= MAX_PROCESS_FDS || !proc->fds[fd])
+    return (uint64_t)-EBADF;
+
+  memset(st, 0, sizeof(struct stat_k));
+  st->st_blksize = 512;
+
+  extern uint64_t get_time_ns_highres(void);
+  int64_t now_sec = (int64_t)(get_time_ns_highres() / 1000000000ULL) + g_realtime_offset_sec;
+  st->st_atim.tv_sec = now_sec;
+  st->st_mtim.tv_sec = now_sec;
+  st->st_ctim.tv_sec = now_sec;
+
+  if (proc->fd_kind[fd] == PROC_FD_KIND_FILE) {
+    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+    if (ref && ref->file) {
+      vfs_file_t *file = ref->file;
+      if (file->is_device) {
+        if (file->device_type == DEVICE_TYPE_BLOCK) {
+          st->st_mode = S_IFBLK | 0660;
+        } else {
+          st->st_mode = S_IFCHR | 0666;
+        }
+        st->st_nlink = 1;
+        st->st_size = 0;
+        st->st_blocks = 0;
+        st->st_rdev = 0x0103;
+        st->st_ino = 1;
+      } else {
+        vfs_dirent_t v_info;
+        memset(&v_info, 0, sizeof(v_info));
+        if (file->path[0] && vfs_get_info(file->path, &v_info) == 0) {
+          if (v_info.is_directory || vfs_is_directory(file->path)) {
+            st->st_mode = S_IFDIR | 0755;
+            st->st_nlink = 2;
+            st->st_size = 4096;
+          } else {
+            st->st_mode = S_IFREG | 0644;
+            st->st_nlink = 1;
+            uint32_t sz = (file->mount && file->mount->ops && file->mount->ops->get_size) ?
+                          file->mount->ops->get_size(file->fs_handle) : v_info.size;
+            st->st_size = (int64_t)sz;
+          }
+          st->st_ino = v_info.start_cluster ? v_info.start_cluster : 1;
+          int64_t msec = fat_datetime_to_unix(v_info.write_date, v_info.write_time);
+          st->st_atim.tv_sec = msec;
+          st->st_mtim.tv_sec = msec;
+          st->st_ctim.tv_sec = msec;
+        } else {
+          st->st_mode = S_IFREG | 0644;
+          st->st_nlink = 1;
+          st->st_size = (file->mount && file->mount->ops && file->mount->ops->get_size) ?
+                        (int64_t)file->mount->ops->get_size(file->fs_handle) : 0;
+          st->st_ino = 1;
+        }
+        st->st_blocks = (st->st_size + 511) / 512;
+      }
+    }
+  } else if (proc->fd_kind[fd] == PROC_FD_KIND_PIPE_READ || proc->fd_kind[fd] == PROC_FD_KIND_PIPE_WRITE) {
+    process_fd_pipe_t *pipe = (process_fd_pipe_t *)proc->fds[fd];
+    st->st_mode = S_IFIFO | 0600;
+    st->st_nlink = 1;
+    st->st_size = pipe ? (int64_t)pipe->count : 0;
+    st->st_blocks = 0;
+    st->st_ino = (uint64_t)(uintptr_t)pipe;
+  } else if (proc->fd_kind[fd] == PROC_FD_KIND_SOCKET) {
+    st->st_mode = S_IFSOCK | 0666;
+    st->st_nlink = 1;
+    st->st_size = 0;
+    st->st_blocks = 0;
+    st->st_ino = (uint64_t)(uintptr_t)proc->fds[fd];
+  } else if (proc->fd_kind[fd] == PROC_FD_KIND_TTY) {
+    st->st_mode = S_IFCHR | 0660;
+    st->st_nlink = 1;
+    st->st_size = 0;
+    st->st_blocks = 0;
+    st->st_rdev = 0x0500;
+    st->st_ino = (uint64_t)proc->tty_id;
+  }
+  return 0;
+}
+
+uint64_t handle_sys_lstat(const syscall_args_t *args) {
+  return handle_sys_stat(args);
 }
 
 uint64_t handle_sys_lseek(const syscall_args_t *args) {
@@ -772,17 +959,35 @@ uint64_t handle_sys_poll(const syscall_args_t *args) {
   shifted.arg2 = args->arg1; // fds
   shifted.arg3 = args->arg2; // nfds
   shifted.arg4 = args->arg3; // timeout
+  int timeout = (int)args->arg3;
+
   uint64_t res = fs_cmd_poll(&shifted);
   while (res == (uint64_t)-2) {
+    asm volatile("int $0x20");
     process_t *proc = process_get_current();
-    if (proc && proc->state == PROC_STATE_BLOCKED) {
-      return (uint64_t)-2;
+    if (proc) {
+      if (proc->kill_pending) {
+        poll_cleanup(proc);
+        proc->sleep_until = 0;
+        return (uint64_t)-EINTR;
+      }
+      if (timeout > 0 && proc->sleep_until > 0 && get_ticks() >= proc->sleep_until) {
+        poll_cleanup(proc);
+        proc->sleep_until = 0;
+        return 0;
+      }
     }
     shifted.arg4 = 0;
     res = fs_cmd_poll(&shifted);
+    if (res == (uint64_t)-2) {
+      if (proc) {
+        proc->state = PROC_STATE_BLOCKED;
+      }
+    }
   }
   process_t *proc = process_get_current();
   if (proc) {
+    proc->sleep_until = 0;
     poll_cleanup(proc);
   }
   return res;
@@ -998,6 +1203,7 @@ uint64_t handle_sys_mount(const syscall_args_t *args) {
   process_t *proc = process_get_current();
   const char *source = (const char *)args->arg1;
   const char *target = (const char *)args->arg2;
+  const char *fstype = (const char *)args->arg3;
 
   if (!target || !is_valid_user_string(target, 1024))
     return (uint64_t)-EFAULT;
@@ -1005,13 +1211,90 @@ uint64_t handle_sys_mount(const syscall_args_t *args) {
   char norm_target[VFS_MAX_PATH];
   vfs_normalize_path(proc ? proc->cwd : "/", target, norm_target);
 
-  if (source && str_starts_with(source, "/dev/")) {
-    const char *dev = source + 5;
-    extern void vfs_automount_partition(const char *devname);
-    vfs_automount_partition(dev);
-    return 0;
+  char fs_buf[64] = {0};
+  if (fstype && is_valid_user_string(fstype, sizeof(fs_buf))) {
+    strncpy(fs_buf, fstype, sizeof(fs_buf) - 1);
   }
-  return 0;
+
+  if (fs_buf[0]) {
+    if (strcmp(fs_buf, "tmpfs") == 0) {
+      extern struct vfs_fs_ops *tmpfs_get_ops(void);
+      return vfs_mount(norm_target, (source && is_valid_user_string(source, 64)) ? source : "tmpfs", "tmpfs", tmpfs_get_ops(), NULL) ? 0 : (uint64_t)-EINVAL;
+    }
+    if (strcmp(fs_buf, "procfs") == 0 || strcmp(fs_buf, "proc") == 0) {
+      extern struct vfs_fs_ops *procfs_get_ops(void);
+      return vfs_mount(norm_target, (source && is_valid_user_string(source, 64)) ? source : "procfs", "procfs", procfs_get_ops(), NULL) ? 0 : (uint64_t)-EINVAL;
+    }
+    if (strcmp(fs_buf, "sysfs") == 0 || strcmp(fs_buf, "sys") == 0) {
+      extern struct vfs_fs_ops *sysfs_get_ops(void);
+      return vfs_mount(norm_target, (source && is_valid_user_string(source, 64)) ? source : "sysfs", "sysfs", sysfs_get_ops(), NULL) ? 0 : (uint64_t)-EINVAL;
+    }
+  }
+
+  if (source && is_valid_user_string(source, 1024) && str_starts_with(source, "/dev/")) {
+    const char *dev = source + 5;
+    Disk *d = disk_get_by_name(dev);
+    if (!d)
+      return (uint64_t)-ENOENT;
+
+    bool want_ext4 = (strcmp(fs_buf, "ext4") == 0);
+    bool want_fat = (strcmp(fs_buf, "fat32") == 0 || strcmp(fs_buf, "vfat") == 0 || strcmp(fs_buf, "fat") == 0);
+
+    if (want_ext4) {
+      void *vol = ext4fs_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "ext4", ext4fs_get_ops(), vol)) {
+        d->is_fat32 = false;
+        return 0;
+      }
+      return (uint64_t)-EINVAL;
+    }
+
+    if (want_fat) {
+      void *vol = fat32_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "fat32", fat32_get_realfs_ops(), vol)) {
+        d->is_fat32 = true;
+        return 0;
+      }
+      return (uint64_t)-EINVAL;
+    }
+
+    uint8_t sb_buf[512] __attribute__((aligned(512)));
+    bool is_ext4 = false;
+    if (d->read_sector(d, 2, sb_buf) == 0) {
+      uint16_t magic = *(uint16_t *)(sb_buf + 56);
+      if (magic == 0xEF53) {
+        is_ext4 = true;
+      }
+    }
+
+    if (is_ext4) {
+      void *vol = ext4fs_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "ext4", ext4fs_get_ops(), vol)) {
+        d->is_fat32 = false;
+        return 0;
+      }
+      vol = fat32_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "fat32", fat32_get_realfs_ops(), vol)) {
+        d->is_fat32 = true;
+        return 0;
+      }
+    } else {
+      void *vol = fat32_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "fat32", fat32_get_realfs_ops(), vol)) {
+        d->is_fat32 = true;
+        return 0;
+      }
+      vol = ext4fs_mount_volume(d);
+      if (vol && vfs_mount(norm_target, dev, "ext4", ext4fs_get_ops(), vol)) {
+        d->is_fat32 = false;
+        return 0;
+      }
+    }
+
+    return (uint64_t)-EINVAL;
+  }
+
+  return (uint64_t)-EINVAL;
 }
 
 uint64_t handle_sys_umount2(const syscall_args_t *args) {
@@ -1032,7 +1315,20 @@ uint64_t handle_sys_sync(const syscall_args_t *args) {
 }
 
 uint64_t handle_sys_syncfs(const syscall_args_t *args) {
-  (void)args;
+  process_t *proc = process_get_current();
+  int fd = (int)args->arg1;
+  if (fd < 0 || fd >= MAX_PROCESS_FDS || !proc || !proc->fds[fd])
+    return (uint64_t)-EBADF;
+
+  if (proc->fd_kind[fd] == PROC_FD_KIND_FILE) {
+    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+    vfs_file_t *vf = ref ? (vfs_file_t *)ref->file : NULL;
+    if (vf && vf->mount && vf->mount->ops && vf->mount->ops->sync_fs) {
+      vf->mount->ops->sync_fs(vf->mount->fs_private);
+      return 0;
+    }
+  }
+
   vfs_sync_all();
   return 0;
 }

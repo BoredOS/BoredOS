@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 
 extern void serial_write(const char *str);
@@ -94,6 +93,8 @@ static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [SYS_OPEN] = handle_sys_open,
     [SYS_CLOSE] = handle_sys_close,
     [SYS_STAT] = handle_sys_stat,
+    [SYS_FSTAT] = handle_sys_fstat,
+    [SYS_LSTAT] = handle_sys_lstat,
     [SYS_POLL] = handle_sys_poll,
     [SYS_LSEEK] = handle_sys_lseek,
     [SYS_MMAP] = handle_sys_mmap,
@@ -107,6 +108,7 @@ static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [SYS_SCHED_YIELD] = handle_sys_sched_yield,
     [SYS_DUP] = handle_sys_dup,
     [SYS_DUP2] = handle_sys_dup2,
+    [SYS_PAUSE] = handle_sys_pause,
     [SYS_NANOSLEEP] = handle_sys_nanosleep,
     [SYS_GETPID] = sys_cmd_get_pid,
     [SYS_SOCKET] = handle_sys_socket,
@@ -136,11 +138,24 @@ static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [SYS_UNLINK] = handle_sys_unlink,
     [SYS_GETTIMEOFDAY] = handle_sys_gettimeofday,
     [SYS_TIMES] = handle_sys_times,
+    [SYS_GETUID] = handle_sys_getuid,
+    [SYS_GETGID] = handle_sys_getgid,
+    [SYS_SETUID] = handle_sys_setuid,
+    [SYS_SETGID] = handle_sys_setgid,
+    [SYS_GETEUID] = handle_sys_geteuid,
+    [SYS_GETEGID] = handle_sys_getegid,
+    [SYS_SETREUID] = handle_sys_setreuid,
+    [SYS_SETREGID] = handle_sys_setregid,
+    [SYS_SETRESUID] = handle_sys_setresuid,
+    [SYS_GETRESUID] = handle_sys_getresuid,
+    [SYS_SETRESGID] = handle_sys_setresgid,
+    [SYS_GETRESGID] = handle_sys_getresgid,
     [SYS_STATFS] = handle_sys_statfs,
     [SYS_FSTATFS] = handle_sys_fstatfs,
     [SYS_PRCTL] = handle_sys_prctl,
     [SYS_ARCH_PRCTL] = handle_sys_arch_prctl,
     [SYS_SYNC] = handle_sys_sync,
+    [SYS_SETTIMEOFDAY] = handle_sys_settimeofday,
     [SYS_MOUNT] = handle_sys_mount,
     [SYS_UMOUNT2] = handle_sys_umount2,
     [SYS_REBOOT] = handle_sys_reboot,
@@ -148,11 +163,13 @@ static const syscall_handler_fn syscall_table[SYSCALL_TABLE_SIZE] = {
     [SYS_FUTEX] = handle_sys_futex,
     [SYS_GETDENTS64] = handle_sys_getdents64,
     [SYS_SET_TID_ADDRESS] = handle_sys_set_tid_address,
+    [SYS_CLOCK_SETTIME] = handle_sys_clock_settime,
     [SYS_CLOCK_GETTIME] = handle_sys_clock_gettime,
     [SYS_CLOCK_GETRES] = handle_sys_clock_getres,
     [SYS_EXIT_GROUP] = handle_sys_exit_group,
     [SYS_FACCESSAT] = handle_sys_faccessat,
     [SYS_SYNCFS] = handle_sys_syncfs,
+    [SYS_SPAWN] = handle_sys_spawn,
 };
 
 static uint64_t syscall_handler_inner(registers_t *regs) {
@@ -175,8 +192,7 @@ static uint64_t syscall_handler_inner(registers_t *regs) {
   return 0;
 }
 
-static uint64_t syscall_maybe_deliver_signal(registers_t *regs) {
-  process_t *proc = process_get_current();
+static uint64_t syscall_maybe_deliver_signal(registers_t *regs, process_t *proc) {
   if (!proc || !proc->is_user || (regs->cs & 0x3) == 0)
     return (uint64_t)regs;
 
@@ -198,7 +214,7 @@ static uint64_t syscall_maybe_deliver_signal(registers_t *regs) {
   uint64_t handler = proc->signal_handlers[sig];
   int flags = proc->signal_action_flags[sig];
 
-  if (handler == 1) {
+  if (handler == 1 || (handler == 0 && (sig == 17 /* SIGCHLD */ || sig == 28 /* SIGWINCH */ || sig == 23 /* SIGURG */))) {
     return (uint64_t)regs;
   }
 
@@ -250,10 +266,79 @@ static uint64_t syscall_maybe_deliver_signal(registers_t *regs) {
 uint64_t syscall_handler_c(registers_t *regs) {
   uint64_t syscall_num = regs->rax;
 
-  // Check for context-switching syscalls
-  if (syscall_num == SYS_EXIT) { // EXIT
-    int status = (int)regs->rdi;
-    return process_terminate_current_with_status((status & 0xff) << 8, (uint64_t)regs);
+  switch (syscall_num) {
+    case SYS_GETPID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->pid : (uint64_t)-1;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_GETTID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->pid : 0;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_GETUID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->uid : 0;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_GETEUID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->euid : 0;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_GETGID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->gid : 0;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_GETEGID: {
+      process_t *cur = process_get_current();
+      regs->rax = cur ? (uint64_t)cur->egid : 0;
+      if (__builtin_expect(cur && !cur->kill_pending && !(cur->signal_pending & ~cur->signal_mask), 1)) {
+        return (uint64_t)regs;
+      }
+      if (cur && cur->kill_pending) {
+        return process_terminate_current_with_status(cur->exit_status ? cur->exit_status : 1, (uint64_t)regs);
+      }
+      return syscall_maybe_deliver_signal(regs, cur);
+    }
+    case SYS_EXIT: {
+      int status = (int)regs->rdi;
+      return process_terminate_current_with_status((status & 0xff) << 8, (uint64_t)regs);
+    }
+    default:
+      break;
   }
 
   // Normal syscalls
@@ -273,5 +358,5 @@ uint64_t syscall_handler_c(registers_t *regs) {
     return process_schedule((uint64_t)regs);
   }
 
-  return syscall_maybe_deliver_signal(regs);
+  return syscall_maybe_deliver_signal(regs, cur_proc);
 }

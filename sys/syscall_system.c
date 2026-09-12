@@ -1,7 +1,6 @@
 // Copyright (c) 2023-2026 Christiaan (chris@boreddev.nl)
-// This software is released under the GNU General Public License v3.0. See
-// LICENSE file for details. This header needs to maintain in any file it is
-// present in, as per the GPL license terms.
+// This software is released under the GNU General Public License v3.0. See LICENSE file for details.
+// This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "syscall_internal.h"
 #include "fat32.h"
 #undef RB_BLACK
@@ -138,112 +137,7 @@ uint64_t sys_cmd_pty_destroy(const syscall_args_t *args) {
   return (uint64_t)pty_destroy(pty_id);
 }
 
-static uint64_t sys_cmd_disk_get_count(const syscall_args_t *args) {
-  (void)args;
-  return (uint64_t)disk_get_count();
-}
 
-static uint64_t sys_cmd_disk_get_info(const syscall_args_t *args) {
-  int index = (int)args->arg2;
-  k_disk_info_t *out = (k_disk_info_t *)args->arg3;
-  if (!out)
-    return (uint64_t)-1;
-  Disk *d = disk_get_by_index(index);
-  if (!d)
-    return (uint64_t)-1;
-  disk_k_strcpy(out->devname, d->devname, 16);
-  disk_k_strcpy(out->label, d->label, 32);
-  out->type = (uint32_t)d->type;
-  out->total_sectors = d->total_sectors;
-  out->is_partition = d->is_partition;
-  out->is_fat32 = d->is_fat32;
-  out->is_esp = d->is_esp;
-  out->lba_offset = d->partition_lba_offset;
-  return 0;
-}
-
-static uint64_t sys_cmd_disk_mount(const syscall_args_t *args) {
-  const char *devname = (const char *)args->arg2;
-  const char *mountpoint = (const char *)args->arg3;
-  if (!devname || !mountpoint)
-    return (uint64_t)-1;
-  Disk *d = disk_get_by_name(devname);
-  if (!d)
-    return (uint64_t)-1;
-
-  if (d->is_fat32) {
-    void *vol = fat32_mount_volume(d);
-    if (vol) {
-      if (vfs_mount(mountpoint, devname, "fat32", fat32_get_realfs_ops(), vol))
-        return 0;
-    }
-  }
-
-  uint8_t sb_buf[512];
-  if (d->read_sector(d, 2, sb_buf) == 0) {
-    uint16_t magic = *(uint16_t *)(sb_buf + 56);
-    if (magic == 0xEF53) {
-      void *vol = ext4fs_mount_volume(d);
-      if (vol) {
-        if (vfs_mount(mountpoint, devname, "ext4", ext4fs_get_ops(), vol)) {
-          d->is_fat32 = false;
-          return 0;
-        }
-      }
-    }
-  }
-
-  void *vol = ext4fs_mount_volume(d);
-  if (vol) {
-    if (vfs_mount(mountpoint, devname, "ext4", ext4fs_get_ops(), vol)) {
-      d->is_fat32 = false;
-      return 0;
-    }
-  }
-
-  vol = fat32_mount_volume(d);
-  if (vol) {
-    if (vfs_mount(mountpoint, devname, "fat32", fat32_get_realfs_ops(), vol)) {
-      d->is_fat32 = true;
-      return 0;
-    }
-  }
-
-  return (uint64_t)-1;
-}
-
-static uint64_t sys_cmd_disk_umount(const syscall_args_t *args) {
-  const char *mountpoint = (const char *)args->arg2;
-  if (!mountpoint)
-    return (uint64_t)-1;
-  return vfs_umount(mountpoint) ? 0 : (uint64_t)-1;
-}
-
-static uint64_t sys_cmd_disk_rescan(const syscall_args_t *args) {
-  const char *devname = (const char *)args->arg2;
-  if (!devname)
-    return (uint64_t)-1;
-  Disk *d = disk_get_by_name(devname);
-  if (!d)
-    return (uint64_t)-1;
-  return (uint64_t)disk_rescan(d);
-}
-
-static uint64_t sys_cmd_disk_sync(const syscall_args_t *args) {
-  const char *mountpoint = (const char *)args->arg2;
-  if (!mountpoint)
-    return (uint64_t)-1;
-  int mc = vfs_get_mount_count();
-  for (int i = 0; i < mc; i++) {
-    vfs_mount_t *m = vfs_get_mount(i);
-    if (m && m->active && strcmp(m->path, mountpoint) == 0) {
-      Disk *d = disk_get_by_name(m->device);
-      if (d)
-        return (uint64_t)disk_sync(d);
-    }
-  }
-  return (uint64_t)-1;
-}
 
 uint64_t handle_sys_reboot(const syscall_args_t *args) {
   int cmd = (int)args->arg3;

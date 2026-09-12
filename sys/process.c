@@ -19,6 +19,7 @@
 #include "kutils.h"
 #include "fpu.h"
 #include "vmm.h"
+#include "panic.h"
 
 #define MSR_FS_BASE 0xC0000100
 
@@ -34,7 +35,7 @@ static process_t *pid_hash_table[PID_HASH_BUCKETS] = {NULL};
 static spinlock_t process_table_lock = SPINLOCK_INIT;
 static spinlock_t runqueue_lock = SPINLOCK_INIT;
 
-static volatile uint32_t next_pid = 0;
+static volatile uint32_t next_pid = 1;
 
 uint32_t reaper_pid = 0; 
 
@@ -120,8 +121,8 @@ void process_put(process_t *proc) {
         if (proc->user_stack_alloc) {
             if (proc->pml4_phys) {
                 mmu_context_t ctx = { .pml4_phys = proc->pml4_phys, .lock = SPINLOCK_INIT };
-                uint64_t stack_top = 0x800000;
-                uint64_t stack_size = 262144;
+                uint64_t stack_top = USER_STACK_TOP;
+                uint64_t stack_size = USER_STACK_INIT_SIZE;
                 for (uint64_t off = 0; off < stack_size; off += 4096) {
                     mmu_unmap_page(&ctx, stack_top - stack_size + off);
                 }
@@ -300,7 +301,7 @@ void process_init(void) {
 
     process_t *kernel_proc = process_alloc_struct();
     if (!kernel_proc) return;
-    kernel_proc->pid = __atomic_fetch_add(&next_pid, 1, __ATOMIC_SEQ_CST);
+    kernel_proc->pid = 0;
     kernel_proc->refcount = 10000;
     kernel_proc->running_cpu = 0;
     kernel_proc->is_user = false;
@@ -377,7 +378,11 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
 
     process_t *parent = process_get_current();
 
-    new_proc->pid = __atomic_fetch_add(&next_pid, 1, __ATOMIC_SEQ_CST);
+    if (!is_user) {
+        new_proc->pid = 0;
+    } else {
+        new_proc->pid = __atomic_fetch_add(&next_pid, 1, __ATOMIC_SEQ_CST);
+    }
     new_proc->refcount = 1;
     new_proc->running_cpu = -1;
     new_proc->is_user = is_user;
@@ -386,6 +391,12 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
     new_proc->kill_pending = false;
     new_proc->parent_pid = parent ? parent->pid : 0;
     new_proc->pgid = parent ? parent->pgid : new_proc->pid;
+    new_proc->uid = 0;
+    new_proc->euid = 0;
+    new_proc->suid = 0;
+    new_proc->gid = 0;
+    new_proc->egid = 0;
+    new_proc->sgid = 0;
     new_proc->exited = false;
     new_proc->exit_status = 0;
     new_proc->fs_base = 0;
@@ -429,7 +440,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
     if (is_user) {
         mmu_context_t ctx = { .pml4_phys = new_proc->pml4_phys, .lock = SPINLOCK_INIT };
         for (int i = 0; i < 32; i++) {
-            if (mmu_map_page(&ctx, 0x800000 + i*4096, v2p((uint64_t)user_stack + i*4096), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
+            if (mmu_map_page(&ctx, USER_STACK_TOP - 131072 + i*4096, v2p((uint64_t)user_stack + i*4096), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
                 kfree_null(user_stack);
                 kfree_null(kernel_stack);
                 process_put(new_proc);
@@ -460,7 +471,7 @@ process_t* process_create(void (*entry_point)(void), bool is_user) {
         uint64_t* stack_ptr = (uint64_t*)((uint64_t)kernel_stack + 32768);
         
         *(--stack_ptr) = 0x1B;          // SS (User Data)
-        *(--stack_ptr) = 0x800000 + 131072; // RSP
+        *(--stack_ptr) = USER_STACK_TOP; // RSP
         *(--stack_ptr) = 0x202;         // RFLAGS (IF=1)
         *(--stack_ptr) = 0x23;          // CS (User Code)
         *(--stack_ptr) = 0x400000;      // RIP
@@ -540,7 +551,61 @@ void process_add_elf_segment(process_t *proc, void *ptr, uint64_t vaddr, size_t 
     }
 }
 
-process_t* process_create_elf(const char* filepath, const char* args_str, bool terminal_proc, int tty_id) {
+static void process_log_exec(process_t *proc, const char *filepath, const char *args_str) {
+    extern uint64_t get_time_ns_highres(void);
+    uint64_t ns = get_time_ns_highres();
+    uint64_t sec = ns / 1000000000ULL;
+    uint64_t usec = (ns % 1000000000ULL) / 1000ULL;
+
+    char s_sec[16];
+    utoa((size_t)sec, s_sec);
+    int s_len = (int)strlen(s_sec);
+    int pad = 4 - s_len;
+    if (pad < 0) pad = 0;
+
+    char s_usec[16];
+    utoa((size_t)usec, s_usec);
+    int u_len = (int)strlen(s_usec);
+    int u_pad = 6 - u_len;
+    if (u_pad < 0) u_pad = 0;
+
+    char tbuf[32];
+    int idx = 0;
+    tbuf[idx++] = '[';
+    for (int i = 0; i < pad; i++) {
+        tbuf[idx++] = ' ';
+    }
+    for (int i = 0; i < s_len; i++) {
+        tbuf[idx++] = s_sec[i];
+    }
+    tbuf[idx++] = '.';
+    for (int i = 0; i < u_pad; i++) {
+        tbuf[idx++] = '0';
+    }
+    for (int i = 0; i < u_len; i++) {
+        tbuf[idx++] = s_usec[i];
+    }
+    tbuf[idx++] = ']';
+    tbuf[idx++] = ' ';
+    tbuf[idx] = '\0';
+
+    serial_write(tbuf);
+    serial_write("[PROC] execve(pid=");
+    serial_write_num((uint32_t)proc->pid);
+    serial_write(", ppid=");
+    serial_write_num((uint32_t)proc->parent_pid);
+    serial_write(", comm=\"");
+    serial_write(proc->name);
+    serial_write("\"): ");
+    serial_write(filepath);
+    if (args_str && args_str[0]) {
+        serial_write(" ");
+        serial_write(args_str);
+    }
+    serial_write("\n");
+}
+
+process_t* process_create_elf(const char* filepath, const char* args_str, uint64_t flags, int tty_id) {
     process_t *new_proc = process_alloc_struct();
     if (!new_proc) return NULL;
 
@@ -574,19 +639,46 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
         new_proc->fd_flags[i] = 0;
     }
 
+    bool terminal_proc = (flags & SPAWN_FLAG_TERMINAL) != 0;
+    bool explicit_tty = (flags & SPAWN_FLAG_TTY_ID) != 0;
+    bool background = (flags & SPAWN_FLAG_BACKGROUND) != 0;
+
     process_t *parent = process_get_current();
-    if (parent) {
+
+    if (explicit_tty && tty_id >= 0) {
+        char tty_path[24];
+        extern void strcpy(char *dest, const char *src);
+        extern void itoa(int n, char *buf);
+        if (tty_id >= 1024) {
+            strcpy(tty_path, "/dev/pts/");
+            itoa(tty_id - 1024, tty_path + 9);
+        } else if (tty_id >= GRAPHICAL_TTY_COUNT && tty_id < TTY_COUNT) {
+            strcpy(tty_path, "/dev/ttyS");
+            itoa(tty_id - GRAPHICAL_TTY_COUNT, tty_path + 9);
+        } else {
+            strcpy(tty_path, "/dev/tty");
+            itoa(tty_id + 1, tty_path + 8);
+        }
+
+        vfs_file_t *f = vfs_open(tty_path, "rw");
+        if (f) {
+            process_fd_file_ref_t *ref = kmalloc(sizeof(process_fd_file_ref_t));
+            if (ref) {
+                ref->file = f;
+                ref->refs = 3;
+                for (int i = 0; i < 3; i++) {
+                    new_proc->fds[i] = ref;
+                    new_proc->fd_kind[i] = PROC_FD_KIND_FILE;
+                    new_proc->fd_flags[i] = (i == 0) ? 0 : 1;
+                }
+            }
+        }
+        if (!background) {
+            tty_set_foreground(tty_id, new_proc->pid);
+        }
+    } else if (parent) {
         for (int i = 0; i < 3; i++) {
             if (parent->fds[i]) {
-                if (parent->fd_kind[i] == PROC_FD_KIND_FILE) {
-                    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)parent->fds[i];
-                    if (ref) {
-                        vfs_file_t *vf = (vfs_file_t *)ref->file;
-                        if (tty_id < 0 && vf && vf->is_device && vf->device_type == DEVICE_TYPE_TTY) {
-                            continue;
-                        }
-                    }
-                }
                 new_proc->fds[i] = parent->fds[i];
                 new_proc->fd_kind[i] = parent->fd_kind[i];
                 new_proc->fd_flags[i] = parent->fd_flags[i];
@@ -605,45 +697,33 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
                 }
             }
         }
-    }
 
-    // Always set up TTY FDs if a TTY is provided
-    if (tty_id >= 0) {
-        char tty_path[24];
-        extern void strcpy(char *dest, const char *src);
-        extern void itoa(int n, char *buf);
-        if (tty_id >= 1024) {
-            strcpy(tty_path, "/dev/pts/");
-            itoa(tty_id - 1024, tty_path + 9);
-        } else if (tty_id >= GRAPHICAL_TTY_COUNT && tty_id < TTY_COUNT) {
-            strcpy(tty_path, "/dev/ttyS");
-            itoa(tty_id - GRAPHICAL_TTY_COUNT, tty_path + 9);
-        } else {
-            strcpy(tty_path, "/dev/tty");
-            itoa(tty_id + 1, tty_path + 8);
-        }
-        
-        vfs_file_t *f = vfs_open(tty_path, "rw");
-        if (f) {
-            process_fd_file_ref_t *ref = kmalloc(sizeof(process_fd_file_ref_t));
-            if (ref) {
-                ref->file = f;
-                ref->refs = 0;
-                for (int i = 0; i < 3; i++) {
-                    if (new_proc->fds[i]) {
-                        // Close inherited FD if any
-                        process_close_fd_inner(new_proc, i);
-                    }
-                    new_proc->fds[i] = ref;
-                    new_proc->fd_kind[i] = PROC_FD_KIND_FILE;
-                    new_proc->fd_flags[i] = (i == 0) ? 0 : 1;
-                    ref->refs++;
-                }
-            }
+        if (tty_id >= 0 && !background) {
             tty_set_foreground(tty_id, new_proc->pid);
         }
     }
 
+    process_fd_file_ref_t *console_ref = NULL;
+    for (int i = 0; i < 3; i++) {
+        if (!new_proc->fds[i]) {
+            if (!console_ref) {
+                vfs_file_t *f = vfs_open("/dev/console", "rw");
+                if (f) {
+                    console_ref = kmalloc(sizeof(process_fd_file_ref_t));
+                    if (console_ref) {
+                        console_ref->file = f;
+                        console_ref->refs = 0;
+                    }
+                }
+            }
+            if (console_ref) {
+                console_ref->refs++;
+                new_proc->fds[i] = console_ref;
+                new_proc->fd_kind[i] = PROC_FD_KIND_FILE;
+                new_proc->fd_flags[i] = (i == 0) ? 0 : 1;
+            }
+        }
+    }
 
     new_proc->heap_start = 0x20000000; // 512MB mark
     new_proc->heap_end = 0x20000000;
@@ -667,12 +747,24 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     if (parent) {
         memcpy(new_proc->cwd, parent->cwd, 1024);
         new_proc->parent_pid = parent->pid;
-        new_proc->pgid = parent->pgid;
+        new_proc->pgid = explicit_tty ? new_proc->pid : parent->pgid;
+        new_proc->uid = parent->uid;
+        new_proc->euid = parent->euid;
+        new_proc->suid = parent->suid;
+        new_proc->gid = parent->gid;
+        new_proc->egid = parent->egid;
+        new_proc->sgid = parent->sgid;
     } else {
         memset(new_proc->cwd, 0, 1024);
         new_proc->cwd[0] = '/';
         new_proc->parent_pid = 0;
         new_proc->pgid = new_proc->pid;
+        new_proc->uid = 0;
+        new_proc->euid = 0;
+        new_proc->suid = 0;
+        new_proc->gid = 0;
+        new_proc->egid = 0;
+        new_proc->sgid = 0;
     }
 
     // 2. Load ELF executable
@@ -708,17 +800,17 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     memset(stack, 0, 4096);
     memset(kernel_stack, 0, KERNEL_STACK_SIZE); 
     
-    // Map initial top page of User stack to [0x800000 - 4096 .. 0x800000]
+    // Map initial top page of User stack to [USER_STACK_TOP - 4096 .. USER_STACK_TOP]
     mmu_context_t fallback_ctx = { .pml4_phys = new_proc->pml4_phys, .lock = SPINLOCK_INIT };
     mmu_context_t *proc_ctx = (new_proc->vmm_space && new_proc->vmm_space->mmu_ctx) ? new_proc->vmm_space->mmu_ctx : &fallback_ctx;
-    if (mmu_map_page(proc_ctx, 0x800000 - 4096, v2p((uint64_t)stack), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
+    if (mmu_map_page(proc_ctx, USER_STACK_TOP - 4096, v2p((uint64_t)stack), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
         kfree_null(stack);
         kfree_null(kernel_stack);
         return NULL;
     }
 
     if (new_proc->vmm_space) {
-        vm_area_t *stack_vma = vma_create(0x800000 - user_stack_size, 0x800000, VMA_TYPE_ANON,
+        vm_area_t *stack_vma = vma_create(USER_STACK_TOP - user_stack_size, USER_STACK_TOP, VMA_TYPE_ANON,
                                           VMA_FLAG_READ | VMA_FLAG_WRITE | VMA_FLAG_STACK);
         if (stack_vma) {
             vma_insert(&new_proc->vmm_space->vma_head, &new_proc->vmm_space->vma_tree, stack_vma);
@@ -735,7 +827,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
 
     int argc = 1;
     char *args_buf = (char *)stack + 4096;
-    uint64_t user_args_buf = 0x800000;
+    uint64_t user_args_buf = USER_STACK_TOP;
 
     // Copy filepath as argv[0]
     int path_len = 0;
@@ -797,7 +889,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
     uint64_t target_sp = (user_args_buf - total_size) & ~15ULL;
     uint64_t current_user_sp = target_sp + total_size;
     
-    args_buf = (char *)((uint64_t)stack + (current_user_sp - (0x800000 - 4096)));
+    args_buf = (char *)((uint64_t)stack + (current_user_sp - (USER_STACK_TOP - 4096)));
 
     // 1. Push AUXV (mlibc standard entries + AT_NULL terminator)
     args_buf -= 20 * sizeof(uint64_t);
@@ -889,9 +981,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, bool t
 
     pid_table_insert(new_proc);
 
-    serial_write("[PROC] Exec: ");
-    serial_write(filepath);
-    serial_write("\n");
+    process_log_exec(new_proc, filepath, args_str);
 
     return new_proc;
 }
@@ -1042,13 +1132,12 @@ static process_t *pid_table_find_unlocked(uint32_t pid) {
 static void reparent_cb(process_t *proc, void *arg) {
     uint32_t parent_pid = *(uint32_t *)arg;
     if (proc && proc->parent_pid == parent_pid) {
-        proc->parent_pid = reaper_pid;
+        uint32_t target_reaper = reaper_pid != 0 ? reaper_pid : 1;
+        proc->parent_pid = target_reaper;
         if (proc->state == PROC_STATE_ZOMBIE) {
-            if (reaper_pid != 0) {
-                process_t *reaper = pid_table_find_unlocked(reaper_pid);
-                if (reaper) {
-                    wait_queue_wake_all(&reaper->wait_exit_queue);
-                }
+            process_t *reaper = pid_table_find_unlocked(target_reaper);
+            if (reaper) {
+                wait_queue_wake_all(&reaper->wait_exit_queue);
             } else {
                 pid_table_remove_unlocked(proc->pid);
                 proc->reaped = true;
@@ -1177,8 +1266,32 @@ void process_terminate(process_t *to_delete) {
     process_terminate_with_status(to_delete, 128 + 9);
 }
 
+static void runqueue_unlink_locked(process_t *proc) {
+    if (!proc || !proc->next) return;
+
+    if (proc->next == proc) {
+        proc->next = NULL;
+        return;
+    }
+
+    process_t *prev = proc;
+    int max_hops = 2048;
+    while (prev->next && prev->next != proc && --max_hops > 0) {
+        prev = prev->next;
+        if (prev == proc) break;
+    }
+
+    if (prev->next == proc) {
+        prev->next = proc->next;
+    }
+    proc->next = NULL;
+}
+
 void process_terminate_with_status(process_t *to_delete, int status) {
     if (!to_delete || to_delete->pid == 0) return;
+    if (to_delete->pid == 1) {
+        kernel_panic(NULL, "Kernel panic - not syncing: Attempted to kill init!");
+    }
     if (to_delete->state == PROC_STATE_ZOMBIE || to_delete->kill_pending) return;
 
     uint32_t cpu_count = smp_cpu_count();
@@ -1199,32 +1312,39 @@ void process_terminate_with_status(process_t *to_delete, int status) {
     to_delete->exit_status = status;
     to_delete->kill_pending = false;
 
-    process_t *prev = to_delete;
-    while (prev->next && prev->next != to_delete) {
-        prev = prev->next;
-    }
-    if (prev->next == to_delete) {
-        prev->next = to_delete->next;
-    }
+    runqueue_unlink_locked(to_delete);
 
     spinlock_release_irqrestore(&runqueue_lock, rflags);
 
+    bool notified = false;
+    uint32_t target_reaper = reaper_pid != 0 ? reaper_pid : 1;
     if (to_delete->parent_pid != 0) {
         process_t *parent = process_get_by_pid(to_delete->parent_pid);
         if (parent) {
             wait_queue_wake_all(&parent->wait_exit_queue);
+            parent->signal_pending |= (1ULL << 17 /* SIGCHLD */);
+            if (parent->state == PROC_STATE_BLOCKED) {
+                parent->state = PROC_STATE_RUNNING;
+                parent->sleep_until = 0;
+            }
             process_put(parent);
+            notified = true;
         }
     }
-    if (reaper_pid != 0 && to_delete->parent_pid != reaper_pid) {
-        process_t *reaper = process_get_by_pid(reaper_pid);
+    if (!notified) {
+        process_t *reaper = process_get_by_pid(target_reaper);
         if (reaper) {
             wait_queue_wake_all(&reaper->wait_exit_queue);
+            reaper->signal_pending |= (1ULL << 17 /* SIGCHLD */);
+            if (reaper->state == PROC_STATE_BLOCKED) {
+                reaper->state = PROC_STATE_RUNNING;
+                reaper->sleep_until = 0;
+            }
             process_put(reaper);
         }
     }
 
-    if (to_delete->parent_pid == 0 && reaper_pid == 0) {
+    if (to_delete->parent_pid == 0 && target_reaper == 0) {
         pid_table_remove(to_delete->pid);
         to_delete->reaped = true;
         process_put(to_delete);
@@ -1237,6 +1357,9 @@ uint64_t process_terminate_current_with_status(int status, uint64_t current_rsp)
     process_t *cur = (process_t *)current_cpu->current_process;
     if (!cur || cur->pid == 0) {
         return current_rsp;
+    }
+    if (cur->pid == 1) {
+        kernel_panic(NULL, "Kernel panic - not syncing: Attempted to kill init! (init exited)");
     }
 
     process_hold(cur);
@@ -1251,16 +1374,11 @@ uint64_t process_terminate_current_with_status(int status, uint64_t current_rsp)
     cur->kill_pending = false;
     cur->running_cpu = -1;
 
-    process_t *prev = cur;
-    while (prev->next && prev->next != cur) {
-        prev = prev->next;
-    }
-    if (prev->next == cur) {
-        prev->next = cur->next;
-    }
+    process_t *next_in_queue = cur->next;
+    runqueue_unlink_locked(cur);
 
     process_t *next_proc = NULL;
-    process_t *start = cur->next;
+    process_t *start = next_in_queue;
     process_t *scan = start;
     if (scan) {
         do {
@@ -1305,16 +1423,29 @@ uint64_t process_terminate_current_with_status(int status, uint64_t current_rsp)
     wrmsr(MSR_FS_BASE, next_proc->fs_base);
 
 
+    bool notified = false;
     if (cur->parent_pid != 0) {
         process_t *parent = pid_table_find_unlocked(cur->parent_pid);
         if (parent) {
             wait_queue_wake_all(&parent->wait_exit_queue);
+            parent->signal_pending |= (1ULL << 17 /* SIGCHLD */);
+            if (parent->state == PROC_STATE_BLOCKED) {
+                parent->state = PROC_STATE_RUNNING;
+                parent->sleep_until = 0;
+            }
+            notified = true;
         }
     }
-    if (reaper_pid != 0 && cur->parent_pid != reaper_pid) {
-        process_t *reaper = pid_table_find_unlocked(reaper_pid);
+    if (!notified) {
+        uint32_t target_reaper = reaper_pid != 0 ? reaper_pid : 1;
+        process_t *reaper = pid_table_find_unlocked(target_reaper);
         if (reaper) {
             wait_queue_wake_all(&reaper->wait_exit_queue);
+            reaper->signal_pending |= (1ULL << 17 /* SIGCHLD */);
+            if (reaper->state == PROC_STATE_BLOCKED) {
+                reaper->state = PROC_STATE_RUNNING;
+                reaper->sleep_until = 0;
+            }
         }
     }
 
@@ -1493,7 +1624,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     memset(stack, 0, 4096);
 
     mmu_context_t stack_ctx = { .pml4_phys = new_pml4, .lock = SPINLOCK_INIT };
-    if (mmu_map_page(&stack_ctx, 0x800000 - 4096, v2p((uint64_t)stack), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
+    if (mmu_map_page(&stack_ctx, USER_STACK_TOP - 4096, v2p((uint64_t)stack), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
         kfree_null(stack);
         proc->vmm_space = saved_space;
         if (new_space) {
@@ -1507,7 +1638,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
 
     int argc = 1;
     char *args_buf = (char *)stack + 4096;
-    uint64_t user_args_buf = 0x800000;
+    uint64_t user_args_buf = USER_STACK_TOP;
 
     int path_len = 0;
     while (filepath[path_len]) path_len++;
@@ -1552,7 +1683,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     uint64_t target_sp = (user_args_buf - total_size) & ~15ULL;
     uint64_t current_user_sp = target_sp + total_size;
     
-    args_buf = (char *)((uint64_t)stack + (current_user_sp - (0x800000 - 4096)));
+    args_buf = (char *)((uint64_t)stack + (current_user_sp - (USER_STACK_TOP - 4096)));
 
     // 1. Push AUXV (mlibc standard entries + AT_NULL terminator)
     args_buf -= 20 * sizeof(uint64_t);
@@ -1601,7 +1732,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     proc->user_stack_alloc = stack;
 
     if (new_space) {
-        vm_area_t *stack_vma = vma_create(0x800000 - user_stack_size, 0x800000, VMA_TYPE_ANON,
+        vm_area_t *stack_vma = vma_create(USER_STACK_TOP - user_stack_size, USER_STACK_TOP, VMA_TYPE_ANON,
                                           VMA_FLAG_READ | VMA_FLAG_WRITE | VMA_FLAG_STACK);
         if (stack_vma) {
             vma_insert(&new_space->vma_head, &new_space->vma_tree, stack_vma);
@@ -1631,7 +1762,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     if (old_stack) {
         if (old_pml4) {
             mmu_context_t ctx = { .pml4_phys = old_pml4, .lock = SPINLOCK_INIT };
-            uint64_t stack_top = 0x800000;
+            uint64_t stack_top = USER_STACK_TOP;
             for (uint64_t off = 0; off < user_stack_size; off += 4096) {
                 mmu_unmap_page(&ctx, stack_top - user_stack_size + off);
             }
@@ -1681,6 +1812,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
         ni++;
     }
     proc->name[ni] = 0;
+    process_log_exec(proc, filepath, args_str);
 
     regs->rip = elf_res.entry_point;
     regs->rdi = argc;
@@ -1747,6 +1879,12 @@ process_t* process_duplicate(registers_t *parent_regs) {
     child->used_memory = parent->used_memory;
     child->is_cloned_child = true;
     child->fs_base = parent->fs_base;
+    child->uid = parent->uid;
+    child->euid = parent->euid;
+    child->suid = parent->suid;
+    child->gid = parent->gid;
+    child->egid = parent->egid;
+    child->sgid = parent->sgid;
 
     memcpy(child->cwd, parent->cwd, 1024);
     memcpy(child->name, parent->name, 64);
@@ -1888,6 +2026,12 @@ process_t* process_create_thread(registers_t *parent_regs, uint64_t entry_point,
     child->fs_base = parent->fs_base;
     child->heap_start = parent->heap_start;
     child->heap_end = parent->heap_end;
+    child->uid = parent->uid;
+    child->euid = parent->euid;
+    child->suid = parent->suid;
+    child->gid = parent->gid;
+    child->egid = parent->egid;
+    child->sgid = parent->sgid;
 
     memcpy(child->cwd, parent->cwd, 1024);
     int len = 0;
