@@ -292,6 +292,7 @@ void process_put(process_t *proc);
 void process_table_for_each(void (*cb)(process_t *proc, void *arg), void *arg);
 process_t* process_find_child_on_tty(int tty_id);
 int process_get_all_pids(uint32_t *pids_out, int max_pids);
+int signal_send_to_pgrp(int pgrp, int sig);
 extern uint32_t reaper_pid; /* PID of the userspace zombie reaper daemon */
 int process_waitpid(uint32_t caller_pid, int target_pid, int options, int *status_out);
 int process_reap(uint32_t caller_pid, uint32_t pid, int *status_out);

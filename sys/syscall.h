@@ -112,6 +112,7 @@ uint64_t syscall_handler_c(registers_t *regs);
 int kernel_futex_wait(uint32_t *uaddr, uint32_t expected);
 int kernel_futex_wake(uint32_t *uaddr, int count);
 int signal_send_to_pid(int pid, int sig);
+int signal_send_to_pgrp(int pgrp, int sig);
 bool is_valid_user_ptr(const void *ptr, size_t size);
 
 #endif // SYSCALL_H

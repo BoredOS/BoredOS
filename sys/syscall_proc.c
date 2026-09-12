@@ -164,6 +164,11 @@ static uint64_t sys_cmd_kill_signal(const syscall_args_t *args) {
   if (sig < 0 || sig >= MAX_SIGNALS)
     return (uint64_t)-1;
 
+  if (pid < -1) {
+    int res = signal_send_to_pgrp(-pid, sig);
+    return res < 0 ? (uint64_t)res : 0;
+  }
+
   if (pid == -1) {
     int max_pids = 1024;
     uint32_t *pids = (uint32_t *)kmalloc(max_pids * sizeof(uint32_t));
@@ -260,6 +265,42 @@ int signal_send_to_pid(int pid, int sig) {
     .arg3 = (uint64_t)sig
   };
   return (int)sys_cmd_kill_signal(&args);
+}
+
+typedef struct {
+  uint32_t pgrp;
+  int sig;
+  int count;
+} send_pgrp_arg_t;
+
+static void signal_pgrp_cb(process_t *proc, void *arg) {
+  send_pgrp_arg_t *a = (send_pgrp_arg_t *)arg;
+  if (!proc || !proc->is_user || proc->state == PROC_STATE_ZOMBIE || proc->exited) return;
+  if (proc->pgid != a->pgrp && proc->pid != (uint32_t)a->pgrp) return;
+
+  int sig = a->sig;
+  if (sig <= 0 || sig >= MAX_SIGNALS) return;
+
+  // Deliver signal directly — we already hold process_table_lock, so we cannot
+  // call signal_send_to_pid() which would call process_get_by_pid() and try to
+  // re-acquire that same lock (recursive spinlock = deadlock).
+  if (proc->signal_handlers[sig] == 1 ||
+      (proc->signal_handlers[sig] == 0 && (sig == 17 || sig == 28 || sig == 23))) {
+    return; // SIG_IGN or ignored by default
+  }
+  proc->signal_pending |= (1ULL << (uint32_t)sig);
+  if (proc->state == PROC_STATE_BLOCKED) {
+    proc->state = PROC_STATE_RUNNING;
+    proc->sleep_until = 0;
+  }
+  a->count++;
+}
+
+int signal_send_to_pgrp(int pgrp, int sig) {
+  if (pgrp <= 0) return -1;
+  send_pgrp_arg_t a = { .pgrp = (uint32_t)pgrp, .sig = sig, .count = 0 };
+  process_table_for_each(signal_pgrp_cb, &a);
+  return a.count > 0 ? 0 : -ESRCH;
 }
 
 static uint64_t sys_cmd_sigaction(const syscall_args_t *args) {
