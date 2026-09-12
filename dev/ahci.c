@@ -209,7 +209,12 @@ static int ahci_identify(int port_num, uint32_t *sectors, char *model) {
     HBA_CMD_TBL *cmd_tbl = ps->cmd_tbl;
     memset(cmd_tbl, 0, sizeof(HBA_CMD_TBL) + sizeof(HBA_PRDT_ENTRY));
 
-    uint64_t phys = mmu_virt_to_phys(mmu_get_current_context(), (uintptr_t)buf);
+    uint64_t phys = 0;
+    if ((uintptr_t)buf >= 0xFFFF800000000000ULL) {
+        phys = v2p((uintptr_t)buf);
+    } else {
+        phys = mmu_virt_to_phys(mmu_get_current_context(), (uintptr_t)buf);
+    }
     if (!phys) {
         kfree_null(buf);
         spinlock_release_irqrestore(&ps->lock, rflags);
