@@ -5,6 +5,7 @@
 echo "Welcome to BoredOS!"
 
 /etc/rc.d/cleanvar start
+/etc/rc.d/vterm start
 /etc/rc.d/hostname start
 /etc/rc.d/timezone start
 /etc/rc.d/netif start

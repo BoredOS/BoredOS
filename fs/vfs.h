@@ -91,6 +91,9 @@ typedef struct vfs_fs_ops {
 #define DEVICE_TYPE_RANDOM      13
 #define DEVICE_TYPE_NULL        14
 #define DEVICE_TYPE_ZERO        15
+#define DEVICE_TYPE_VTERM_MASTER 16
+#define DEVICE_TYPE_VTERM_CTL    17
+#define DEVICE_TYPE_TTY_ACTIVE   18
 
 // VFS file handle
 struct vfs_file {

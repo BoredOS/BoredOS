@@ -30,7 +30,8 @@ struct winsize {
 #define GRAPHICAL_TTY_COUNT 10
 #define SERIAL_TTY_COUNT 4
 #define TTY_COUNT (GRAPHICAL_TTY_COUNT + SERIAL_TTY_COUNT)
-#define TTY_IN_QUEUE_SIZE 1024
+#define TTY_IN_QUEUE_SIZE 4096
+#define TTY_OUT_QUEUE_SIZE 8192
 
 typedef struct {
     uint8_t buffer[TTY_IN_QUEUE_SIZE];
@@ -40,10 +41,21 @@ typedef struct {
 } tty_queue_t;
 
 typedef struct {
-    uint32_t codepoint;
-    uint32_t fg;
-    uint32_t bg;
-} tty_cell_t;
+    uint8_t buffer[TTY_OUT_QUEUE_SIZE];
+    uint32_t head;
+    uint32_t tail;
+    wait_queue_head_t wait_queue;
+} tty_out_queue_t;
+
+#define VTERM_EVENT_SWITCH   1
+#define VTERM_EVENT_KDMODE   2
+#define VTERM_EVENT_RESIZE   3
+
+typedef struct {
+    uint32_t type;
+    int vt_id;
+    int val;
+} vterm_event_t;
 
 typedef struct {
     int id;
@@ -52,32 +64,16 @@ typedef struct {
     bool is_serial;
     uint16_t serial_port;
     serial_device_t *serial_dev;
-    tty_cell_t *grid;
-    bool dirty;
-    int dirty_row_start, dirty_row_end;
-    int width, height;
-    int cursor_x, cursor_y;
-    int last_cursor_x, last_cursor_y;
-    bool cursor_visible;
-    bool last_cursor_visible;
-    uint32_t fg_color, bg_color;
-    bool blit_enabled;
     int kd_mode;
-    
+    bool blit_enabled;
+    struct winsize ws;
+
     tty_queue_t key_queue;
     tty_queue_t mouse_queue;
-    tty_queue_t out_queue; // For standard text output
-    tty_queue_t char_queue; // For processed ASCII/UTF-8 input
-
+    tty_out_queue_t out_queue;
+    tty_queue_t char_queue;
 
     int fg_pid;
-    uint32_t kb_mods;
-    int esc_state;
-    int esc_params[8];
-    int esc_num_params;
-    int saved_x, saved_y;
-    int utf8_state;
-    uint32_t utf8_codepoint;
     bool last_char_was_cr;
     spinlock_t lock;
 } tty_t;
@@ -104,6 +100,14 @@ void tty_push_serial_char(int id, uint8_t ch);
 bool tty_is_serial(int id);
 int tty_read_input(int id, char *buf, size_t len);
 
+int tty_read_master(int id, char *buf, size_t len);
+int tty_write_master(int id, const char *buf, size_t len);
+int tty_poll_master(int id, struct poll_table *pt);
+
+void vterm_event_push(uint32_t type, int vt_id, int val);
+int vterm_event_read(void *buf, size_t len);
+int vterm_event_poll(struct poll_table *pt);
+
 int tty_set_foreground(int id, int pid);
 int tty_get_foreground(int id);
 
@@ -112,6 +116,7 @@ void tty_set_blit_enabled(bool enabled);
 bool tty_get_blit_enabled(void);
 struct poll_table;
 int tty_poll(int id, struct poll_table *pt);
+int tty_ioctl(int id, uint64_t request, void *arg);
 size_t tty_copy_boot_log(char *dst, size_t max_len);
 
 #endif

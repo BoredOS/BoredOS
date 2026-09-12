@@ -1,0 +1,68 @@
+. /etc/rc.subr
+
+action="$1"
+if [ -z "$action" ]; then
+    action="status"
+fi
+
+if [ "$action" = "start" ]; then
+    if [ "$vterm_enable" = "YES" ]; then
+        if [ -f /var/run/vterm.pid ]; then
+            read pid < /var/run/vterm.pid
+            if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+                echo "vterm is already running with PID $pid"
+                exit 0
+            fi
+            rm -f /var/run/vterm.pid
+        fi
+
+        if [ -e /dev/fb0 ] && [ -f /bin/vterm.elf ]; then
+            echo "Starting virtual terminal daemon..."
+            mkdir -p /var/run
+            vterm.elf &
+            echo $! > /var/run/vterm.pid
+            echo "vterm started with PID $!."
+        fi
+    fi
+elif [ "$action" = "forcestart" ]; then
+    if [ -f /var/run/vterm.pid ]; then
+        read pid < /var/run/vterm.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "vterm is already running with PID $pid"
+            exit 0
+        fi
+        rm -f /var/run/vterm.pid
+    fi
+
+    if [ -e /dev/fb0 ] && [ -f /bin/vterm.elf ]; then
+        echo "Starting virtual terminal daemon..."
+        mkdir -p /var/run
+        vterm.elf &
+        echo $! > /var/run/vterm.pid
+        echo "vterm started with PID $!."
+    fi
+elif [ "$action" = "stop" ]; then
+    if [ -f /var/run/vterm.pid ]; then
+        read pid < /var/run/vterm.pid
+        if [ -n "$pid" ]; then
+            echo "Stopping vterm (PID $pid)..."
+            kill $pid
+            rm -f /var/run/vterm.pid
+            echo "vterm stopped."
+        fi
+    else
+        echo "vterm is not running."
+    fi
+elif [ "$action" = "restart" ]; then
+    /etc/rc.d/vterm stop
+    /etc/rc.d/vterm start
+elif [ "$action" = "status" ]; then
+    if [ -f /var/run/vterm.pid ]; then
+        read pid < /var/run/vterm.pid
+        if [ -n "$pid" ] && [ -d /proc/$pid ]; then
+            echo "vterm is running with PID $pid."
+            exit 0
+        fi
+    fi
+    echo "vterm is not running."
+fi

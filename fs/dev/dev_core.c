@@ -49,10 +49,13 @@ int vfs_dev_read(vfs_file_t *file, void *buf, size_t size) {
 
     switch (file->device_type) {
         case DEVICE_TYPE_TTY:
+        case DEVICE_TYPE_TTY_ACTIVE:
         case DEVICE_TYPE_PTY_MASTER:
         case DEVICE_TYPE_PTY_SLAVE:
         case DEVICE_TYPE_KEYBOARD:
         case DEVICE_TYPE_MOUSE:
+        case DEVICE_TYPE_VTERM_MASTER:
+        case DEVICE_TYPE_VTERM_CTL:
             return dev_tty_read(file, buf, size);
 
         case DEVICE_TYPE_FRAMEBUFFER:
@@ -91,8 +94,11 @@ int vfs_dev_write(vfs_file_t *file, const void *buf, size_t size) {
 
     switch (file->device_type) {
         case DEVICE_TYPE_TTY:
+        case DEVICE_TYPE_TTY_ACTIVE:
         case DEVICE_TYPE_PTY_MASTER:
         case DEVICE_TYPE_PTY_SLAVE:
+        case DEVICE_TYPE_VTERM_MASTER:
+        case DEVICE_TYPE_VTERM_CTL:
             return dev_tty_write(file, buf, size);
 
         case DEVICE_TYPE_FRAMEBUFFER:
@@ -128,8 +134,11 @@ int vfs_dev_ioctl(vfs_file_t *file, uint64_t request, void *arg) {
 
     switch (file->device_type) {
         case DEVICE_TYPE_TTY:
+        case DEVICE_TYPE_TTY_ACTIVE:
         case DEVICE_TYPE_PTY_MASTER:
         case DEVICE_TYPE_PTY_SLAVE:
+        case DEVICE_TYPE_VTERM_MASTER:
+        case DEVICE_TYPE_VTERM_CTL:
             return dev_tty_ioctl(file, request, arg);
 
         case DEVICE_TYPE_FRAMEBUFFER:
@@ -178,10 +187,13 @@ int vfs_dev_poll(vfs_file_t *file, struct poll_table *pt) {
 
     switch (file->device_type) {
         case DEVICE_TYPE_TTY:
+        case DEVICE_TYPE_TTY_ACTIVE:
         case DEVICE_TYPE_PTY_MASTER:
         case DEVICE_TYPE_PTY_SLAVE:
         case DEVICE_TYPE_KEYBOARD:
         case DEVICE_TYPE_MOUSE:
+        case DEVICE_TYPE_VTERM_MASTER:
+        case DEVICE_TYPE_VTERM_CTL:
             return dev_tty_poll(file, pt);
 
         default:

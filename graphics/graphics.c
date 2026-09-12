@@ -34,23 +34,6 @@ void graphics_init(struct limine_framebuffer *fb) {
     }
 }
 
-void graphics_alloc_backing_buffer(void) {
-    if (g_fb && !g_back_buffer && g_back_buffer_size > 0) {
-        g_back_buffer = (uint32_t *)kmalloc_aligned(g_back_buffer_size, 4096);
-        if (g_back_buffer) {
-            if (g_fb->address && g_fb->bpp == 32) {
-                for (int y = 0; y < (int)g_fb->height; y++) {
-                    uint32_t *src_row = (uint32_t *)((uint8_t *)g_fb->address + y * g_fb->pitch);
-                    uint32_t *dst_row = &g_back_buffer[y * g_fb->width];
-                    memcpy(dst_row, src_row, g_fb->width * sizeof(uint32_t));
-                }
-            } else {
-                memset(g_back_buffer, 0, g_back_buffer_size);
-            }
-        }
-    }
-}
-
 void graphics_update_resolution(int width, int height, int bpp, void* fb_addr, int color_mode) {
     if (!g_fb) return;
     

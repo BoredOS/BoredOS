@@ -471,8 +471,6 @@ static void init_memory(void) {
             }
         }
 
-        graphics_alloc_backing_buffer();
-
         extern void mmu_init(void);
         extern bool mmu_run_tests(void);
         mmu_init();
@@ -820,12 +818,7 @@ void kmain(void) {
 
     asm volatile("sti");
 
-    // Main blitter loop
-    while(1) {
-        if (!g_headless_mode) {
-            tty_blit_active();
-        }
-        k_sleep(16); 
-    }
+    extern void work_queue_drain_loop(void);
+    work_queue_drain_loop();
 
 }

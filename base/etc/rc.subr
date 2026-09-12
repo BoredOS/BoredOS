@@ -3,6 +3,7 @@
 # if rc.conf is missing or empty, then imports user preferences from rc.conf.
 
 cleanvar_enable="YES"
+vterm_enable="YES"
 hostname_enable="YES"
 timezone="UTC"
 ifconfig_lo0="inet 127.0.0.1"
