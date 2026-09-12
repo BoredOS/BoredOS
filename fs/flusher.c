@@ -8,6 +8,7 @@
 #include "process.h"
 #include "vfs.h"
 #include "pmm.h"
+#include <string.h>
 
 static wait_queue_head_t flusher_waitq;
 
@@ -33,5 +34,6 @@ static void flusher_worker_loop(void) {
 
 void flusher_init(void) {
     wait_queue_init(&flusher_waitq);
-    process_create(flusher_worker_loop, false);
+    process_t *p = process_create(flusher_worker_loop, false);
+    if (p) strcpy(p->name, "kflusher");
 }

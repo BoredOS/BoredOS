@@ -114,7 +114,8 @@ int network_init(void) {
             netif_set_up(&nic_netif);
             
             extern process_t* process_create(void (*entry_point)(void), bool is_user);
-            process_create(net_worker_loop, false);
+            process_t *net_p = process_create(net_worker_loop, false);
+            if (net_p) strcpy(net_p->name, "knet");
 
             extern void serial_write(const char *str);
             serial_write("[NET] Network interface initialized and background net thread spawned\n");

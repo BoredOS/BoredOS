@@ -444,7 +444,9 @@ void ac97_init(void) {
 
     // Spawn the kernel mixer thread
     process_t *mixer_proc = process_create(ac97_mixer_thread, false);
-    if (!mixer_proc) {
+    if (mixer_proc) {
+        strcpy(mixer_proc->name, "kac97");
+    } else {
         serial_write("[AC97] Failed to spawn mixer thread\n");
     }
 

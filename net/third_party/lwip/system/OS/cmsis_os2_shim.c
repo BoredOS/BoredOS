@@ -277,6 +277,10 @@ osThreadId_t osThreadNew(void (*func)(void *), void *arg, const osThreadAttr_t *
     // register thread start after process created
     process_t *p = process_create(thread_entry_wrapper, false);
     if (!p) return 0;
+    if (attr && attr->name && attr->name[0]) {
+        strncpy(p->name, attr->name, sizeof(p->name) - 1);
+        p->name[sizeof(p->name) - 1] = '\0';
+    }
     thread_start_t *ts = (thread_start_t*)kmalloc(sizeof(thread_start_t));
     if (!ts) return 0;
     ts->pid = p->pid;
@@ -286,7 +290,6 @@ osThreadId_t osThreadNew(void (*func)(void *), void *arg, const osThreadAttr_t *
     ts->next = thread_starts;
     thread_starts = ts;
     spinlock_release_irqrestore(&thread_starts_lock, flags);
-    (void)attr;
     return (osThreadId_t)p->pid;
 }
 
