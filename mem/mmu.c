@@ -139,6 +139,10 @@ mmu_context_t *mmu_get_kernel_context(void) {
 }
 
 mmu_context_t *mmu_get_current_context(void) {
+    process_t *proc = process_get_current();
+    if (proc && proc->vmm_space && proc->vmm_space->mmu_ctx) {
+        return proc->vmm_space->mmu_ctx;
+    }
     return active_context ? active_context : &kernel_context;
 }
 
@@ -527,6 +531,15 @@ int mmu_protect_page(mmu_context_t *ctx, uintptr_t virt, uint32_t flags) {
 }
 
 uintptr_t mmu_virt_to_phys(mmu_context_t *ctx, uintptr_t virt) {
+    if (!ctx || !ctx->pml4_phys) {
+        ctx = mmu_get_current_context();
+    }
+    if (virt < 0xFFFF800000000000ULL && ctx == &kernel_context) {
+        process_t *proc = process_get_current();
+        if (proc && proc->vmm_space && proc->vmm_space->mmu_ctx) {
+            ctx = proc->vmm_space->mmu_ctx;
+        }
+    }
     if (!ctx || !ctx->pml4_phys) return 0;
 
     uint64_t rflags = spinlock_acquire_irqsave(&ctx->lock);

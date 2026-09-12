@@ -20,11 +20,14 @@
 #define PAGE_MASK (PAGE_SIZE - 1)
 
 #define USER_MMAP_BASE 0x0000700000000000ULL
-#define USER_MMAP_END  0x00007FFFFFF00000ULL
+#define USER_MMAP_END  0x00007FFFF0000000ULL
 #define MAX_STACK_SIZE (8UL * 1024 * 1024)
 
 #define VMALLOC_BASE   0xFFFFC00000000000ULL
 #define VMALLOC_END    0xFFFFD00000000000ULL
+
+#define IOREMAP_BASE   0xFFFFD00000000000ULL
+#define IOREMAP_END    0xFFFFE00000000000ULL
 
 #define PT_PRESENT     (1ULL << 0)
 #define PT_RW          (1ULL << 1)
@@ -41,6 +44,9 @@ static page_t *zero_page_desc = NULL;
 
 static spinlock_t vmalloc_lock = SPINLOCK_INIT;
 static uintptr_t vmalloc_current = VMALLOC_BASE;
+
+static spinlock_t ioremap_lock = SPINLOCK_INIT;
+static uintptr_t ioremap_current = IOREMAP_BASE;
 
 void vmm_rwsem_init(vmm_rwsem_t *sem) {
     if (!sem) return;
@@ -706,5 +712,54 @@ void vfree(void *addr) {
         }
     }
 
+    mmu_tlb_flush_all();
+}
+
+void *ioremap(uintptr_t phys_addr, size_t size) {
+    if (size == 0) return NULL;
+
+    uintptr_t page_offset = phys_addr & PAGE_MASK;
+    uintptr_t phys_base = phys_addr & ~PAGE_MASK;
+    size_t aligned_size = (size + page_offset + PAGE_MASK) & ~PAGE_MASK;
+    size_t page_count = aligned_size >> 12;
+
+    uint64_t flags = spinlock_acquire_irqsave(&ioremap_lock);
+    uintptr_t virt = ioremap_current;
+    if (virt + aligned_size > IOREMAP_END) {
+        spinlock_release_irqrestore(&ioremap_lock, flags);
+        return NULL;
+    }
+    ioremap_current += aligned_size;
+    spinlock_release_irqrestore(&ioremap_lock, flags);
+
+    mmu_context_t *kctx = mmu_get_kernel_context();
+    for (size_t i = 0; i < page_count; i++) {
+        uintptr_t v = virt + (i << 12);
+        uintptr_t p = phys_base + (i << 12);
+        int ret = mmu_map_page(kctx, v, p, MMU_PROT_READ | MMU_PROT_WRITE | MMU_FLAG_NOCACHE | MMU_FLAG_GLOBAL);
+        if (ret != 0) {
+            for (size_t j = 0; j < i; j++) {
+                mmu_unmap_page(kctx, virt + (j << 12));
+            }
+            mmu_tlb_flush_all();
+            return NULL;
+        }
+    }
+
+    return (void *)(virt + page_offset);
+}
+
+void iounmap(void *addr, size_t size) {
+    if (!addr || size == 0) return;
+    uintptr_t virt = (uintptr_t)addr & ~PAGE_MASK;
+    if (virt < IOREMAP_BASE || virt >= IOREMAP_END) return;
+
+    size_t aligned_size = (size + ((uintptr_t)addr & PAGE_MASK) + PAGE_MASK) & ~PAGE_MASK;
+    size_t page_count = aligned_size >> 12;
+
+    mmu_context_t *kctx = mmu_get_kernel_context();
+    for (size_t i = 0; i < page_count; i++) {
+        mmu_unmap_page(kctx, virt + (i << 12));
+    }
     mmu_tlb_flush_all();
 }

@@ -61,5 +61,7 @@ uintptr_t vmm_get_zero_paddr(void);
 void *vmalloc(size_t size);
 void vfree(void *addr);
 
-#endif
- // BOREDOS_VMM_H
+void *ioremap(uintptr_t phys_addr, size_t size);
+void iounmap(void *addr, size_t size);
+
+#endif // BOREDOS_VMM_H
