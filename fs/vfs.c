@@ -2,6 +2,7 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "vfs_internal.h"
+#include "../sys/process.h"
 
 vfs_mount_t mounts[VFS_MAX_MOUNTS];
 int mount_count = 0;
@@ -367,6 +368,19 @@ bool vfs_rmdir(const char *path) {
     return mount->ops->rmdir(mount->fs_private, rel_path);
 }
 
+static void vfs_get_parent_dir(const char *path, char *parent) {
+    strcpy(parent, path);
+    int last_slash = -1;
+    for (int i = 0; parent[i]; i++) {
+        if (parent[i] == '/') last_slash = i;
+    }
+    if (last_slash <= 0) {
+        strcpy(parent, "/");
+    } else {
+        parent[last_slash] = '\0';
+    }
+}
+
 bool vfs_delete(const char *path) {
     if (!path) return false;
 
@@ -375,6 +389,30 @@ bool vfs_delete(const char *path) {
 
     if (normalized[0] == '/' && normalized[1] == '\0') return false;
     if (strcmp(normalized, "/dev") == 0) return false;
+
+    uint64_t mflags = spinlock_acquire_irqsave(&vfs_lock);
+    for (int i = 0; i < VFS_MAX_MOUNTS; i++) {
+        if (mounts[i].active && strcmp(mounts[i].path, normalized) == 0) {
+            spinlock_release_irqrestore(&vfs_lock, mflags);
+            return false;
+        }
+    }
+    spinlock_release_irqrestore(&vfs_lock, mflags);
+
+    char parent_dir[VFS_MAX_PATH];
+    vfs_get_parent_dir(normalized, parent_dir);
+    vfs_dirent_t dir_info;
+    memset(&dir_info, 0, sizeof(dir_info));
+    if (vfs_get_info(parent_dir, &dir_info) == 0 && (dir_info.mode & 01000)) {
+        vfs_dirent_t file_info;
+        memset(&file_info, 0, sizeof(file_info));
+        if (vfs_get_info(normalized, &file_info) == 0) {
+            process_t *proc = process_get_current();
+            if (proc && proc->euid != 0 && proc->euid != file_info.uid && proc->euid != dir_info.uid) {
+                return false;
+            }
+        }
+    }
 
     if (str_starts_with(normalized, "/dev/")) {
         const char *devname = normalized + 5;
@@ -400,6 +438,22 @@ bool vfs_rename(const char *old_path, const char *new_path) {
     char norm_old[VFS_MAX_PATH], norm_new[VFS_MAX_PATH];
     vfs_normalize_process_path(old_path, norm_old);
     vfs_normalize_process_path(new_path, norm_new);
+
+    // Sticky bit check on source parent directory
+    char parent_old[VFS_MAX_PATH];
+    vfs_get_parent_dir(norm_old, parent_old);
+    vfs_dirent_t dir_info;
+    memset(&dir_info, 0, sizeof(dir_info));
+    if (vfs_get_info(parent_old, &dir_info) == 0 && (dir_info.mode & 01000)) {
+        vfs_dirent_t file_info;
+        memset(&file_info, 0, sizeof(file_info));
+        if (vfs_get_info(norm_old, &file_info) == 0) {
+            process_t *proc = process_get_current();
+            if (proc && proc->euid != 0 && proc->euid != file_info.uid && proc->euid != dir_info.uid) {
+                return false;
+            }
+        }
+    }
 
     const char *rel_old = NULL, *rel_new = NULL;
     vfs_mount_t *mount_old = vfs_resolve_mount(norm_old, &rel_old);
@@ -584,4 +638,86 @@ int vfs_get_info(const char *path, vfs_dirent_t *info) {
     }
 
     return mount->ops->get_info(mount->fs_private, rel_path, info);
+}
+
+bool vfs_check_permission(uint32_t mode, uint32_t uid, uint32_t gid, int requested_mask, process_t *proc) {
+    if (!proc) return true;
+    if (proc->euid == 0) {
+        if (requested_mask & 1) {
+            if ((mode & 0040000) == 0 && (mode & 0170000) != 0 && (mode & 0111) == 0) return false;
+        }
+        return true;
+    }
+
+    if (proc->euid == uid) {
+        int owner_bits = (mode >> 6) & 7;
+        return (owner_bits & requested_mask) == requested_mask;
+    }
+
+    bool in_group = (proc->egid == gid);
+    if (!in_group) {
+        for (int i = 0; i < proc->ngroups; i++) {
+            if (proc->groups[i] == gid) {
+                in_group = true;
+                break;
+            }
+        }
+    }
+    if (in_group) {
+        int group_bits = (mode >> 3) & 7;
+        return (group_bits & requested_mask) == requested_mask;
+    }
+
+    int other_bits = mode & 7;
+    return (other_bits & requested_mask) == requested_mask;
+}
+
+bool vfs_check_path_search(const char *normalized_path, process_t *proc) {
+    if (!proc || proc->euid == 0) return true;
+    if (!normalized_path || normalized_path[0] != '/') return true;
+
+    char prefix[VFS_MAX_PATH];
+    prefix[0] = '/';
+    prefix[1] = '\0';
+    size_t prefix_len = 1;
+
+    for (size_t i = 1; normalized_path[i]; i++) {
+        if (normalized_path[i] == '/') {
+            prefix[prefix_len] = '\0';
+            vfs_dirent_t dinfo;
+            memset(&dinfo, 0, sizeof(dinfo));
+            if (vfs_get_info(prefix, &dinfo) == 0) {
+                uint32_t dmode = dinfo.mode ? dinfo.mode : 0755;
+                if (!vfs_check_permission(dmode, dinfo.uid, dinfo.gid, 1, proc)) {
+                    return false;
+                }
+            }
+        }
+        if (prefix_len + 1 < sizeof(prefix)) {
+            prefix[prefix_len++] = normalized_path[i];
+        }
+    }
+    return true;
+}
+
+int vfs_chmod(const char *path, uint32_t mode) {
+    if (!path) return -1;
+    char normalized[VFS_MAX_PATH];
+    vfs_normalize_process_path(path, normalized);
+
+    const char *rel_path = NULL;
+    vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
+    if (!mount || !mount->ops || !mount->ops->chmod) return -1;
+    return mount->ops->chmod(mount->fs_private, (rel_path && rel_path[0]) ? rel_path : "/", mode);
+}
+
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid) {
+    if (!path) return -1;
+    char normalized[VFS_MAX_PATH];
+    vfs_normalize_process_path(path, normalized);
+
+    const char *rel_path = NULL;
+    vfs_mount_t *mount = vfs_resolve_mount(normalized, &rel_path);
+    if (!mount || !mount->ops || !mount->ops->chown) return -1;
+    return mount->ops->chown(mount->fs_private, (rel_path && rel_path[0]) ? rel_path : "/", uid, gid);
 }

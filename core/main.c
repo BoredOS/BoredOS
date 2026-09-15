@@ -652,7 +652,7 @@ static void init_rootfs(void) {
 static void init_modules(void) {
     if (module_request.response == NULL) {
         log_fail("Limine module response NULL");
-    } else if (!(g_boot_flags & BOOT_FLAG_DISK) || !vfs_exists("/bin/yawn.elf")) {
+    } else if (!(g_boot_flags & BOOT_FLAG_DISK) || !vfs_exists("/bin/yawn")) {
         log_ok("Limine modules loaded");
         for (uint64_t i = 0; i < module_request.response->module_count; i++) {
             struct limine_file *mod = module_request.response->modules[i];
@@ -781,7 +781,7 @@ static void init_tty(void) {
     kconsole_set_active(false);
 
     // Spawn userspace init system as configured by the bootloader
-    const char *init_binary = g_boot_init_path[0] ? g_boot_init_path : "/bin/yawn.elf";
+    const char *init_binary = g_boot_init_path[0] ? g_boot_init_path : "/bin/yawn";
     serial_write("[INIT] Spawning bootloader-configured init: ");
     serial_write(init_binary);
     serial_write("\n");
@@ -792,12 +792,12 @@ static void init_tty(void) {
         serial_write(init_binary);
         serial_write(", falling back to emergency rescue shell\n");
         if (!g_headless_mode) {
-            init_proc = process_create_elf("/bin/bsh.elf", "1", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 0);
+            init_proc = process_create_elf("/bin/bsh", "1", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 0);
         } else {
-            init_proc = process_create_elf("/bin/bsh.elf", "11", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 10);
+            init_proc = process_create_elf("/bin/bsh", "11", SPAWN_FLAG_TERMINAL | SPAWN_FLAG_TTY_ID, 10);
         }
         if (!init_proc) {
-            serial_write("[INIT] FATAL: Neither /bin/yawn.elf nor /bin/bsh.elf could be spawned!\n");
+            serial_write("[INIT] FATAL: Neither /bin/yawn nor /bin/bsh could be spawned!\n");
             serial_write("[INIT] The root filesystem does not contain these binaries.\n");
         }
     }

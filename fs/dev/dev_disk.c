@@ -4,9 +4,14 @@
 #include "dev_internal.h"
 #include "../../sys/syscall.h"
 #include "../../sys/errno.h"
+#include "../../sys/process.h"
 
 vfs_file_t* dev_disk_open(const char *devname, const char *mode) {
     (void)mode;
+    process_t *proc = process_get_current();
+    if (proc && proc->euid != 0) {
+        return NULL;
+    }
     Disk *d = disk_get_by_name(devname);
     if (d) {
         uint64_t flags = spinlock_acquire_irqsave(&vfs_lock);

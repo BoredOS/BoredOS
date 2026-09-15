@@ -250,6 +250,9 @@ int dev_random_get_info(const char *dev, vfs_dirent_t *info) {
         strcpy(info->name, dev);
         info->size = 0;
         info->is_directory = 0;
+        info->mode = 0666;
+        info->uid = 0;
+        info->gid = 0;
         info->start_cluster = 0;
         info->write_date = 0;
         info->write_time = 0;

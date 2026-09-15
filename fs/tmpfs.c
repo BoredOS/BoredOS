@@ -8,6 +8,7 @@
 #include "platform.h"
 #include "kutils.h"
 #include "spinlock.h"
+#include "../sys/process.h"
 #include <string.h>
 
 static spinlock_t tmpfs_lock = SPINLOCK_INIT;
@@ -46,6 +47,20 @@ static tmpfs_inode_t *tmpfs_alloc_inode(const char *name, bool is_dir) {
     memset(node, 0, sizeof(tmpfs_inode_t));
     strncpy(node->name, name, sizeof(node->name) - 1);
     node->is_dir = is_dir;
+    uint32_t ftype = is_dir ? 0040000 : 0100000;
+    process_t *proc = process_get_current();
+    if (proc) {
+        node->uid = proc->euid;
+        node->gid = proc->egid;
+        node->mode = ftype | (is_dir ? (0777 & ~proc->umask) : (0666 & ~proc->umask));
+    } else {
+        node->uid = 0;
+        node->gid = 0;
+        node->mode = ftype | (is_dir ? 0755 : 0644);
+    }
+    if (strcmp(name, "tmp") == 0) {
+        node->mode = 0041777;
+    }
     address_space_init(&node->i_mapping, node, &tmpfs_aops);
     return node;
 }
@@ -444,6 +459,40 @@ static int tmpfs_vfs_get_info(void *fs_private, const char *rel_path, vfs_dirent
     info->start_cluster = 0;
     info->write_date = 0;
     info->write_time = 0;
+    uint32_t ftype = node->is_dir ? 0040000 : 0100000;
+    info->mode = ftype | (node->mode & 07777);
+    info->uid = node->uid;
+    info->gid = node->gid;
+    spinlock_release_irqrestore(&tmpfs_lock, flags);
+    return 0;
+}
+
+static int tmpfs_vfs_chmod(void *fs_private, const char *rel_path, uint32_t mode) {
+    (void)fs_private;
+    if (!rel_path) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&tmpfs_lock);
+    tmpfs_inode_t *node = tmpfs_lookup(rel_path, false, false, false);
+    if (!node) {
+        spinlock_release_irqrestore(&tmpfs_lock, flags);
+        return -1;
+    }
+    uint32_t ftype = node->is_dir ? 0040000 : 0100000;
+    node->mode = ftype | (mode & 07777);
+    spinlock_release_irqrestore(&tmpfs_lock, flags);
+    return 0;
+}
+
+static int tmpfs_vfs_chown(void *fs_private, const char *rel_path, uint32_t uid, uint32_t gid) {
+    (void)fs_private;
+    if (!rel_path) return -1;
+    uint64_t flags = spinlock_acquire_irqsave(&tmpfs_lock);
+    tmpfs_inode_t *node = tmpfs_lookup(rel_path, false, false, false);
+    if (!node) {
+        spinlock_release_irqrestore(&tmpfs_lock, flags);
+        return -1;
+    }
+    if (uid != (uint32_t)-1) node->uid = uid;
+    if (gid != (uint32_t)-1) node->gid = gid;
     spinlock_release_irqrestore(&tmpfs_lock, flags);
     return 0;
 }
@@ -483,6 +532,8 @@ static vfs_fs_ops_t tmpfs_ops = {
     .is_dir = tmpfs_vfs_is_dir,
     .get_info = tmpfs_vfs_get_info,
     .statfs = tmpfs_vfs_statfs,
+    .chmod = tmpfs_vfs_chmod,
+    .chown = tmpfs_vfs_chown,
     .get_position = tmpfs_vfs_get_position,
     .get_size = tmpfs_vfs_get_size,
     .poll = NULL,

@@ -367,6 +367,14 @@ int procfs_read(void *fs_private, void *handle, void *buf, size_t size) {
 strcpy(out + strlen(out), "\nIdle: ");
 
             strcpy(out + strlen(out), proc->is_idle ? "1" : "0");
+            strcpy(out + strlen(out), "\nUid: ");
+            char uid_s[16];
+            itoa(proc->uid, uid_s);
+            strcpy(out + strlen(out), uid_s);
+            strcpy(out + strlen(out), "\nGid: ");
+            char gid_s[16];
+            itoa(proc->gid, gid_s);
+            strcpy(out + strlen(out), gid_s);
             strcpy(out + strlen(out), "\n");
         }
         process_put(proc);

@@ -12,6 +12,12 @@
 #define VFS_MAX_NAME 256
 #define VFS_MAX_MOUNTS 64
 
+#ifndef _UID_T_DECLARED
+#define _UID_T_DECLARED
+typedef uint32_t uid_t;
+typedef uint32_t gid_t;
+#endif
+
 #define POLLIN     0x0001
 #define POLLOUT    0x0004
 #define POLLERR    0x0008
@@ -41,6 +47,9 @@ typedef struct vfs_dirent {
     uint32_t start_cluster;
     uint16_t write_date;
     uint16_t write_time;
+    uint32_t mode;
+    uint32_t uid;
+    uint32_t gid;
 } vfs_dirent_t;
 
 // Filesystem operations — implemented by each filesystem type
@@ -68,12 +77,18 @@ typedef struct vfs_fs_ops {
     int   (*unmount)(void *fs_private);
     int   (*writepage)(struct address_space *mapping, struct page *page);
 
+    // Permission operations
+    int   (*chmod)(void *fs_private, const char *rel_path, uint32_t mode);
+    int   (*chown)(void *fs_private, const char *rel_path, uint32_t uid, uint32_t gid);
+
     // Handle info (for backward compat with syscall position/size queries)
     uint32_t (*get_position)(void *file_handle);
     uint32_t (*get_size)(void *file_handle);
     int      (*poll)(void *fs_private, void *file_handle, struct poll_table *pt);
     int      (*ioctl)(void *fs_private, void *file_handle, uint64_t request, void *arg);
 } vfs_fs_ops_t;
+
+#define MS_NOSUID 0x0002
 
 #define DEVICE_TYPE_BLOCK       0
 #define DEVICE_TYPE_TTY         1
@@ -119,6 +134,7 @@ struct vfs_mount {
     void *fs_private;       // FS-specific data (e.g. FAT32_Volume*)
     char device[32];        // Device name (e.g. "ramfs", "sda1")
     char fs_type[16];       // "ramfs", "fat32"
+    uint32_t flags;         // Mount flags (e.g. MS_NOSUID)
     bool active;
 };
 
@@ -151,9 +167,17 @@ bool vfs_is_directory(const char *path);
 int vfs_get_info(const char *path, vfs_dirent_t *info);
 int vfs_statfs(const char *path, vfs_statfs_t *stat);
 
-// Mount enumeration
+// Permissions & Ownership
+struct process;
+bool vfs_check_permission(uint32_t mode, uint32_t uid, uint32_t gid, int requested_mask, struct process *proc);
+bool vfs_check_path_search(const char *normalized_path, struct process *proc);
+int vfs_chmod(const char *path, uint32_t mode);
+int vfs_chown(const char *path, uint32_t uid, uint32_t gid);
+
+// Mount enumeration & resolution
 int vfs_get_mount_count(void);
 vfs_mount_t* vfs_get_mount(int index);
+vfs_mount_t* vfs_resolve_mount(const char *path, const char **rel_path_out);
 int vfs_sync_all(void);
 
 // Block device auto-mount

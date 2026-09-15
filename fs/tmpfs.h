@@ -13,6 +13,9 @@ typedef struct tmpfs_inode {
     bool is_dir;
     uint32_t size;
     uint32_t attributes;
+    uint32_t mode;
+    uid_t uid;
+    gid_t gid;
     address_space_t i_mapping;
     struct tmpfs_inode *parent;
     struct tmpfs_inode *children;

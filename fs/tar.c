@@ -71,6 +71,13 @@ void tar_parse(void *archive, uint64_t archive_size) {
         }
 
         uint64_t file_size = tar_parse_octal(header->size, 11);
+        uint64_t file_mode = tar_parse_octal(header->mode, 7);
+        uint64_t file_uid = tar_parse_octal(header->uid, 7);
+        uint64_t file_gid = tar_parse_octal(header->gid, 7);
+        if (file_uid == 501 && file_gid == 20) {
+            file_uid = 0;
+            file_gid = 0;
+        }
         
         char full_path[256];
         // Ensure path starts with a '/' for VFS consistency
@@ -94,6 +101,8 @@ void tar_parse(void *archive, uint64_t archive_size) {
         if (header->typeflag == '5') {
             // It's a directory
             vfs_mkdir_recursive(full_path);
+            if (file_mode != 0) vfs_chmod(full_path, (uint32_t)file_mode);
+            vfs_chown(full_path, (uint32_t)file_uid, (uint32_t)file_gid);
         } else if (header->typeflag == '0' || header->typeflag == '\0') {
             // It's a normal file
             // First ensure the parent directory exists
@@ -115,6 +124,8 @@ void tar_parse(void *archive, uint64_t archive_size) {
                 vfs_write(fh, ptr + 512, (int)file_size);
                 vfs_close(fh);
             }
+            if (file_mode != 0) vfs_chmod(full_path, (uint32_t)file_mode);
+            vfs_chown(full_path, (uint32_t)file_uid, (uint32_t)file_gid);
         }
         
         // Advance pointer to the next file header

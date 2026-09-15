@@ -250,6 +250,9 @@ int dev_fb_get_info(const char *dev, vfs_dirent_t *info) {
         strcpy(info->name, dev);
         info->size = (uint64_t)fb.width * fb.height * (fb.bpp / 8);
         info->is_directory = 0;
+        info->mode = 0666;
+        info->uid = 0;
+        info->gid = 0;
         info->start_cluster = 0;
         info->write_date = 0;
         info->write_time = 0;

@@ -7,6 +7,7 @@
 #include "disk.h"
 #include "slab.h"
 #include "spinlock.h"
+#include "process.h"
 #include <stddef.h>
 #include <string.h>
 #include <limits.h>
@@ -216,6 +217,7 @@ typedef struct {
     ext4_file file;
     ext4fs_vol_t *vol;
     bool valid;
+    bool is_directory;
 } ext4fs_handle_t;
 
 static void* vfs_ext4_open(void *fs_private, const char *rel_path,
@@ -227,8 +229,30 @@ static void* vfs_ext4_open(void *fs_private, const char *rel_path,
     ext4fs_handle_t *h = (ext4fs_handle_t *)kcalloc(1, sizeof(ext4fs_handle_t));
     if (!h) return NULL;
 
+    char clean_mode[16];
+    int c = 0;
+    for (int i = 0; mode && mode[i] && c < 15; i++) {
+        if (mode[i] != 'e' && mode[i] != 'x' && mode[i] != 'm') clean_mode[c++] = mode[i];
+    }
+    clean_mode[c] = '\0';
+    if (clean_mode[0] == '\0') strcpy(clean_mode, "r");
+    bool existed = (ext4_inode_exist(path, 1) == EOK || ext4_inode_exist(path, 2) == EOK);
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
-    int r = ext4_fopen(&h->file, path, mode);
+    int r = ext4_fopen(&h->file, path, clean_mode);
+    bool is_dir = false;
+    if (r != EOK && ext4_inode_exist(path, 2) == EOK) {
+        is_dir = true;
+        r = EOK;
+    }
+    if (r == EOK && !existed && !is_dir) {
+        process_t *proc = process_get_current();
+        if (proc) {
+            ext4_mode_set(path, 0666 & ~proc->umask);
+            if (proc->euid != 0 || proc->egid != 0) {
+                ext4_owner_set(path, proc->euid, proc->egid);
+            }
+        }
+    }
     spinlock_release_irqrestore(&vol->lock, flags);
 
     if (r != EOK) {
@@ -242,6 +266,7 @@ static void* vfs_ext4_open(void *fs_private, const char *rel_path,
     }
     h->vol = vol;
     h->valid = true;
+    h->is_directory = is_dir;
     return h;
 }
 
@@ -250,10 +275,13 @@ static void vfs_ext4_close(void *fs_private, void *file_handle) {
     ext4fs_handle_t *h = (ext4fs_handle_t *)file_handle;
     if (!h) return;
     if (h->valid && h->vol) {
-        uint64_t flags = spinlock_acquire_irqsave(&h->vol->lock);
-        ext4_fclose(&h->file);
-        ext4_cache_flush(h->vol->mount_point);
-        spinlock_release_irqrestore(&h->vol->lock, flags);
+        if (!h->is_directory) {
+            uint64_t flags = spinlock_acquire_irqsave(&h->vol->lock);
+            ext4_fclose(&h->file);
+            ext4_cache_flush(h->vol->mount_point);
+            spinlock_release_irqrestore(&h->vol->lock, flags);
+        }
+        h->valid = false;
     }
     kfree_null(h);
 }
@@ -267,7 +295,7 @@ static int vfs_ext4_read(void *fs_private, void *file_handle,
 
     ext4fs_handle_t *h = (ext4fs_handle_t *)file_handle;
 
-    if (!h || !h->valid || !h->vol)
+    if (!h || !h->valid || !h->vol || h->is_directory)
         return -1;
 
     size_t rcnt = 0;
@@ -294,7 +322,7 @@ static int vfs_ext4_write(void *fs_private, void *file_handle,
 
     ext4fs_handle_t *h = (ext4fs_handle_t *)file_handle;
 
-    if (!h || !h->valid || !h->vol)
+    if (!h || !h->valid || !h->vol || h->is_directory)
         return -1;
 
     size_t wcnt = 0;
@@ -422,6 +450,15 @@ static bool vfs_ext4_mkdir(void *fs_private, const char *rel_path) {
     ext4fs_build_path(vol, rel_path, path, sizeof(path));
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
     int r = ext4_dir_mk(path);
+    if (r == EOK) {
+        process_t *proc = process_get_current();
+        if (proc) {
+            ext4_mode_set(path, 0777 & ~proc->umask);
+            if (proc->euid != 0 || proc->egid != 0) {
+                ext4_owner_set(path, proc->euid, proc->egid);
+            }
+        }
+    }
     spinlock_release_irqrestore(&vol->lock, flags);
     if (r != EOK && r != EEXIST) {
         serial_write("[EXT4] mkdir failed: ");
@@ -459,9 +496,17 @@ static bool vfs_ext4_rename(void *fs_private, const char *old_path,
     ext4fs_build_path(vol, old_path, opath, sizeof(opath));
     ext4fs_build_path(vol, new_path, npath, sizeof(npath));
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
-    bool ok = (ext4_frename(opath, npath) == EOK);
+    int r = ext4_frename(opath, npath);
+    if (r == EEXIST) {
+        if (ext4_inode_exist(npath, 2) == EOK) {
+            ext4_dir_rm(npath);
+        } else {
+            ext4_fremove(npath);
+        }
+        r = ext4_frename(opath, npath);
+    }
     spinlock_release_irqrestore(&vol->lock, flags);
-    return ok;
+    return (r == EOK);
 }
 
 static bool vfs_ext4_exists(void *fs_private, const char *rel_path) {
@@ -516,9 +561,16 @@ static int vfs_ext4_get_info(void *fs_private, const char *rel_path,
     ext4fs_ensure_trailing_slash(dpath);
 
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
+    uint32_t mode = 0;
+    uint32_t uid = 0, gid = 0;
     if (ext4_inode_exist(dpath, 2) == EOK || ext4_inode_exist(path, 2) == EOK) {
         info->is_directory = 1;
         info->size = 0;
+        ext4_mode_get(path, &mode);
+        ext4_owner_get(path, &uid, &gid);
+        info->mode = mode ? mode : 0755;
+        info->uid = uid;
+        info->gid = gid;
         spinlock_release_irqrestore(&vol->lock, flags);
         return 0;
     }
@@ -533,50 +585,69 @@ static int vfs_ext4_get_info(void *fs_private, const char *rel_path,
     info->is_directory = 0;
     info->size = (uint32_t)ext4_fsize(&f);
     ext4_fclose(&f);
+    ext4_mode_get(path, &mode);
+    ext4_owner_get(path, &uid, &gid);
+    info->mode = mode ? mode : 0644;
+    info->uid = uid;
+    info->gid = gid;
     spinlock_release_irqrestore(&vol->lock, flags);
     return 0;
 }
 
+static int vfs_ext4_chmod(void *fs_private, const char *rel_path, uint32_t mode) {
+    ext4fs_vol_t *vol = (ext4fs_vol_t *)fs_private;
+    char path[512];
+    ext4fs_build_path(vol, rel_path, path, sizeof(path));
+    uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
+    int r = ext4_mode_set(path, mode & 07777);
+    spinlock_release_irqrestore(&vol->lock, flags);
+    return (r == EOK) ? 0 : -1;
+}
+
+static int vfs_ext4_chown(void *fs_private, const char *rel_path, uint32_t uid, uint32_t gid) {
+    ext4fs_vol_t *vol = (ext4fs_vol_t *)fs_private;
+    char path[512];
+    ext4fs_build_path(vol, rel_path, path, sizeof(path));
+    uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
+    if (uid == (uint32_t)-1 || gid == (uint32_t)-1) {
+        uint32_t cur_uid = 0, cur_gid = 0;
+        if (ext4_owner_get(path, &cur_uid, &cur_gid) == EOK) {
+            if (uid == (uint32_t)-1) uid = cur_uid;
+            if (gid == (uint32_t)-1) gid = cur_gid;
+        }
+    }
+    int r = ext4_owner_set(path, uid, gid);
+    spinlock_release_irqrestore(&vol->lock, flags);
+    return (r == EOK) ? 0 : -1;
+}
+
 static int vfs_ext4_statfs(void *fs_private, vfs_statfs_t *stat) {
     ext4fs_vol_t *vol = (ext4fs_vol_t *)fs_private;
-    struct ext4_mount_stats ms;
-
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
-    int r = ext4_mount_point_stats(vol->mount_point, &ms);
+    struct ext4_mount_stats s;
+    int r = ext4_mount_point_stats(vol->mount_point, &s);
     spinlock_release_irqrestore(&vol->lock, flags);
     if (r != EOK) return -1;
-
-    stat->block_size = ms.block_size;
-    stat->total_blocks = ms.blocks_count;
-    stat->free_blocks = ms.free_blocks_count;
+    stat->total_blocks = s.blocks_count;
+    stat->free_blocks = s.free_blocks_count;
+    stat->block_size = s.block_size;
     return 0;
 }
 
 static int vfs_ext4_sync_fs(void *fs_private) {
     ext4fs_vol_t *vol = (ext4fs_vol_t *)fs_private;
-    if (!vol) return 0;
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
-    ext4_cache_flush(vol->mount_point);
+    int r = ext4_cache_flush(vol->mount_point);
     spinlock_release_irqrestore(&vol->lock, flags);
-    Disk *d = vol->disk;
-    if (d && d->sync) d->sync(d);
-    return 0;
+    return (r == EOK) ? 0 : -1;
 }
 
 static int vfs_ext4_unmount(void *fs_private) {
     ext4fs_vol_t *vol = (ext4fs_vol_t *)fs_private;
-    if (!vol) return 0;
     uint64_t flags = spinlock_acquire_irqsave(&vol->lock);
-    ext4_cache_write_back(vol->mount_point, false);
-    ext4_cache_flush(vol->mount_point);
-    ext4_journal_stop(vol->mount_point);
-    ext4_umount(vol->mount_point);
-    ext4_device_unregister(vol->dev_name);
+    int r = ext4_umount(vol->mount_point);
     spinlock_release_irqrestore(&vol->lock, flags);
-    Disk *d = vol->disk;
-    if (d && d->sync) d->sync(d);
-    kfree_null(vol);
-    return 0;
+    return (r == EOK) ? 0 : -1;
 }
 
 static vfs_fs_ops_t ext4_ops = {
@@ -598,6 +669,8 @@ static vfs_fs_ops_t ext4_ops = {
     .statfs     = vfs_ext4_statfs,
     .sync_fs    = vfs_ext4_sync_fs,
     .unmount    = vfs_ext4_unmount,
+    .chmod      = vfs_ext4_chmod,
+    .chown      = vfs_ext4_chown,
     .poll       = NULL,
     .ioctl      = NULL,
 };

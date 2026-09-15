@@ -2,6 +2,7 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "dev_internal.h"
+#include "../../sys/process.h"
 
 extern void* tun_open(void);
 extern void  tun_close(void *handle);
@@ -11,6 +12,10 @@ extern int   tun_ioctl(void *handle, unsigned long request, void *arg);
 
 vfs_file_t* dev_net_open(const char *devname, const char *mode) {
     (void)mode;
+    process_t *proc = process_get_current();
+    if (proc && proc->euid != 0) {
+        return NULL;
+    }
     if (strcmp(devname, "net/tun") == 0 || strcmp(devname, "tun") == 0 || strcmp(devname, "tun0") == 0) {
         void *th = tun_open();
         if (th) {

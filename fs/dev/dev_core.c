@@ -253,11 +253,31 @@ int vfs_dev_get_info(const char *dev, vfs_dirent_t *info) {
     if (!dev || !info) return -1;
 
     int ret;
-    if ((ret = dev_tty_get_info(dev, info)) == 0) return 0;
-    if ((ret = dev_fb_get_info(dev, info)) == 0) return 0;
-    if ((ret = dev_net_get_info(dev, info)) == 0) return 0;
-    if ((ret = dev_disk_get_info(dev, info)) == 0) return 0;
-    if ((ret = dev_random_get_info(dev, info)) == 0) return 0;
+    info->uid = 0;
+    info->gid = 0;
+
+    if ((ret = dev_tty_get_info(dev, info)) == 0) {
+        if (!info->mode) info->mode = info->is_directory ? 0755 : 0666;
+        info->gid = 5;
+        return 0;
+    }
+    if ((ret = dev_fb_get_info(dev, info)) == 0) {
+        if (!info->mode) info->mode = 0666;
+        return 0;
+    }
+    if ((ret = dev_net_get_info(dev, info)) == 0) {
+        if (!info->mode) info->mode = 0666;
+        return 0;
+    }
+    if ((ret = dev_disk_get_info(dev, info)) == 0) {
+        if (!info->mode) info->mode = 0660;
+        info->gid = 6;
+        return 0;
+    }
+    if ((ret = dev_random_get_info(dev, info)) == 0) {
+        if (!info->mode) info->mode = 0666;
+        return 0;
+    }
 
     return -1;
 }
