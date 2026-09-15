@@ -318,15 +318,30 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland packages
 	@if [ -f LICENSE ]; then printf "  -> LICENSE\n"; mkdir -p $(BUILD_DIR)/initrd/docs; cp LICENSE $(BUILD_DIR)/initrd/docs/; fi
 	@if [ -f base/boot/limine.conf ]; then printf "  -> limine.conf\n"; cp base/boot/limine.conf $(BUILD_DIR)/initrd/; fi
 	
-	@printf "$(YELLOW)[STRIP]$(RESET) Stripping ELF binaries to reduce initrd size...\n"
-	@find $(BUILD_DIR)/initrd/bin $(BUILD_DIR)/initrd/usr/bin -name '*.elf' 2>/dev/null | while read f; do \
-		printf "  stripping $$f\n"; \
-		$(STRIP) --strip-unneeded "$$f" || true; \
+	@printf "$(YELLOW)[STRIP]$(RESET) Stripping binaries to reduce initrd size...\n"
+	@find $(BUILD_DIR)/initrd/bin $(BUILD_DIR)/initrd/usr/bin -type f 2>/dev/null | while read f; do \
+		$(STRIP) --strip-unneeded "$$f" 2>/dev/null || true; \
 	done
-	@printf "$(GREEN)[STRIP]$(RESET) Done stripping binaries.\n"
+	@if [ -d $(BUILD_DIR)/initrd/root ]; then chmod 0700 $(BUILD_DIR)/initrd/root; fi
+	@if [ -d $(BUILD_DIR)/initrd/tmp ]; then chmod 1777 $(BUILD_DIR)/initrd/tmp; fi
+	@if [ -f $(BUILD_DIR)/initrd/etc/shadow ]; then chmod 0600 $(BUILD_DIR)/initrd/etc/shadow; fi
+	@if [ -f $(BUILD_DIR)/initrd/etc/doas.conf ]; then chmod 0400 $(BUILD_DIR)/initrd/etc/doas.conf; fi
+	@if [ -f $(BUILD_DIR)/initrd/bin/login ]; then chmod 4755 $(BUILD_DIR)/initrd/bin/login; fi
+	@if [ -f $(BUILD_DIR)/initrd/bin/passwd ]; then chmod 4755 $(BUILD_DIR)/initrd/bin/passwd; fi
+	@if [ -f $(BUILD_DIR)/initrd/bin/su ]; then chmod 4755 $(BUILD_DIR)/initrd/bin/su; fi
+	@if [ -f $(BUILD_DIR)/initrd/bin/doas ]; then chmod 4755 $(BUILD_DIR)/initrd/bin/doas; fi
+	@if [ -d $(BUILD_DIR)/initrd/etc/rc.d ]; then chmod 0755 $(BUILD_DIR)/initrd/etc/rc.d/*; fi
+	@if [ -d $(BUILD_DIR)/initrd/Library ]; then \
+		find $(BUILD_DIR)/initrd/Library -type d -exec chmod 0755 {} + 2>/dev/null || true; \
+		find $(BUILD_DIR)/initrd/Library -type f -exec chmod 0644 {} + 2>/dev/null || true; \
+	fi
+	@if [ -d $(BUILD_DIR)/initrd/etc/skel ]; then \
+		find $(BUILD_DIR)/initrd/etc/skel -type d -exec chmod 0755 {} + 2>/dev/null || true; \
+		find $(BUILD_DIR)/initrd/etc/skel -type f -exec chmod 0644 {} + 2>/dev/null || true; \
+	fi
 
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar...\n"
-	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --exclude="._*" -cf ../initrd.tar *
+	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname wheel --exclude="._*" -cf ../initrd.tar *
 	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar\n"
 
 $(BUILD_DIR)/initrd.tar.lz4: $(BUILD_DIR)/initrd.tar

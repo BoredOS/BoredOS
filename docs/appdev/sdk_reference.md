@@ -5,7 +5,7 @@
 
 ---
 
-BoredOS provides a compact userland SDK for building `.elf` applications.
+BoredOS provides a compact userland SDK for building native applications.
 This page is the high-level map; detailed API references now live in dedicated pages.
 
 ## SDK Structure

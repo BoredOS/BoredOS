@@ -91,13 +91,13 @@ Inside `init_graphics()` ([`core/main.c`](../../../core/main.c)), `g_headless_mo
 ### Runtime Behavior Differences
 
 * **Graphical Mode (`g_headless_mode == false`):**
-  * `init_tty()` spawns 10 shells (`/bin/bsh.elf 1` .. `/bin/bsh.elf 10`) on `/dev/tty1`–`/dev/tty10`.
+  * `init_tty()` spawns 10 shells (`/bin/bsh 1` .. `/bin/bsh 10`) on `/dev/tty1`–`/dev/tty10`.
   * `COM1` is dedicated to kernel logging (`serial_write`, `log_ok`).
   * `kmain()` executes `tty_blit_active()` every 16ms.
 
 * **Headless Mode (`g_headless_mode == true`):**
   * Framebuffer setup and graphical VT shells (`tty1`–`tty10`) are omitted entirely.
-  * A single shell (`/bin/bsh.elf 10`) spawns attached directly to `/dev/ttyS0`.
+  * A single shell (`/bin/bsh 10`) spawns attached directly to `/dev/ttyS0`.
   * The `tty_blit_active()` call in `kmain()` is bypassed to avoid wasted render cycles.
 
 ### Log Collision Prevention

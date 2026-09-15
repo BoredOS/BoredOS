@@ -50,7 +50,7 @@ Instructions for compiling the OS from source.
 -   [`Usage`](build/usage.md): Understanding the Makefile targets, QEMU emulation, and flashing to bare metal hardware.
 
 ### 3. [Application Development](appdev/)
-The SDK and toolchain guides for creating your own `.elf` userland binaries.
+The SDK and toolchain guides for creating your own native userland applications.
 -   [`SDK Reference`](appdev/sdk_reference.md): Overview hub for SDK layout, includes, and links to detailed libc/syscall docs.
 -   [`Syscalls`](appdev/syscalls.md): Current syscall numbers, FS/SYSTEM command IDs, and wrapper guidance.
 -   [`libc Reference`](appdev/libc_reference.md): Current libc headers, implemented APIs, and behavior notes.

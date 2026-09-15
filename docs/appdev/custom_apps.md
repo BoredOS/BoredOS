@@ -59,7 +59,7 @@ INCLUDES = -I$(BOREDOS_SDK)/include
 # Source files
 SOURCES = $(wildcard src/*.c)
 OBJECTS = $(SOURCES:src/%.c=obj/%.o)
-BINARY = calc.elf
+BINARY = calc
 
 all: $(BINARY)
 

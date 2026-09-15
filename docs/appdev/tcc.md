@@ -22,8 +22,8 @@ int main() {
 Compile and run it:
 
 ```bash
-tcc hello.c -o hello.elf
-./hello.elf
+tcc hello.c -o hello
+./hello
 ```
 
 ## Developing Direct Framebuffer (Graphics) Applications
@@ -85,7 +85,7 @@ int main() {
 ### Compilation Command
 
 ```bash
-tcc hello_fb.c -o hello_fb.elf
+tcc hello_fb.c -o hello_fb
 ```
 
 ## Technical Details
@@ -119,5 +119,5 @@ If you encounter an "I/O Error" while writing the output file, you may have run 
 ### Missing Headers
 Ensure that you are including headers using the standard syntax: `#include <stdio.h>`. If you are using custom paths, use the `-I` flag:
 ```bash
-tcc myapp.c -I/root/my_headers -o myapp.elf
+tcc myapp.c -I/root/my_headers -o myapp
 ```

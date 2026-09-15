@@ -13,12 +13,12 @@ YAWN bootstraps userspace, manages login terminals defined in `/etc/ttys`, execu
 The bootloader passes the init binary path on the kernel command line:
 
 ```text
-init=/bin/yawn.elf
+init=/bin/yawn
 ```
 
-When the kernel finishes hardware setup, it spawns `/bin/yawn.elf` as PID 1 with stdin, stdout, and stderr connected to `/dev/console`.
+When the kernel finishes hardware setup, it spawns `/bin/yawn` as PID 1 with stdin, stdout, and stderr connected to `/dev/console`.
 
-If `/bin/yawn.elf` fails to spawn, the kernel attempts to spawn `/bin/bsh.elf` as an emergency shell.
+If `/bin/yawn` fails to spawn, the kernel attempts to spawn `/bin/bsh` as an emergency shell.
 
 ### Startup Sequence
 
@@ -30,7 +30,7 @@ When PID 1 starts:
    [yawn] BoredOS YAWN (PID 1) started. You Awake? Well, Now what?
    ```
 3. It loads `/etc/rc.conf` for service settings and `/etc/ttys` for terminal definitions.
-4. It runs `/etc/rc` synchronously via `/bin/bsh.elf` to execute startup scripts and launch services.
+4. It runs `/etc/rc` synchronously via `/bin/bsh` to execute startup scripts and launch services.
 5. It captures the console boot log and redirects its stdout and stderr to `/var/log/yawn.log` so all init and service output is recorded.
 6. It clears the screen and starts configured login terminals.
 
@@ -101,20 +101,20 @@ This file defines the terminals YAWN should manage. Lines starting with `#` are 
 
 ```text
 # name    command                 type      status       mode
-tty1      "/bin/bsh.elf 1"        ansi      on           respawn
-tty2      "/bin/bsh.elf 2"        ansi      on           lazy
-tty3      "/bin/bsh.elf 3"        ansi      on           lazy
-tty4      "/bin/bsh.elf 4"        ansi      on           lazy
-tty5      "/bin/bsh.elf 5"        ansi      off          off
-tty6      "/bin/bsh.elf 6"        ansi      off          off
-tty7      "/bin/bsh.elf 7"        ansi      off          off
-tty8      "/bin/bsh.elf 8"        ansi      off          off
-tty9      "/bin/bsh.elf 9"        ansi      off          off
-tty10     "/bin/bsh.elf 10"       ansi      off          off
-ttyS0     "/bin/bsh.elf 11"       vt100     off          off
-ttyS1     "/bin/bsh.elf 12"       vt100     off          off
-ttyS2     "/bin/bsh.elf 13"       vt100     off          off
-ttyS3     "/bin/bsh.elf 14"       vt100     off          off
+tty1      "/bin/bsh 1"            ansi      on           respawn
+tty2      "/bin/bsh 2"            ansi      on           lazy
+tty3      "/bin/bsh 3"            ansi      on           lazy
+tty4      "/bin/bsh 4"            ansi      on           lazy
+tty5      "/bin/bsh 5"            ansi      off          off
+tty6      "/bin/bsh 6"            ansi      off          off
+tty7      "/bin/bsh 7"            ansi      off          off
+tty8      "/bin/bsh 8"            ansi      off          off
+tty9      "/bin/bsh 9"            ansi      off          off
+tty10     "/bin/bsh 10"           ansi      off          off
+ttyS0     "/bin/bsh 11"           vt100     off          off
+ttyS1     "/bin/bsh 12"           vt100     off          off
+ttyS2     "/bin/bsh 13"           vt100     off          off
+ttyS3     "/bin/bsh 14"           vt100     off          off
 ```
 
 Field meanings:
@@ -161,13 +161,13 @@ if [ "$action" = "start" ]; then
         fi
 
         echo "Starting example daemon..."
-        /bin/example.elf &
+        /bin/example &
         echo $! > /var/run/example.pid
         echo "example started with PID $!."
     fi
 elif [ "$action" = "forcestart" ]; then
     echo "Starting example daemon..."
-    /bin/example.elf &
+    /bin/example &
     echo $! > /var/run/example.pid
     echo "example started with PID $!."
 elif [ "$action" = "stop" ]; then
@@ -229,7 +229,7 @@ Flags:
 
 ### Using the yawn Command
 
-When run with a PID other than 1, `/bin/yawn.elf` is a client tool that sends signals to PID 1:
+When run with a PID other than 1, `/bin/yawn` is a client tool that sends signals to PID 1:
 
 ```sh
 yawn status    # Prints whether PID 1 is active

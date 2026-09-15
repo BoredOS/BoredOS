@@ -101,7 +101,7 @@ This file is similar to `.zshrc` or `.bashrc` and can define:
 Prompt tokens:
 - `%n` username
 - `%h` hostname
-- `%~` cwd ("~" for `/root`)
+- `%~` cwd ("~" for `$HOME`)
 - `%T` time (HH:MM)
 
 Example:

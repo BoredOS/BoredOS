@@ -210,7 +210,7 @@ On every frame refresh, the ball updates its physics coordinates using Euler int
 
 1. Compile the bouncing ball client natively:
    ```bash
-   tcc fb_bouncing_ball.c -o /bin/fb_bouncing_ball.elf
+   tcc fb_bouncing_ball.c -o /bin/fb_bouncing_ball
    ```
 2. Type `fb_bouncing_ball` and press Enter.
 3. The display will enter graphics mode and render a bright red bouncing ball accelerating under gravity. The terminal will be cleanly restored after 10 seconds or immediately if you press `Ctrl+C`.
