@@ -107,6 +107,12 @@ LIMINE_URL_BASE = https://github.com/limine-bootloader/limine/raw/v$(LIMINE_VERS
 
 HOST_OS := $(shell uname -s 2>/dev/null || echo Windows)
 
+ifeq ($(HOST_OS),Darwin)
+TAR_INITRD_CMD = COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname wheel --exclude="._*" -cf ../initrd.tar *
+else
+TAR_INITRD_CMD = tar --owner=0 --group=0 --numeric-owner --exclude="._*" -cf ../initrd.tar *
+endif
+
 .PHONY: all clean run run-hd limine-setup run-windows run-mac run-linux run-hd-mac run-hd-windows run-hd-linux userland usr-fetch \
         run-serial run-hd-serial run-serial-mac run-serial-linux run-serial-windows run-hd-serial-mac run-hd-serial-linux run-hd-serial-windows \
         bochs run-bochs run-bochs-hd run-bochs-serial run-bochs-hd-serial \
@@ -341,7 +347,7 @@ $(BUILD_DIR)/initrd.tar: $(KERNEL_ELF) userland packages
 	fi
 
 	@printf "$(YELLOW)[TAR]$(RESET) Creating initrd.tar...\n"
-	cd $(BUILD_DIR)/initrd && COPYFILE_DISABLE=1 tar --uid 0 --gid 0 --uname root --gname wheel --exclude="._*" -cf ../initrd.tar *
+	cd $(BUILD_DIR)/initrd && $(TAR_INITRD_CMD)
 	@printf "$(GREEN)[OK]$(RESET) Initrd created: $(BUILD_DIR)/initrd.tar\n"
 
 $(BUILD_DIR)/initrd.tar.lz4: $(BUILD_DIR)/initrd.tar
