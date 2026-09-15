@@ -70,7 +70,7 @@
 	branch = main
 [submodule "usr/lwext4"]
 	path = fs/vendor/lwext4
-	url = https://github.com/gkostka/lwext4.git
+	url = https://github.com/boredos/lwext4.git
 	ignore = all
 	branch = master
 [submodule "usr/mlibc"]
