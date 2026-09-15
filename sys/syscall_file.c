@@ -90,6 +90,46 @@ void fd_addref(process_t *proc, int fd) {
   }
 }
 
+static bool vfs_check_parent_write_permission(const char *norm_path, process_t *proc, uint32_t target_uid, bool is_delete_or_rename) {
+  if (!proc || proc->euid == 0) return true;
+
+  char parent_path[VFS_MAX_PATH];
+  strncpy(parent_path, norm_path, sizeof(parent_path) - 1);
+  parent_path[sizeof(parent_path) - 1] = '\0';
+
+  char *slash = NULL;
+  for (int i = 0; parent_path[i]; i++) {
+    if (parent_path[i] == '/') slash = &parent_path[i];
+  }
+  if (!slash) {
+    strcpy(parent_path, "/");
+  } else if (slash == parent_path) {
+    *(slash + 1) = '\0';
+  } else {
+    *slash = '\0';
+  }
+
+  if (!vfs_check_path_search(parent_path, proc)) {
+    return false;
+  }
+
+  vfs_dirent_t pinfo;
+  memset(&pinfo, 0, sizeof(pinfo));
+  if (vfs_get_info(parent_path, &pinfo) != 0) {
+    return false;
+  }
+  uint32_t pmode = pinfo.mode ? pinfo.mode : 0755;
+  if (!vfs_check_permission(pmode, pinfo.uid, pinfo.gid, 3 /* write + search */, proc)) {
+    return false;
+  }
+  if (is_delete_or_rename && (pmode & 01000)) {
+    if (proc->euid != 0 && proc->euid != target_uid && proc->euid != pinfo.uid) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static uint64_t fs_cmd_open(const syscall_args_t *args) {
   process_t *proc = process_get_current();
   const char *path = (const char *)args->arg2;
@@ -102,6 +142,31 @@ static uint64_t fs_cmd_open(const syscall_args_t *args) {
     if ((uintptr_t)mode_arg == 1) mode = "w";
     else if ((uintptr_t)mode_arg == 2) mode = "w+";
     else if ((uintptr_t)mode_arg > 4096) mode = mode_arg;
+  }
+
+  char norm_path[VFS_MAX_PATH];
+  vfs_normalize_path(proc ? proc->cwd : "/", path, norm_path);
+
+  if (!vfs_check_path_search(norm_path, proc)) {
+    return (uint64_t)-EACCES;
+  }
+
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(norm_path, &info) == 0) {
+    int req = 0;
+    if (strchr(mode, 'r') || strchr(mode, '+')) req |= 4;
+    if (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+')) req |= 2;
+    uint32_t fmode = info.mode ? info.mode : (info.is_directory ? 0755 : (strncmp(norm_path, "/dev/", 5) == 0 ? 0666 : 0644));
+    if (!vfs_check_permission(fmode, info.uid, info.gid, req, proc)) {
+      return (uint64_t)-EACCES;
+    }
+  } else {
+    if (strchr(mode, 'w') || strchr(mode, 'a') || strchr(mode, '+')) {
+      if (!vfs_check_parent_write_permission(norm_path, proc, 0, false)) {
+        return (uint64_t)-EACCES;
+      }
+    }
   }
 
   vfs_file_t *vf = vfs_open(path, mode);
@@ -333,12 +398,58 @@ static uint64_t fs_cmd_delete(const syscall_args_t *args) {
     return (uint64_t)-EFAULT;
   char normalized[VFS_MAX_PATH];
   vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
+
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(normalized, &info) != 0) {
+    return (uint64_t)-ENOENT;
+  }
+
+  if (!vfs_check_parent_write_permission(normalized, proc, info.uid, true)) {
+    return (uint64_t)-EACCES;
+  }
+
   if (vfs_is_directory(normalized)) {
     return vfs_rmdir(normalized) ? 0 : (uint64_t)-ENOENT;
   }
   if (vfs_delete(normalized))
     return 0;
   return (uint64_t)-ENOENT;
+}
+
+static uint64_t fs_cmd_rename(const syscall_args_t *args) {
+  process_t *proc = process_get_current();
+  const char *old_path = (const char *)args->arg2;
+  const char *new_path = (const char *)args->arg3;
+  if (!old_path || !is_valid_user_string(old_path, 1024) ||
+      !new_path || !is_valid_user_string(new_path, 1024))
+    return (uint64_t)-EFAULT;
+
+  char norm_old[VFS_MAX_PATH];
+  char norm_new[VFS_MAX_PATH];
+  vfs_normalize_path(proc ? proc->cwd : "/", old_path, norm_old);
+  vfs_normalize_path(proc ? proc->cwd : "/", new_path, norm_new);
+
+  vfs_dirent_t old_info;
+  memset(&old_info, 0, sizeof(old_info));
+  if (vfs_get_info(norm_old, &old_info) != 0) {
+    return (uint64_t)-ENOENT;
+  }
+
+  if (!vfs_check_parent_write_permission(norm_old, proc, old_info.uid, true)) {
+    return (uint64_t)-EACCES;
+  }
+
+  vfs_dirent_t new_info;
+  memset(&new_info, 0, sizeof(new_info));
+  bool new_exists = (vfs_get_info(norm_new, &new_info) == 0);
+  if (!vfs_check_parent_write_permission(norm_new, proc, new_exists ? new_info.uid : 0, new_exists)) {
+    return (uint64_t)-EACCES;
+  }
+
+  if (vfs_rename(norm_old, norm_new))
+    return 0;
+  return (uint64_t)-EIO;
 }
 
 static uint64_t fs_cmd_mkdir(const syscall_args_t *args) {
@@ -350,6 +461,9 @@ static uint64_t fs_cmd_mkdir(const syscall_args_t *args) {
   vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
   if (vfs_exists(normalized)) {
     return (uint64_t)-17; // -EEXIST
+  }
+  if (!vfs_check_parent_write_permission(normalized, proc, 0, false)) {
+    return (uint64_t)-EACCES;
   }
   return vfs_mkdir(normalized) ? 0 : (uint64_t)-ENOENT;
 }
@@ -822,16 +936,16 @@ uint64_t handle_sys_stat(const syscall_args_t *args) {
   }
 
   if (is_dir || v_info.is_directory) {
-    st->st_mode = S_IFDIR | 0755;
+    st->st_mode = S_IFDIR | (v_info.mode ? (v_info.mode & 07777) : 0755);
     st->st_nlink = 2;
     st->st_size = 4096;
     st->st_blocks = 8;
     st->st_ino = v_info.start_cluster ? v_info.start_cluster : 1;
   } else if (strncmp(normalized, "/dev/", 5) == 0) {
     if (k_strstr(normalized, "sd") || k_strstr(normalized, "hd") || k_strstr(normalized, "nvme") || k_strstr(normalized, "ram")) {
-      st->st_mode = S_IFBLK | 0660;
+      st->st_mode = S_IFBLK | (v_info.mode ? (v_info.mode & 07777) : 0660);
     } else {
-      st->st_mode = S_IFCHR | 0666;
+      st->st_mode = S_IFCHR | (v_info.mode ? (v_info.mode & 07777) : 0666);
     }
     st->st_nlink = 1;
     st->st_size = v_info.size;
@@ -839,12 +953,15 @@ uint64_t handle_sys_stat(const syscall_args_t *args) {
     st->st_rdev = 0x0103;
     st->st_ino = v_info.start_cluster ? v_info.start_cluster : 2;
   } else {
-    st->st_mode = S_IFREG | 0644;
+    st->st_mode = S_IFREG | (v_info.mode ? (v_info.mode & 07777) : 0644);
     st->st_nlink = 1;
     st->st_size = (int64_t)v_info.size;
     st->st_blocks = (int64_t)((v_info.size + 511) / 512);
     st->st_ino = v_info.start_cluster ? v_info.start_cluster : 3;
   }
+
+  st->st_uid = v_info.uid;
+  st->st_gid = v_info.gid;
 
   int64_t sec = fat_datetime_to_unix(v_info.write_date, v_info.write_time);
   st->st_atim.tv_sec = sec;
@@ -893,16 +1010,18 @@ uint64_t handle_sys_fstat(const syscall_args_t *args) {
         memset(&v_info, 0, sizeof(v_info));
         if (file->path[0] && vfs_get_info(file->path, &v_info) == 0) {
           if (v_info.is_directory || vfs_is_directory(file->path)) {
-            st->st_mode = S_IFDIR | 0755;
+            st->st_mode = S_IFDIR | (v_info.mode ? (v_info.mode & 07777) : 0755);
             st->st_nlink = 2;
             st->st_size = 4096;
           } else {
-            st->st_mode = S_IFREG | 0644;
+            st->st_mode = S_IFREG | (v_info.mode ? (v_info.mode & 07777) : 0644);
             st->st_nlink = 1;
             uint32_t sz = (file->mount && file->mount->ops && file->mount->ops->get_size) ?
                           file->mount->ops->get_size(file->fs_handle) : v_info.size;
             st->st_size = (int64_t)sz;
           }
+          st->st_uid = v_info.uid;
+          st->st_gid = v_info.gid;
           st->st_ino = v_info.start_cluster ? v_info.start_cluster : 1;
           int64_t msec = fat_datetime_to_unix(v_info.write_date, v_info.write_time);
           st->st_atim.tv_sec = msec;
@@ -1053,6 +1172,13 @@ uint64_t handle_sys_chdir(const syscall_args_t *args) {
   return fs_cmd_chdir(&shifted);
 }
 
+uint64_t handle_sys_rename(const syscall_args_t *args) {
+  syscall_args_t shifted = *args;
+  shifted.arg2 = args->arg1;
+  shifted.arg3 = args->arg2;
+  return fs_cmd_rename(&shifted);
+}
+
 uint64_t handle_sys_mkdir(const syscall_args_t *args) {
   syscall_args_t shifted = *args;
   shifted.arg2 = args->arg1; // path
@@ -1175,6 +1301,7 @@ uint64_t handle_sys_faccessat(const syscall_args_t *args) {
   process_t *proc = process_get_current();
   int dirfd = (int)args->arg1;
   const char *path = (const char *)args->arg2;
+  int mode = (int)args->arg3;
 
   if (!path || !is_valid_user_string(path, 1024))
     return (uint64_t)-EFAULT;
@@ -1193,14 +1320,209 @@ uint64_t handle_sys_faccessat(const syscall_args_t *args) {
   }
 
   vfs_normalize_path(cwd, path, normalized);
-  if (vfs_exists(normalized))
-    return 0;
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(normalized, &info) != 0 && !vfs_exists(normalized))
+    return (uint64_t)-ENOENT;
 
-  return (uint64_t)-ENOENT;
+  if (mode == 0) return 0;
+
+  uint32_t fmode = info.mode ? info.mode : (info.is_directory ? 0755 : 0644);
+  int flags = (int)args->arg4;
+  process_t test_proc;
+  if (proc) {
+    test_proc = *proc;
+    if (!(flags & 0x200 /* AT_EACCESS */)) {
+      test_proc.euid = proc->uid;
+      test_proc.egid = proc->gid;
+    }
+  }
+  if (!vfs_check_permission(fmode, info.uid, info.gid, mode, proc ? &test_proc : NULL)) {
+    return (uint64_t)-EACCES;
+  }
+  return 0;
+}
+
+uint64_t handle_sys_umask(const syscall_args_t *args) {
+  process_t *proc = process_get_current();
+  if (!proc) return 022;
+  uint32_t old_umask = proc->umask;
+  proc->umask = (uint32_t)args->arg1 & 0777;
+  return (uint64_t)old_umask;
+}
+
+uint64_t handle_sys_chmod(const syscall_args_t *args) {
+  const char *path = (const char *)args->arg1;
+  uint32_t mode = (uint32_t)args->arg2;
+  if (!path || !is_valid_user_string(path, 1024)) return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  char normalized[VFS_MAX_PATH];
+  vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
+
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(normalized, &info) != 0 && !vfs_exists(normalized)) return (uint64_t)-ENOENT;
+
+  if (proc && proc->euid != 0 && proc->euid != info.uid) {
+    return (uint64_t)-EPERM;
+  }
+
+  int ret = vfs_chmod(normalized, mode);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
+}
+
+uint64_t handle_sys_fchmod(const syscall_args_t *args) {
+  int fd = (int)args->arg1;
+  uint32_t mode = (uint32_t)args->arg2;
+  process_t *proc = process_get_current();
+  if (!proc || fd < 0 || fd >= MAX_PROCESS_FDS || !proc->fds[fd]) return (uint64_t)-EBADF;
+  if (proc->fd_kind[fd] != PROC_FD_KIND_FILE) return (uint64_t)-EINVAL;
+  process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+  if (!ref || !ref->file) return (uint64_t)-EINVAL;
+  vfs_file_t *vf = (vfs_file_t *)ref->file;
+  if (!vf->path[0]) return (uint64_t)-EINVAL;
+
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(vf->path, &info) != 0 && !vfs_exists(vf->path)) return (uint64_t)-ENOENT;
+  if (proc->euid != 0 && proc->euid != info.uid) return (uint64_t)-EPERM;
+
+  int ret = vfs_chmod(vf->path, mode);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
+}
+
+uint64_t handle_sys_chown(const syscall_args_t *args) {
+  const char *path = (const char *)args->arg1;
+  uint32_t uid = (uint32_t)args->arg2;
+  uint32_t gid = (uint32_t)args->arg3;
+  if (!path || !is_valid_user_string(path, 1024)) return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  if (proc && proc->euid != 0) return (uint64_t)-EPERM;
+
+  char normalized[VFS_MAX_PATH];
+  vfs_normalize_path(proc ? proc->cwd : "/", path, normalized);
+
+  int ret = vfs_chown(normalized, uid, gid);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
+}
+
+uint64_t handle_sys_fchown(const syscall_args_t *args) {
+  int fd = (int)args->arg1;
+  uint32_t uid = (uint32_t)args->arg2;
+  uint32_t gid = (uint32_t)args->arg3;
+  process_t *proc = process_get_current();
+  if (proc && proc->euid != 0) return (uint64_t)-EPERM;
+  if (!proc || fd < 0 || fd >= MAX_PROCESS_FDS || !proc->fds[fd]) return (uint64_t)-EBADF;
+  if (proc->fd_kind[fd] != PROC_FD_KIND_FILE) return (uint64_t)-EINVAL;
+  process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[fd];
+  if (!ref || !ref->file) return (uint64_t)-EINVAL;
+  vfs_file_t *vf = (vfs_file_t *)ref->file;
+  if (!vf->path[0]) return (uint64_t)-EINVAL;
+
+  int ret = vfs_chown(vf->path, uid, gid);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
+}
+
+uint64_t handle_sys_lchown(const syscall_args_t *args) {
+  return handle_sys_chown(args);
+}
+
+uint64_t handle_sys_fchownat(const syscall_args_t *args) {
+  int dirfd = (int)args->arg1;
+  const char *path = (const char *)args->arg2;
+  uint32_t uid = (uint32_t)args->arg3;
+  uint32_t gid = (uint32_t)args->arg4;
+  int flags = (int)args->arg5;
+
+  if (!path || !path[0] || (flags & 0x1000 /* AT_EMPTY_PATH */)) {
+    syscall_args_t fargs;
+    fargs.arg1 = (uint64_t)dirfd;
+    fargs.arg2 = (uint64_t)uid;
+    fargs.arg3 = (uint64_t)gid;
+    return handle_sys_fchown(&fargs);
+  }
+
+  if (!is_valid_user_string(path, 1024)) return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  if (proc && proc->euid != 0) return (uint64_t)-EPERM;
+
+  char base_dir[VFS_MAX_PATH];
+  if (path[0] == '/') {
+    base_dir[0] = '/';
+    base_dir[1] = '\0';
+  } else if (dirfd == -100 /* AT_FDCWD */ || !proc) {
+    strncpy(base_dir, proc ? proc->cwd : "/", sizeof(base_dir) - 1);
+    base_dir[sizeof(base_dir) - 1] = '\0';
+  } else {
+    if (dirfd < 0 || dirfd >= MAX_PROCESS_FDS || !proc->fds[dirfd] || proc->fd_kind[dirfd] != PROC_FD_KIND_FILE) {
+      return (uint64_t)-EBADF;
+    }
+    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[dirfd];
+    if (!ref || !ref->file) return (uint64_t)-EBADF;
+    vfs_file_t *vf = (vfs_file_t *)ref->file;
+    strncpy(base_dir, vf->path, sizeof(base_dir) - 1);
+    base_dir[sizeof(base_dir) - 1] = '\0';
+  }
+
+  char normalized[VFS_MAX_PATH];
+  vfs_normalize_path(base_dir, path, normalized);
+  int ret = vfs_chown(normalized, uid, gid);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
+}
+
+uint64_t handle_sys_fchmodat(const syscall_args_t *args) {
+  int dirfd = (int)args->arg1;
+  const char *path = (const char *)args->arg2;
+  uint32_t mode = (uint32_t)args->arg3;
+  int flags = (int)args->arg4;
+
+  if (!path || !path[0] || (flags & 0x1000 /* AT_EMPTY_PATH */)) {
+    syscall_args_t fargs;
+    fargs.arg1 = (uint64_t)dirfd;
+    fargs.arg2 = (uint64_t)mode;
+    return handle_sys_fchmod(&fargs);
+  }
+
+  if (!is_valid_user_string(path, 1024)) return (uint64_t)-EFAULT;
+
+  process_t *proc = process_get_current();
+  char base_dir[VFS_MAX_PATH];
+  if (path[0] == '/') {
+    base_dir[0] = '/';
+    base_dir[1] = '\0';
+  } else if (dirfd == -100 /* AT_FDCWD */ || !proc) {
+    strncpy(base_dir, proc ? proc->cwd : "/", sizeof(base_dir) - 1);
+    base_dir[sizeof(base_dir) - 1] = '\0';
+  } else {
+    if (dirfd < 0 || dirfd >= MAX_PROCESS_FDS || !proc->fds[dirfd] || proc->fd_kind[dirfd] != PROC_FD_KIND_FILE) {
+      return (uint64_t)-EBADF;
+    }
+    process_fd_file_ref_t *ref = (process_fd_file_ref_t *)proc->fds[dirfd];
+    if (!ref || !ref->file) return (uint64_t)-EBADF;
+    vfs_file_t *vf = (vfs_file_t *)ref->file;
+    strncpy(base_dir, vf->path, sizeof(base_dir) - 1);
+    base_dir[sizeof(base_dir) - 1] = '\0';
+  }
+
+  char normalized[VFS_MAX_PATH];
+  vfs_normalize_path(base_dir, path, normalized);
+
+  vfs_dirent_t info;
+  memset(&info, 0, sizeof(info));
+  if (vfs_get_info(normalized, &info) != 0 && !vfs_exists(normalized)) return (uint64_t)-ENOENT;
+  if (proc && proc->euid != 0 && proc->euid != info.uid) return (uint64_t)-EPERM;
+
+  int ret = vfs_chmod(normalized, mode);
+  return (ret == 0) ? 0 : (uint64_t)-EIO;
 }
 
 uint64_t handle_sys_mount(const syscall_args_t *args) {
   process_t *proc = process_get_current();
+  if (!proc || proc->euid != 0) return (uint64_t)-EPERM;
+
   const char *source = (const char *)args->arg1;
   const char *target = (const char *)args->arg2;
   const char *fstype = (const char *)args->arg3;
@@ -1299,6 +1621,8 @@ uint64_t handle_sys_mount(const syscall_args_t *args) {
 
 uint64_t handle_sys_umount2(const syscall_args_t *args) {
   process_t *proc = process_get_current();
+  if (!proc || proc->euid != 0) return (uint64_t)-EPERM;
+
   const char *target = (const char *)args->arg1;
   if (!target || !is_valid_user_string(target, 1024))
     return (uint64_t)-EFAULT;

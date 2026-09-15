@@ -149,8 +149,11 @@ typedef struct {
     size_t size;
 } elf_segment_info_t;
 
+#ifndef _UID_T_DECLARED
+#define _UID_T_DECLARED
 typedef uint32_t uid_t;
 typedef uint32_t gid_t;
+#endif
 
 typedef struct process {
     uint32_t pid;
@@ -165,12 +168,19 @@ typedef struct process {
     bool is_user;
     int state;
 
+#undef NGROUPS_MAX
+#define NGROUPS_MAX 32
+
     uid_t uid;
     uid_t euid;
     uid_t suid;
     gid_t gid;
     gid_t egid;
     gid_t sgid;
+    gid_t groups[NGROUPS_MAX];
+    int ngroups;
+    uint32_t umask;
+    bool is_suid_elevated;
     
     uint64_t heap_start;
     uint64_t heap_end;

@@ -38,12 +38,16 @@ static void disk_k_strcpy(char *dst, const char *src, int max) {
 
 static uint64_t sys_cmd_reboot(const syscall_args_t *args) {
   (void)args;
+  process_t *proc = process_get_current();
+  if (proc && proc->euid != 0) return (uint64_t)-EPERM;
   k_reboot();
   return 0;
 }
 
 static uint64_t sys_cmd_shutdown(const syscall_args_t *args) {
   (void)args;
+  process_t *proc = process_get_current();
+  if (proc && proc->euid != 0) return (uint64_t)-EPERM;
   k_shutdown();
   return 0;
 }

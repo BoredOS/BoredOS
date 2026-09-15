@@ -2,6 +2,7 @@
 // This software is released under the GNU General Public License v3.0. See LICENSE file for details.
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "process.h"
+#include "errno.h"
 #include "gdt.h"
 #include "idt.h"
 #include "mmu.h"
@@ -754,6 +755,10 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
         new_proc->gid = parent->gid;
         new_proc->egid = parent->egid;
         new_proc->sgid = parent->sgid;
+        new_proc->ngroups = parent->ngroups;
+        memcpy(new_proc->groups, parent->groups, sizeof(new_proc->groups));
+        new_proc->umask = parent->umask;
+        new_proc->is_suid_elevated = false;
     } else {
         memset(new_proc->cwd, 0, 1024);
         new_proc->cwd[0] = '/';
@@ -765,6 +770,71 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
         new_proc->gid = 0;
         new_proc->egid = 0;
         new_proc->sgid = 0;
+        new_proc->ngroups = 0;
+        new_proc->umask = 0022;
+        new_proc->is_suid_elevated = false;
+    }
+
+    vfs_dirent_t file_stat;
+    memset(&file_stat, 0, sizeof(file_stat));
+    if (vfs_get_info(filepath, &file_stat) != 0) {
+        return NULL;
+    }
+    uint32_t fmode = file_stat.mode ? file_stat.mode : 0755;
+    if (!vfs_check_permission(fmode, file_stat.uid, file_stat.gid, 1 /* X_OK */, new_proc)) {
+        return NULL;
+    }
+
+    vfs_file_t *script_file = vfs_open(filepath, "r");
+    if (script_file) {
+        char hdr[256];
+        int n = vfs_read(script_file, hdr, sizeof(hdr) - 1);
+        vfs_close(script_file);
+        if (n >= 2 && hdr[0] == '#' && hdr[1] == '!') {
+            hdr[n] = '\0';
+            char *line_end = strchr(hdr, '\n');
+            if (line_end) *line_end = '\0';
+            char *cr = strchr(hdr, '\r');
+            if (cr) *cr = '\0';
+
+            char *p = hdr + 2;
+            while (*p == ' ' || *p == '\t') p++;
+            char *interp = p;
+            while (*p && *p != ' ' && *p != '\t') p++;
+            char *interp_arg = NULL;
+            if (*p) {
+                *p++ = '\0';
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p) interp_arg = p;
+            }
+
+            if (interp && interp[0]) {
+                static int spawn_shebang_depth = 0;
+                if (spawn_shebang_depth >= 4) {
+                    spawn_shebang_depth = 0;
+                    process_put(new_proc);
+                    return NULL;
+                }
+                spawn_shebang_depth++;
+
+                char new_args[1024];
+                new_args[0] = '\0';
+                if (interp_arg && interp_arg[0]) {
+                    strncpy(new_args, interp_arg, sizeof(new_args) - 1);
+                    strcat(new_args, " ");
+                }
+                strcat(new_args, filepath);
+                if (args_str && args_str[0]) {
+                    strcat(new_args, " ");
+                    strcat(new_args, args_str);
+                }
+
+                process_put(new_proc);
+                process_t *res = process_create_elf(interp, new_args, flags, tty_id);
+                spawn_shebang_depth--;
+                return res;
+            }
+        }
     }
 
     // 2. Load ELF executable
@@ -775,6 +845,21 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
         serial_write("\n");
         return NULL;
     }
+
+    const char *rel_check = NULL;
+    vfs_mount_t *mnt = vfs_resolve_mount(filepath, &rel_check);
+    bool nosuid = mnt && (mnt->flags & MS_NOSUID);
+    if (!nosuid) {
+        if (file_stat.mode & 04000) { // S_ISUID
+            new_proc->euid = file_stat.uid;
+            new_proc->suid = file_stat.uid;
+        }
+        if (file_stat.mode & 02000) { // S_ISGID
+            new_proc->egid = file_stat.gid;
+            new_proc->sgid = file_stat.gid;
+        }
+    }
+    new_proc->is_suid_elevated = (new_proc->euid != new_proc->uid || new_proc->egid != new_proc->gid);
 
     // Set process name from filepath
     int last_slash = -1;
@@ -883,7 +968,7 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
     //        [auxv pairs...]
     //        [auxv terminator: AT_NULL = 0, 0]
     
-    int total_elements = 1 + (argc + 1) + 1 + 20; 
+    int total_elements = 1 + (argc + 1) + 1 + 28; 
     int total_size = total_elements * (int)sizeof(uint64_t);
 
     uint64_t target_sp = (user_args_buf - total_size) & ~15ULL;
@@ -892,8 +977,8 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
     args_buf = (char *)((uint64_t)stack + (current_user_sp - (USER_STACK_TOP - 4096)));
 
     // 1. Push AUXV (mlibc standard entries + AT_NULL terminator)
-    args_buf -= 20 * sizeof(uint64_t);
-    current_user_sp -= 20 * sizeof(uint64_t);
+    args_buf -= 28 * sizeof(uint64_t);
+    current_user_sp -= 28 * sizeof(uint64_t);
     uint64_t *user_auxv = (uint64_t *)args_buf;
     user_auxv[0]  = AT_ENTRY;    user_auxv[1]  = elf_res.exec_entry;
     user_auxv[2]  = AT_PAGESZ;   user_auxv[3]  = 4096;
@@ -903,8 +988,12 @@ process_t* process_create_elf(const char* filepath, const char* args_str, uint64
     user_auxv[10] = AT_BASE;     user_auxv[11] = elf_res.interp_base;
     user_auxv[12] = AT_RANDOM;   user_auxv[13] = user_args_buf; // stack entropy
     user_auxv[14] = AT_EXECFN;   user_auxv[15] = user_args_buf; // filepath on stack
-    user_auxv[16] = AT_SECURE;   user_auxv[17] = 0;
-    user_auxv[18] = AT_NULL;     user_auxv[19] = 0;
+    user_auxv[16] = AT_UID;      user_auxv[17] = (uint64_t)new_proc->uid;
+    user_auxv[18] = AT_EUID;     user_auxv[19] = (uint64_t)new_proc->euid;
+    user_auxv[20] = AT_GID;      user_auxv[21] = (uint64_t)new_proc->gid;
+    user_auxv[22] = AT_EGID;     user_auxv[23] = (uint64_t)new_proc->egid;
+    user_auxv[24] = AT_SECURE;   user_auxv[25] = new_proc->is_suid_elevated ? 1 : 0;
+    user_auxv[26] = AT_NULL;     user_auxv[27] = 0;
 
     // 2. Push ENVP (empty)
     args_buf -= 1 * sizeof(uint64_t);
@@ -1571,6 +1660,68 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     process_t *proc = process_get_current();
     if (!proc || !proc->is_user || !regs || !filepath) return -1;
 
+    if (!vfs_exists(filepath)) return -ENOENT;
+    if (vfs_is_directory(filepath)) return -EACCES;
+
+    vfs_dirent_t file_stat;
+    memset(&file_stat, 0, sizeof(file_stat));
+    if (vfs_get_info(filepath, &file_stat) != 0) return -ENOENT;
+
+    uint32_t fmode = file_stat.mode ? file_stat.mode : 0755;
+    if (!vfs_check_permission(fmode, file_stat.uid, file_stat.gid, 1 /* X_OK */, proc)) {
+        return -EACCES;
+    }
+
+    vfs_file_t *script_file = vfs_open(filepath, "r");
+    if (script_file) {
+        char hdr[256];
+        int n = vfs_read(script_file, hdr, sizeof(hdr) - 1);
+        vfs_close(script_file);
+        if (n >= 2 && hdr[0] == '#' && hdr[1] == '!') {
+            hdr[n] = '\0';
+            char *line_end = strchr(hdr, '\n');
+            if (line_end) *line_end = '\0';
+            char *cr = strchr(hdr, '\r');
+            if (cr) *cr = '\0';
+
+            char *p = hdr + 2;
+            while (*p == ' ' || *p == '\t') p++;
+            char *interp = p;
+            while (*p && *p != ' ' && *p != '\t') p++;
+            char *interp_arg = NULL;
+            if (*p) {
+                *p++ = '\0';
+                while (*p == ' ' || *p == '\t') p++;
+                if (*p) interp_arg = p;
+            }
+
+            if (interp && interp[0]) {
+                static int shebang_depth = 0;
+                if (shebang_depth >= 4) {
+                    shebang_depth = 0;
+                    return -ELOOP;
+                }
+                shebang_depth++;
+
+                char new_args[1024];
+                new_args[0] = '\0';
+                if (interp_arg && interp_arg[0]) {
+                    strncpy(new_args, interp_arg, sizeof(new_args) - 1);
+                    strcat(new_args, " ");
+                }
+                strcat(new_args, filepath);
+                if (args_str && args_str[0]) {
+                    strcat(new_args, " ");
+                    strcat(new_args, args_str);
+                }
+
+                int ret = process_exec_replace_current(regs, interp, new_args);
+                shebang_depth--;
+                return ret;
+            }
+        }
+    }
+
     vmm_space_t *new_space = vmm_create_space();
     mmu_context_t *fallback_new_ctx = new_space ? NULL : mmu_create_context();
     uint64_t new_pml4 = new_space ? new_space->mmu_ctx->pml4_phys : (fallback_new_ctx ? fallback_new_ctx->pml4_phys : 0);
@@ -1581,58 +1732,113 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
         return -1;
     }
 
-    for (uint32_t i = 0; i < proc->elf_segment_count; i++) {
-        if (proc->elf_segments[i].ptr) {
-            if (proc->pml4_phys) {
-                mmu_context_t ctx = { .pml4_phys = proc->pml4_phys, .lock = SPINLOCK_INIT };
-                for (uint64_t off = 0; off < proc->elf_segments[i].size; off += 4096) {
-                    mmu_unmap_page(&ctx, proc->elf_segments[i].vaddr + off);
-                }
-            }
-            kfree_null(proc->elf_segments[i].ptr);
-            proc->elf_segments[i].ptr = NULL;
-        }
+    typedef struct {
+        void *ptr;
+        uint64_t vaddr;
+        size_t size;
+    } elf_seg_backup_t;
+    elf_seg_backup_t old_segments[4];
+    uint32_t old_segment_count = proc->elf_segment_count;
+    if (old_segment_count > 4) old_segment_count = 4;
+    for (uint32_t i = 0; i < old_segment_count; i++) {
+        old_segments[i].ptr = proc->elf_segments[i].ptr;
+        old_segments[i].vaddr = proc->elf_segments[i].vaddr;
+        old_segments[i].size = proc->elf_segments[i].size;
     }
     proc->elf_segment_count = 0;
-
 
     vmm_space_t *saved_space = proc->vmm_space;
     proc->vmm_space = new_space;
 
     elf_load_result_t elf_res;
     if (!elf_load(filepath, new_pml4, proc, &elf_res)) {
+        // Rollback on failure: clean up new segments and restore old process state
+        for (uint32_t i = 0; i < proc->elf_segment_count; i++) {
+            if (proc->elf_segments[i].ptr) {
+                kfree_null(proc->elf_segments[i].ptr);
+            }
+        }
+        for (uint32_t i = 0; i < old_segment_count; i++) {
+            proc->elf_segments[i].ptr = old_segments[i].ptr;
+            proc->elf_segments[i].vaddr = old_segments[i].vaddr;
+            proc->elf_segments[i].size = old_segments[i].size;
+        }
+        proc->elf_segment_count = old_segment_count;
         proc->vmm_space = saved_space;
+
         if (new_space) {
             vmm_destroy_space(new_space);
         } else if (fallback_new_ctx) {
             mmu_destroy_context(fallback_new_ctx);
         }
-        return -1;
+        if (!vfs_exists(filepath)) return -ENOENT;
+        if (vfs_is_directory(filepath)) return -EACCES;
+        return -ENOEXEC;
     }
+
+    for (uint32_t i = 0; i < old_segment_count; i++) {
+        if (old_segments[i].ptr) {
+            if (proc->pml4_phys) {
+                mmu_context_t ctx = { .pml4_phys = proc->pml4_phys, .lock = SPINLOCK_INIT };
+                for (uint64_t off = 0; off < old_segments[i].size; off += 4096) {
+                    mmu_unmap_page(&ctx, old_segments[i].vaddr + off);
+                }
+            }
+            kfree_null(old_segments[i].ptr);
+        }
+    }
+    proc->vmm_space = new_space;
+
+    const char *rel_check = NULL;
+    vfs_mount_t *mnt = vfs_resolve_mount(filepath, &rel_check);
+    bool nosuid = mnt && (mnt->flags & MS_NOSUID);
+    if (!nosuid) {
+        if (file_stat.mode & 04000) { // S_ISUID
+            proc->euid = file_stat.uid;
+            proc->suid = file_stat.uid;
+        }
+        if (file_stat.mode & 02000) { // S_ISGID
+            proc->egid = file_stat.gid;
+            proc->sgid = file_stat.gid;
+        }
+    }
+    proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
 
     size_t user_stack_size = 262144;
     void* stack = kmalloc_aligned(4096, 4096);
     if (!stack) {
+        for (uint32_t i = 0; i < proc->elf_segment_count; i++) {
+            if (proc->elf_segments[i].ptr) {
+                kfree_null(proc->elf_segments[i].ptr);
+            }
+        }
+        proc->elf_segment_count = 0;
         proc->vmm_space = saved_space;
         if (new_space) {
             vmm_destroy_space(new_space);
         } else if (fallback_new_ctx) {
             mmu_destroy_context(fallback_new_ctx);
         }
-        return -1;
+        return -ENOMEM;
     }
     memset(stack, 0, 4096);
 
     mmu_context_t stack_ctx = { .pml4_phys = new_pml4, .lock = SPINLOCK_INIT };
     if (mmu_map_page(&stack_ctx, USER_STACK_TOP - 4096, v2p((uint64_t)stack), MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) != 0) {
         kfree_null(stack);
+        for (uint32_t i = 0; i < proc->elf_segment_count; i++) {
+            if (proc->elf_segments[i].ptr) {
+                kfree_null(proc->elf_segments[i].ptr);
+            }
+        }
+        proc->elf_segment_count = 0;
         proc->vmm_space = saved_space;
         if (new_space) {
             vmm_destroy_space(new_space);
         } else if (fallback_new_ctx) {
             mmu_destroy_context(fallback_new_ctx);
         }
-        return -1;
+        return -ENOMEM;
     }
     proc->vmm_space = saved_space;
 
@@ -1677,7 +1883,7 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     }
     argv_ptrs[argc] = 0;
 
-    int total_elements = 1 + (argc + 1) + 1 + 20; 
+    int total_elements = 1 + (argc + 1) + 1 + 28; 
     int total_size = total_elements * (int)sizeof(uint64_t);
 
     uint64_t target_sp = (user_args_buf - total_size) & ~15ULL;
@@ -1686,8 +1892,8 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     args_buf = (char *)((uint64_t)stack + (current_user_sp - (USER_STACK_TOP - 4096)));
 
     // 1. Push AUXV (mlibc standard entries + AT_NULL terminator)
-    args_buf -= 20 * sizeof(uint64_t);
-    current_user_sp -= 20 * sizeof(uint64_t);
+    args_buf -= 28 * sizeof(uint64_t);
+    current_user_sp -= 28 * sizeof(uint64_t);
     uint64_t *user_auxv = (uint64_t *)args_buf;
     user_auxv[0]  = AT_ENTRY;    user_auxv[1]  = elf_res.exec_entry;
     user_auxv[2]  = AT_PAGESZ;   user_auxv[3]  = 4096;
@@ -1697,8 +1903,12 @@ int process_exec_replace_current(registers_t *regs, const char* filepath, const 
     user_auxv[10] = AT_BASE;     user_auxv[11] = elf_res.interp_base;
     user_auxv[12] = AT_RANDOM;   user_auxv[13] = user_args_buf; // stack entropy
     user_auxv[14] = AT_EXECFN;   user_auxv[15] = user_args_buf; // filepath on stack
-    user_auxv[16] = AT_SECURE;   user_auxv[17] = 0;
-    user_auxv[18] = AT_NULL;     user_auxv[19] = 0;
+    user_auxv[16] = AT_UID;      user_auxv[17] = (uint64_t)proc->uid;
+    user_auxv[18] = AT_EUID;     user_auxv[19] = (uint64_t)proc->euid;
+    user_auxv[20] = AT_GID;      user_auxv[21] = (uint64_t)proc->gid;
+    user_auxv[22] = AT_EGID;     user_auxv[23] = (uint64_t)proc->egid;
+    user_auxv[24] = AT_SECURE;   user_auxv[25] = proc->is_suid_elevated ? 1 : 0;
+    user_auxv[26] = AT_NULL;     user_auxv[27] = 0;
 
     args_buf -= 1 * sizeof(uint64_t);
     current_user_sp -= 1 * sizeof(uint64_t);
@@ -1885,6 +2095,10 @@ process_t* process_duplicate(registers_t *parent_regs) {
     child->gid = parent->gid;
     child->egid = parent->egid;
     child->sgid = parent->sgid;
+    child->ngroups = parent->ngroups;
+    memcpy(child->groups, parent->groups, sizeof(child->groups));
+    child->umask = parent->umask;
+    child->is_suid_elevated = parent->is_suid_elevated;
 
     memcpy(child->cwd, parent->cwd, 1024);
     memcpy(child->name, parent->name, 64);

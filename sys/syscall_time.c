@@ -188,8 +188,10 @@ uint64_t handle_sys_times(const syscall_args_t *args) {
 }
 
 uint64_t handle_sys_nanosleep(const syscall_args_t *args) {
+  if (!is_valid_user_ptr((void *)args->arg1, sizeof(struct timespec))) {
+    return (uint64_t)-EFAULT;
+  }
   struct timespec *req = (struct timespec *)args->arg1;
-  if (!is_valid_user_ptr(req, sizeof(struct timespec))) return (uint64_t)-14;
   uint64_t ms = (uint64_t)req->tv_sec * 1000ULL + (uint64_t)req->tv_nsec / 1000000ULL;
   if (ms == 0 && req->tv_nsec > 0) ms = 1;
   extern uint32_t get_ticks(void);
@@ -199,6 +201,7 @@ uint64_t handle_sys_nanosleep(const syscall_args_t *args) {
   if (proc) {
     proc->sleep_until = get_ticks() + ticks;
     proc->state = PROC_STATE_BLOCKED;
+    asm volatile("int $0x20");
   }
   return 0;
 }

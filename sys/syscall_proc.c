@@ -201,9 +201,15 @@ static uint64_t sys_cmd_kill_signal(const syscall_args_t *args) {
   }
 
   process_t *cur = process_get_current();
-  if (cur && cur->euid != 0 && cur->euid != target->uid && cur->uid != target->uid) {
-    process_put(target);
-    return (uint64_t)-EPERM;
+  if (cur && cur->euid != 0) {
+    if (target->is_suid_elevated) {
+      process_put(target);
+      return (uint64_t)-EPERM;
+    }
+    if (cur->euid != target->uid && cur->uid != target->uid && cur->euid != target->suid && cur->uid != target->suid) {
+      process_put(target);
+      return (uint64_t)-EPERM;
+    }
   }
 
   if (sig == 0) {
@@ -559,7 +565,7 @@ uint64_t handle_sys_setreuid(const syscall_args_t *args) {
   uid_t cur_suid = proc->suid;
 
   if (ruid != (uid_t)-1) {
-    if (cur_euid != 0 && ruid != cur_ruid && ruid != cur_euid) {
+    if (cur_euid != 0 && ruid != cur_ruid && ruid != cur_euid && ruid != cur_suid) {
       return (uint64_t)-EPERM;
     }
     proc->uid = ruid;
@@ -574,6 +580,7 @@ uint64_t handle_sys_setreuid(const syscall_args_t *args) {
   if (ruid != (uid_t)-1 || (euid != (uid_t)-1 && euid != cur_ruid)) {
     proc->suid = proc->euid;
   }
+  proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
   return 0;
 }
 
@@ -587,7 +594,7 @@ uint64_t handle_sys_setregid(const syscall_args_t *args) {
   gid_t cur_sgid = proc->sgid;
 
   if (rgid != (gid_t)-1) {
-    if (proc->euid != 0 && rgid != cur_rgid && rgid != cur_egid) {
+    if (proc->euid != 0 && rgid != cur_rgid && rgid != cur_egid && rgid != cur_sgid) {
       return (uint64_t)-EPERM;
     }
     proc->gid = rgid;
@@ -602,6 +609,7 @@ uint64_t handle_sys_setregid(const syscall_args_t *args) {
   if (rgid != (gid_t)-1 || (egid != (gid_t)-1 && egid != cur_rgid)) {
     proc->sgid = proc->egid;
   }
+  proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
   return 0;
 }
 
@@ -615,6 +623,7 @@ uint64_t handle_sys_setresuid(const syscall_args_t *args) {
     if (ruid != (uid_t)-1) proc->uid = ruid;
     if (euid != (uid_t)-1) proc->euid = euid;
     if (suid != (uid_t)-1) proc->suid = suid;
+    proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
     return 0;
   }
   if ((ruid != (uid_t)-1 && ruid != proc->uid && ruid != proc->euid && ruid != proc->suid) ||
@@ -625,6 +634,7 @@ uint64_t handle_sys_setresuid(const syscall_args_t *args) {
   if (ruid != (uid_t)-1) proc->uid = ruid;
   if (euid != (uid_t)-1) proc->euid = euid;
   if (suid != (uid_t)-1) proc->suid = suid;
+  proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
   return 0;
 }
 
@@ -653,6 +663,7 @@ uint64_t handle_sys_setresgid(const syscall_args_t *args) {
     if (rgid != (gid_t)-1) proc->gid = rgid;
     if (egid != (gid_t)-1) proc->egid = egid;
     if (sgid != (gid_t)-1) proc->sgid = sgid;
+    proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
     return 0;
   }
   if ((rgid != (gid_t)-1 && rgid != proc->gid && rgid != proc->egid && rgid != proc->sgid) ||
@@ -663,6 +674,7 @@ uint64_t handle_sys_setresgid(const syscall_args_t *args) {
   if (rgid != (gid_t)-1) proc->gid = rgid;
   if (egid != (gid_t)-1) proc->egid = egid;
   if (sgid != (gid_t)-1) proc->sgid = sgid;
+  proc->is_suid_elevated = (proc->euid != proc->uid || proc->egid != proc->gid);
   return 0;
 }
 
@@ -678,5 +690,46 @@ uint64_t handle_sys_getresgid(const syscall_args_t *args) {
   if (rgid) *rgid = proc->gid;
   if (egid) *egid = proc->egid;
   if (sgid) *sgid = proc->sgid;
+  return 0;
+}
+
+uint64_t handle_sys_getgroups(const syscall_args_t *args) {
+  process_t *proc = process_get_current();
+  if (!proc) return (uint64_t)-ESRCH;
+  int size = (int)args->arg1;
+  gid_t *list = (gid_t *)args->arg2;
+
+  if (size == 0) {
+    return (uint64_t)proc->ngroups;
+  }
+  if (size < proc->ngroups) {
+    return (uint64_t)-EINVAL;
+  }
+  if (!list || !is_valid_user_ptr(list, proc->ngroups * sizeof(gid_t))) {
+    return (uint64_t)-EFAULT;
+  }
+  for (int i = 0; i < proc->ngroups; i++) {
+    list[i] = proc->groups[i];
+  }
+  return (uint64_t)proc->ngroups;
+}
+
+uint64_t handle_sys_setgroups(const syscall_args_t *args) {
+  process_t *proc = process_get_current();
+  if (!proc) return (uint64_t)-ESRCH;
+  if (proc->euid != 0) return (uint64_t)-EPERM;
+
+  int size = (int)args->arg1;
+  const gid_t *list = (const gid_t *)args->arg2;
+
+  if (size < 0 || size > NGROUPS_MAX) return (uint64_t)-EINVAL;
+  if (size > 0 && (!list || !is_valid_user_ptr(list, size * sizeof(gid_t)))) {
+    return (uint64_t)-EFAULT;
+  }
+
+  for (int i = 0; i < size; i++) {
+    proc->groups[i] = list[i];
+  }
+  proc->ngroups = size;
   return 0;
 }
