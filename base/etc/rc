@@ -16,5 +16,6 @@ echo "Welcome to BoredOS!"
 /etc/rc.d/httpd start
 /etc/rc.d/nova start
 /etc/rc.d/local start
+/etc/rc.d/motd start
 
 echo "System ready."

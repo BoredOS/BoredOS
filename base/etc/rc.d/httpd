@@ -18,8 +18,8 @@ if [ "$action" = "start" ]; then
         port="${httpd_port:-80}"
         root="${httpd_root:-/Library/WebServer/Documents}"
         mkdir -p "$root"
-        if [ -f /bin/httpd.elf ]; then
-            httpd.elf -p "$port" -r "$root" > /var/log/httpd.log &
+        if [ -f /bin/httpd ]; then
+            httpd -p "$port" -r "$root" > /var/log/httpd.log &
             echo $! > /var/run/httpd.pid
             echo "httpd started with PID $! (port $port, root $root)."
         fi
@@ -36,8 +36,8 @@ elif [ "$action" = "forcestart" ]; then
     port="${httpd_port:-80}"
     root="${httpd_root:-/Library/WebServer/Documents}"
     mkdir -p "$root"
-    if [ -f /bin/httpd.elf ]; then
-        httpd.elf -p "$port" -r "$root" > /var/log/httpd.log &
+    if [ -f /bin/httpd ]; then
+        httpd -p "$port" -r "$root" > /var/log/httpd.log &
         echo $! > /var/run/httpd.pid
         echo "httpd started with PID $! (port $port, root $root)."
     fi

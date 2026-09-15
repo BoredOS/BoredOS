@@ -10,7 +10,7 @@ if [ "$action" = "start" ]; then
         exit 0
     fi
 
-    if [ ! -f /bin/sntp.elf ] && [ ! -f /bin/sntp ]; then
+    if [ ! -f /bin/sntp ]; then
         echo "ntp: sntp utility not found, skipping."
         exit 0
     fi
@@ -38,9 +38,5 @@ if [ "$action" = "start" ]; then
         server="pool.ntp.org"
     fi
     echo "Querying NTP time server $server..."
-    if [ -f /bin/sntp.elf ]; then
-        /bin/sntp.elf "$server"
-    else
-        /bin/sntp "$server"
-    fi
+    /bin/sntp "$server"
 fi

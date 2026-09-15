@@ -11,7 +11,13 @@ if [ "$action" = "start" ]; then
     fi
 
     echo "Cleaning temporary files and /var/run..."
-    rm -rf /var/run
-    rm -rf /tmp
     mkdir -p /var/run /var/log /tmp
+    chmod 1777 /tmp 2>/dev/null
+    chmod 0700 /root 2>/dev/null
+    chmod 0755 /etc 2>/dev/null
+    chmod 0644 /etc/rc.conf /etc/rc.local /etc/rc.subr /etc/passwd /etc/group /etc/hostname /etc/timezone /etc/resolv.conf /etc/motd /etc/ttys 2>/dev/null
+    chmod 0755 /etc/rc /etc/rc.shutdown /etc/rc.d 2>/dev/null
+    chmod 0600 /etc/shadow 2>/dev/null
+    chmod 0400 /etc/doas.conf 2>/dev/null
+    chmod 0755 /Library 2>/dev/null
 fi

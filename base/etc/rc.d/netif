@@ -9,8 +9,8 @@ if [ "$action" = "start" ]; then
     echo "Configuring network interfaces..."
 
     if [ -n "$ifconfig_lo0" ]; then
-        if [ -f /bin/ifconfig.elf ]; then
-            ifconfig.elf lo0 127.0.0.1 up
+        if [ -f /bin/ifconfig ]; then
+            ifconfig lo0 127.0.0.1 up
         fi
     fi
 
@@ -43,33 +43,29 @@ if [ "$action" = "start" ]; then
         if [ "$ifcfg" = "DHCP" ] || [ "$ifcfg" = "SYNCDHCP" ]; then
             if [ -n "$ifdev" ]; then
                 echo "Starting DHCP client on $ifdev..."
-                if [ -f /bin/dhclient.elf ]; then
-                    dhclient.elf $ifdev
+                if [ -f /bin/dhclient ]; then
+                    dhclient $ifdev
                 fi
             else
                 echo "Auto-detecting network interface for DHCP..."
-                if [ -f /bin/dhclient.elf ]; then
-                    dhclient.elf
+                if [ -f /bin/dhclient ]; then
+                    dhclient
                 fi
             fi
         elif [ -n "$ifdev" ]; then
-            if [ -f /bin/ifconfig.elf ]; then
-                ifconfig.elf $ifdev $ifcfg up
+            if [ -f /bin/ifconfig ]; then
+                ifconfig $ifdev $ifcfg up
                 echo "Assigned static IP on $ifdev: $ifcfg"
             fi
         fi
     fi
 elif [ "$action" = "stop" ]; then
     echo "Stopping network interfaces..."
-    if [ -f /bin/ifconfig.elf ] || [ -f /bin/ifconfig ]; then
+    if [ -f /bin/ifconfig ]; then
         for dev in em0 re0 vtnet0 eth0; do
             eval val=\"\$ifconfig_${dev}\"
             if [ -n "$val" ]; then
-                if [ -f /bin/ifconfig.elf ]; then
-                    ifconfig.elf $dev down
-                else
-                    ifconfig $dev down
-                fi
+                ifconfig $dev down
             fi
         done
     fi
@@ -77,7 +73,7 @@ elif [ "$action" = "restart" ]; then
     /etc/rc.d/netif stop
     /etc/rc.d/netif start
 elif [ "$action" = "status" ]; then
-    if [ -f /bin/ifconfig.elf ]; then
-        ifconfig.elf
+    if [ -f /bin/ifconfig ]; then
+        ifconfig
     fi
 fi

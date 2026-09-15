@@ -1,0 +1,11 @@
+root:x:0:
+daemon:x:1:
+bin:x:2:
+tty:x:5:
+disk:x:6:
+wheel:x:10:root
+audio:x:29:
+video:x:44:
+net:x:100:
+users:x:1000:
+nogroup:x:65534:

@@ -15,8 +15,8 @@ if [ "$action" = "start" ]; then
             fi
         fi
         echo "Starting Nova Desktop Environment..."
-        if [ -f /bin/nova.elf ]; then
-            nova.elf > /var/log/nova.log &
+        if [ -f /bin/nova ]; then
+            nova > /var/log/nova.log &
             echo $! > /var/run/nova.pid
             echo "Nova started with PID $!."
         fi
@@ -30,8 +30,8 @@ elif [ "$action" = "forcestart" ]; then
         fi
     fi
     echo "Starting Nova Desktop Environment..."
-    if [ -f /bin/nova.elf ]; then
-        nova.elf > /var/log/nova.log &
+    if [ -f /bin/nova ]; then
+        nova > /var/log/nova.log &
         echo $! > /var/run/nova.pid
         echo "Nova started with PID $!."
     fi

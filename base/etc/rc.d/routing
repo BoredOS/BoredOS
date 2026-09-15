@@ -7,9 +7,9 @@ fi
 
 if [ "$action" = "start" ]; then
     if [ -n "$defaultrouter" ]; then
-        if [ -f /bin/route.elf ]; then
+        if [ -f /bin/route ]; then
             echo "Setting default gateway to $defaultrouter..."
-            route.elf add default $defaultrouter
+            route add default $defaultrouter
         fi
     fi
 elif [ "$action" = "status" ]; then

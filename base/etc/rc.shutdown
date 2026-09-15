@@ -21,11 +21,7 @@ if [ -f /etc/rc.d/netif ]; then
     /etc/rc.d/netif stop
 fi
 
-if [ -f /bin/umount.elf ]; then
-    /bin/umount.elf /boot 2>/dev/null
-    /bin/umount.elf /mnt/boot 2>/dev/null
-    /bin/umount.elf /mnt 2>/dev/null
-elif [ -f /bin/umount ]; then
+if [ -f /bin/umount ]; then
     /bin/umount /boot 2>/dev/null
     /bin/umount /mnt/boot 2>/dev/null
     /bin/umount /mnt 2>/dev/null

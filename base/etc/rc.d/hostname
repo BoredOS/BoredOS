@@ -7,8 +7,8 @@ fi
 
 if [ "$action" = "start" ]; then
     if [ -n "$hostname" ]; then
-        if [ -f /bin/hostname.elf ]; then
-            hostname.elf "$hostname"
+        if [ -f /bin/hostname ]; then
+            hostname "$hostname"
         fi
         echo "Hostname set to '$hostname'."
     fi
