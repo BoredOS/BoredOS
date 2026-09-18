@@ -92,3 +92,13 @@
 [submodule "usr/kirc"]
 	path = usr/kirc
 	url = https://github.com/BoredOS/kirc.git
+[submodule "usr/quake"]
+	path = usr/quake
+	url = https://github.com/boredos/quake.git
+	branch = main
+	ignore = all
+[submodule "usr/quake2"]
+	path = usr/quake2
+	url = https://github.com/boredos/quake2.git
+	branch = main
+	ignore = all
