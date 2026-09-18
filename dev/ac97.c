@@ -22,6 +22,7 @@
 #define SNDCTL_DSP_GETFMTS    0x5005
 #define SNDCTL_DSP_SETFMT     0x5006
 #define SNDCTL_DSP_CHANNELS   0x5007
+#define SNDCTL_DSP_GETODELAY  0x5008
 
 #define AFMT_S16_LE           0x0010
 #define AFMT_U8               0x0008
@@ -651,6 +652,13 @@ int ac97_dsp_ioctl(void *handle, uint64_t request, void *arg) {
             client->channels = *(int*)arg ? 2 : 1;
             spinlock_release_irqrestore(&client->lock, flags);
             *(int*)arg = 1; // Report stereo; mono upmixing is not implemented
+            return 0;
+        }
+        case SNDCTL_DSP_GETODELAY: {
+            if (!arg) return -EINVAL;
+            uint64_t flags = spinlock_acquire_irqsave(&client->lock);
+            *(int*)arg = (int)client->count;
+            spinlock_release_irqrestore(&client->lock, flags);
             return 0;
         }
     }

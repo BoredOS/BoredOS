@@ -17,6 +17,7 @@
 #define SNDCTL_DSP_GETFMTS    0x5005
 #define SNDCTL_DSP_SETFMT     0x5006
 #define SNDCTL_DSP_CHANNELS   0x5007
+#define SNDCTL_DSP_GETODELAY  0x5008
 
 // OSS mixer ioctl numbers
 
