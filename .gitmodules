@@ -102,3 +102,8 @@
 	url = https://github.com/boredos/quake2.git
 	branch = main
 	ignore = all
+[submodule "usr/classicube"]
+	path = usr/classicube
+	url = https://github.com/BoredOS/classicube.git
+	branch = main
+	ignore = all
