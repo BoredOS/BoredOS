@@ -54,6 +54,7 @@ int vmm_protect(vmm_space_t *space, uintptr_t addr, size_t length, uint32_t prot
 uintptr_t vmm_brk(vmm_space_t *space, uintptr_t new_brk);
 
 int vmm_handle_page_fault(vmm_space_t *space, uintptr_t fault_addr, uint32_t error_code, struct registers_t *regs);
+int vmm_prefault_user_range(vmm_space_t *space, uintptr_t addr, size_t len, int write);
 
 struct page *vmm_get_zero_page(void);
 uintptr_t vmm_get_zero_paddr(void);

@@ -193,6 +193,9 @@ uint64_t handle_sys_nanosleep(const syscall_args_t *args) {
   }
   struct timespec *req = (struct timespec *)args->arg1;
   uint64_t ms = (uint64_t)req->tv_sec * 1000ULL + (uint64_t)req->tv_nsec / 1000000ULL;
+  if (ms == 0 && req->tv_nsec == 0 && req->tv_sec == 0) {
+    return 0;
+  }
   if (ms == 0 && req->tv_nsec > 0) ms = 1;
   extern uint32_t get_ticks(void);
   uint32_t ticks = (uint32_t)ms;

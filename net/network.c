@@ -67,6 +67,13 @@ static void net_rx_irq_notify(void) {
     wait_queue_wake_all(&net_rx_waitq);
 }
 
+void net_rx_wake(void) {
+    if (lwip_initialized) {
+        net_rx_pending = 1;
+        wait_queue_wake_all(&net_rx_waitq);
+    }
+}
+
 static void net_worker_loop(void) {
     wait_queue_init(&net_rx_waitq);
 
@@ -97,6 +104,7 @@ int network_init(void) {
         return 0;
     }
 
+    wait_queue_init(&net_rx_waitq);
     lwip_init();
 #if LWIP_DNS
     dns_init(); // Explicitly init DNS just in case

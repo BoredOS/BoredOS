@@ -77,61 +77,121 @@ int sockbuf_append(sockbuf_t *sb, struct pbuf *p, const ip_addr_t *src_ip, uint1
 int sockbuf_read(sockbuf_t *sb, void *buf, size_t max_len, ip_addr_t *out_ip, uint16_t *out_port, int peek) {
     if (!sb || !buf || max_len == 0) return 0;
 
-    uint64_t flags = spinlock_acquire_irqsave(&sb->lock);
-
-    size_t total_copied = 0;
-    uint8_t *dest = (uint8_t *)buf;
-    sockbuf_entry_t *to_free_list = NULL;
-    struct pbuf *p_to_free_header = NULL;
-    u16_t p_free_header_len = 0;
-
-    while (sb->head && total_copied < max_len) {
+    if (peek) {
+        uint64_t flags = spinlock_acquire_irqsave(&sb->lock);
+        if (!sb->head) {
+            spinlock_release_irqrestore(&sb->lock, flags);
+            return 0;
+        }
         sockbuf_entry_t *entry = sb->head;
         size_t avail = entry->p->tot_len;
-        size_t wanted = max_len - total_copied;
-        size_t to_copy = (wanted < avail) ? wanted : avail;
+        size_t to_copy = (max_len < avail) ? max_len : avail;
         if (to_copy > 0xFFFF) to_copy = 0xFFFF;
+        if (out_ip) *out_ip = entry->src_ip;
+        if (out_port) *out_port = entry->src_port;
 
-        pbuf_copy_partial(entry->p, dest + total_copied, (u16_t)to_copy, 0);
+        uint8_t kbuf[512];
+        size_t kcopy = (to_copy < sizeof(kbuf)) ? to_copy : sizeof(kbuf);
+        pbuf_copy_partial(entry->p, kbuf, (u16_t)kcopy, 0);
+        spinlock_release_irqrestore(&sb->lock, flags);
 
-        if (total_copied == 0) {
-            if (out_ip) *out_ip = entry->src_ip;
-            if (out_port) *out_port = entry->src_port;
+        memcpy(buf, kbuf, kcopy);
+        return (int)kcopy;
+    }
+
+    uint64_t flags = spinlock_acquire_irqsave(&sb->lock);
+
+    if (!sb->head) {
+        spinlock_release_irqrestore(&sb->lock, flags);
+        return 0;
+    }
+
+    sockbuf_entry_t *consumed_head = NULL;
+    sockbuf_entry_t *consumed_tail = NULL;
+    size_t total_dequeued = 0;
+
+    uint8_t partial_buf[4096];
+    size_t partial_len = 0;
+    ip_addr_t first_ip;
+    uint16_t first_port = 0;
+    bool has_first_meta = false;
+
+    while (sb->head && total_dequeued < max_len) {
+        sockbuf_entry_t *entry = sb->head;
+        size_t avail = entry->p->tot_len;
+        size_t wanted = max_len - total_dequeued;
+
+        if (!has_first_meta) {
+            first_ip = entry->src_ip;
+            first_port = entry->src_port;
+            has_first_meta = true;
         }
 
-        total_copied += to_copy;
-
-        if (!peek) {
-            if (to_copy == entry->p->tot_len) {
-                sb->head = entry->next;
-                if (!sb->head) sb->tail = NULL;
-                sb->sb_cc -= entry->p->tot_len;
-                entry->next = to_free_list;
-                to_free_list = entry;
+        if (wanted >= avail) {
+            sb->head = entry->next;
+            if (!sb->head) sb->tail = NULL;
+            entry->next = NULL;
+            if (sb->sb_cc >= (uint32_t)avail) {
+                sb->sb_cc -= (uint32_t)avail;
             } else {
-                pbuf_remove_header(entry->p, (u16_t)to_copy);
-                sb->sb_cc -= to_copy;
-                break;
+                sb->sb_cc = 0;
+            }
+            total_dequeued += avail;
+
+            if (!consumed_head) {
+                consumed_head = entry;
+                consumed_tail = entry;
+            } else {
+                consumed_tail->next = entry;
+                consumed_tail = entry;
             }
         } else {
+            size_t to_copy = (wanted < sizeof(partial_buf)) ? wanted : sizeof(partial_buf);
+            pbuf_copy_partial(entry->p, partial_buf, (u16_t)to_copy, 0);
+            partial_len = to_copy;
+            total_dequeued += to_copy;
+
+            entry->p = pbuf_free_header(entry->p, (u16_t)to_copy);
+            if (sb->sb_cc >= (uint32_t)to_copy) {
+                sb->sb_cc -= (uint32_t)to_copy;
+            } else {
+                sb->sb_cc = 0;
+            }
             break;
         }
     }
 
     spinlock_release_irqrestore(&sb->lock, flags);
 
-    // Free fully consumed pbufs and entries outside sb->lock
-    while (to_free_list) {
-        sockbuf_entry_t *next = to_free_list->next;
-        if (to_free_list->p) pbuf_free(to_free_list->p);
-        kfree_null(to_free_list);
-        to_free_list = next;
+    if (out_ip && has_first_meta) *out_ip = first_ip;
+    if (out_port && has_first_meta) *out_port = first_port;
+
+    uint8_t *dest = (uint8_t *)buf;
+    size_t copied = 0;
+
+    sockbuf_entry_t *curr = consumed_head;
+    while (curr) {
+        sockbuf_entry_t *next = curr->next;
+        if (curr->p) {
+            u16_t len = curr->p->tot_len;
+            pbuf_copy_partial(curr->p, dest + copied, len, 0);
+            copied += len;
+            pbuf_free(curr->p);
+            curr->p = NULL;
+        }
+        kfree_null(curr);
+        curr = next;
     }
 
-    if (!peek && total_copied > 0) {
+    if (partial_len > 0) {
+        memcpy(dest + copied, partial_buf, partial_len);
+        copied += partial_len;
+    }
+
+    if (copied > 0) {
         wait_queue_wake_all(&sb->waitq);
     }
-    return (int)total_copied;
+    return (int)copied;
 }
 
 int sockbuf_is_empty(sockbuf_t *sb) {

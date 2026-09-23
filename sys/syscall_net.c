@@ -393,6 +393,8 @@ uint64_t handle_sys_recvfrom(const syscall_args_t *args) {
     if (sock->type == SOCK_STREAM) {
       // SOCK_STREAM (TCP) recv
       extern int network_socket_recv(void *sock, void *buf, size_t len, int nonblock);
+      if (proc->vmm_space && vmm_prefault_user_range(proc->vmm_space, (uintptr_t)buf, len, 1) != 0)
+        return (uint64_t)-EFAULT;
       int ret = network_socket_recv(sock, buf, len, nonblock);
       if (ret == -2) return (uint64_t)-2;
       return (uint64_t)ret;
@@ -400,6 +402,8 @@ uint64_t handle_sys_recvfrom(const syscall_args_t *args) {
       uint32_t from_ip = 0;
       uint16_t from_port = 0;
       extern int network_socket_recvfrom(void *sock, void *buf, size_t max_len, int nonblock, uint32_t *from_ip, uint16_t *from_port);
+      if (proc->vmm_space && vmm_prefault_user_range(proc->vmm_space, (uintptr_t)buf, len, 1) != 0)
+        return (uint64_t)-EFAULT;
       int ret = network_socket_recvfrom(sock, buf, len, nonblock, &from_ip, &from_port);
       if (ret == -2) {
         return (uint64_t)-2;

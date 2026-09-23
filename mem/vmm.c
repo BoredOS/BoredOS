@@ -763,3 +763,22 @@ void iounmap(void *addr, size_t size) {
     }
     mmu_tlb_flush_all();
 }
+
+int vmm_prefault_user_range(vmm_space_t *space, uintptr_t addr, size_t len, int write) {
+    if (!space || !addr || len == 0) return 0;
+    if (addr >= 0x8000000000000000ULL) return -EFAULT;
+
+    uint32_t error_code = write ? 2 : 0;
+    uintptr_t page_start = addr & ~PAGE_MASK;
+    uintptr_t page_end   = (addr + len - 1) & ~PAGE_MASK;
+
+    for (uintptr_t p = page_start; p <= page_end; p += PAGE_SIZE) {
+        if (mmu_virt_to_phys(space->mmu_ctx, p) != 0)
+            continue;
+        int res = vmm_handle_page_fault(space, p, error_code, NULL);
+        if (res != 0)
+            return -EFAULT;
+    }
+    return 0;
+}
+

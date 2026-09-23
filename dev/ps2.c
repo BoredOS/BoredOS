@@ -29,7 +29,8 @@ uint64_t timer_handler(registers_t *regs) {
         uint32_t lo, hi;
         asm volatile("rdtsc" : "=a"(lo), "=d"(hi));
         last_tick_tsc = ((uint64_t)hi << 32) | lo;
-        network_process_frames();
+        extern void net_rx_wake(void);
+        net_rx_wake();
 
         extern void k_beep_process(void);
         k_beep_process();
