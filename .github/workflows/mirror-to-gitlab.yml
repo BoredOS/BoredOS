@@ -23,4 +23,4 @@ jobs:
         run: |
           git remote add gitlab "https://${GITLAB_USERNAME}:${GITLAB_TOKEN}@gitlab.com/boredos/boredos.git"
           git push --prune gitlab "refs/remotes/origin/*:refs/heads/*"
-          git push --tags gitlab
+          git push --force --tags gitlab
