@@ -1461,9 +1461,6 @@ void xHCI_worker(void *xpciaddr) {
     }
 
     selfdev->early_boot = false;
-
-    lapic_dump_state();
-
     for (;;) {
         __asm__ volatile("sti");
         xHCI_poll_evring(selfdev);
