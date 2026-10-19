@@ -53,7 +53,7 @@ YAWN (*Yet Another Workload Navigator*) is our custom init and service managemen
 
 | Subsystem | Details |
 |-----------|---------|
-| **SMP** | Multi-core support via LAPIC. Per-CPU state lives in the GS segment. XSAVE/XRSTOR handle FPU context across switches. |
+| **SMP** | Multi-core support via LAPIC. Per-CPU state lives in the GS segment. FXSAVE/FXRSTOR handle FPU context across switches. |
 | **Scheduler** | Preemptive round-robin over a circular process list, with sleep/wake support, per-CPU affinity, and cross-core IPI for AP scheduling. |
 | **Memory** | Physical page allocator (PMM), slab allocator, 4-level MMU with COW, VMA tracking with an RB-tree, demand paging, and a page cache. |
 | **VFS** | Virtual filesystem layer supporting tmpfs, FAT32, ext4, ProcFS, DevFS, and SysFS. |

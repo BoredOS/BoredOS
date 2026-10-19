@@ -1440,8 +1440,6 @@ void process_terminate_with_status(process_t *to_delete, int status) {
     }
 }
 
-
-
 uint64_t process_terminate_current_with_status(int status, uint64_t current_rsp) {
     process_t *cur = (process_t *)current_cpu->current_process;
     if (!cur || cur->pid == 0) {

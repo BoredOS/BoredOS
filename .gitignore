@@ -24,3 +24,8 @@ boredos.dump
 kernel_debug.log
 bochs.log
 disk.img.lock
+xhci_log.txt
+xhci_debug.log
+compile_commands.json
+.vscode/
+.clangd

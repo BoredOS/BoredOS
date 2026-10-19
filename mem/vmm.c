@@ -666,7 +666,7 @@ void *vmalloc(size_t size) {
     for (size_t i = 0; i < page_count; i++) {
         page_t *p = pmm_alloc_page(PAGE_FLAG_KERNEL | PAGE_FLAG_ZERO);
         if (!p) {
-            for (size_t j = 0; j < i; j++) {
+            for (size_t j = 0; j < i; j++) {    
                 uintptr_t v = virt + (j << 12);
                 uintptr_t phys = mmu_virt_to_phys(kctx, v);
                 if (phys) pmm_free_page(pmm_paddr_to_page(phys));

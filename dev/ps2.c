@@ -3,6 +3,7 @@
 // This header needs to maintain in any file it is present in, as per the GPL license terms.
 #include "ps2.h"
 #include "io.h"
+#include "kconsole.h"
 #include "tty.h"
 #include "process.h"
 #include "kutils.h"
@@ -180,9 +181,6 @@ uint64_t keyboard_handler(registers_t *regs) {
                 }
             }
         }
-
-
-
     }
 
     outb(0x20, 0x20); // EOI

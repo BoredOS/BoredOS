@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include "pci.h"
 #include "io.h"
+#include "kconsole.h"
 
 uint32_t pci_read_config(uint8_t bus, uint8_t device, uint8_t function, uint8_t offset) {
     uint32_t address = (uint32_t)((1u << 31) | (bus << 16) | (device << 11) | (function << 8) | (offset & 0xFC));
@@ -65,6 +66,7 @@ int pci_enumerate_devices(pci_device_t* devices, int max_devices) {
                         devices[count].class_code = pci_get_class_code(bus, dev, fn);
                         devices[count].subclass = pci_get_subclass(bus, dev, fn);
                         devices[count].prog_if = pci_get_prog_if(bus, dev, fn);
+
                         count++;
                     }
                 }
