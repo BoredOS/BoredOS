@@ -184,8 +184,6 @@ void lapic_timer_start(void) {
         lapic_ticks_per_ms = 6250;
     }
 
-    extern volatile uint64_t kernel_ticks;
-
     // Set divide to 16
     lapic_write(0x3E0, 0x03);
 

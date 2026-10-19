@@ -49,8 +49,6 @@ static inline void spinlock_acquire(spinlock_t *lock) {
 static inline void spinlock_release(spinlock_t *lock) {
     asm volatile("" ::: "memory"); // compiler barrier
     *lock = 0;
-    __asm__ volatile("sfence" ::: "memory");
-    __asm__ volatile("mfence" ::: "memory");
 }
 
 // Try to acquire without blocking. Returns 1 if acquired, 0 if not.
