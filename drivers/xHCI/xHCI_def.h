@@ -1,11 +1,11 @@
 /*
-* BoredOS xHCI Host Controller Driver
+* BoredOS xHCI Host Controller Driver Definitions
 *
 * Copyright (C) 2026 Zyperium <zzyperium@gmail.com>
 *
 * This software is dual-licensed under the MIT License and the GNU General 
+* Public License v3.0 (or, at your option, any later version). You may choose:
 * to use, redistribute, and/or modify this file under the terms of either license.
-* Public License v3.0 (or, at your option, any later version). You may choose 
 *
 * Option 1: MIT License
 * -----------------------------------------------------------------------------

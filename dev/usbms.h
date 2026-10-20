@@ -1,11 +1,11 @@
 /*
-* BoredOS USB Mass Storage Device
+* BoredOS SCSI USB Mass Storage Driver
 *
-* Copyright (C)2026 Zyperium <zzyperium@gmail.com>
+* Copyright (C) 2026 Zyperium <zzyperium@gmail.com>
 *
 * This software is dual-licensed under the MIT License and the GNU General 
-* to use, redistribute, and/or modify this file under the terms of either license.
 * Public License v3.0 (or, at your option, any later version). You may choose:
+* to use, redistribute, and/or modify this file under the terms of either license.
 *
 * Option 1: MIT License
 * -----------------------------------------------------------------------------
@@ -42,6 +42,7 @@
 * You should have received a copy of the GNU General Public License
 * along with this program. If not, see <https://www.gnu.org/licenses/>.
 */
+
 
 #ifndef USBMS_H
 #define USBMS_H
