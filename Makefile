@@ -517,6 +517,7 @@ run-linux: $(ISO_IMAGE) disk.qcow2
 		-device ahci,id=ahci -drive file=disk.qcow2,format=qcow2,if=none,id=disk0 -device ide-hd,bus=ahci.0,drive=disk0 \
 		-cpu max
 
+		
 run-hd-windows: disk.qcow2
 	$(call PRINT_STEP,BOOTING BOREDOS FROM HARD DRIVE ON WINDOWS)
 	qemu-system-x86_64 -m 4G -serial stdio -boot c \

@@ -14,10 +14,12 @@
 #include "ps2.h"
 #include "tty.h"
 #include "pty.h"
+#include "xHCI.h"
 
 #include "io.h"
 #include "fat32.h"
 #include "tar.h"
+#include "usbkb.h"
 #include "vfs.h"
 #include "kconsole.h"
 #include "kutils.h"
@@ -540,6 +542,10 @@ static void init_subsystems(void) {
     log_ok("FAT32 ready");
 
     disk_manager_init();
+
+    xHCI_setup();
+    usbkb_init();
+    
     disk_manager_scan();
     
     // Initialize AC97 sound card
@@ -563,24 +569,15 @@ static void init_rootfs(void) {
     vfs_mount("/", "tmpfs", "tmpfs", tmpfs_get_ops(), NULL);
 
     if (g_boot_flags & BOOT_FLAG_DISK) {
-        Disk *d = NULL;
-        if (g_boot_root_device[0] != '\0') {
-            d = disk_get_by_name(g_boot_root_device);
-        }
-        if (!d) {
-            int total_disks = disk_get_count();
-            for (int i = 0; i < total_disks; i++) {
-                Disk *cand = disk_get_by_index(i);
-                if (cand && cand->is_partition && !cand->is_esp) {
-                    d = cand;
-                    break;
-                }
-            }
-        }
+        void *vol = NULL; const char *fs_type = NULL; vfs_fs_ops_t *ops = NULL;
+        Disk *d = disk_get_by_name(g_boot_root_device);
 
-        void *vol = NULL;
-        const char *fs_type = NULL;
-        vfs_fs_ops_t *ops = NULL;
+        int total = disk_get_count();
+        for (int i = 0; !vol && i < total + (d ? 1 : 0); i++) {
+            Disk *cand = d ? d : disk_get_by_index(i);
+            if (d) d = NULL;
+            if (!cand || !cand->is_partition || cand->is_esp) continue;
+        }
 
         if (d) {
             extern void *ext4fs_mount_volume(Disk *d);
@@ -641,6 +638,8 @@ static void init_rootfs(void) {
             vfs_mkdir("/dev");
         } else {
             serial_write("[INIT] Warning: Root device volume not found! Running from tmpfs.\n");
+            g_boot_flags &= ~BOOT_FLAG_DISK;
+            g_boot_flags |=  BOOT_FLAG_LIVE;
         }
     }
 
@@ -742,9 +741,11 @@ static void init_modules(void) {
 
 static void init_input(void) {
     ps2_init();
+    outb(0x21, inb(0x21) | 0x01);
     asm("sti");  // Enable interrupts 
     keymap_init();
     lapic_init();
+    lapic_timer_start();
 
     if (smp_request.response != NULL) {
         smp_init(smp_request.response);

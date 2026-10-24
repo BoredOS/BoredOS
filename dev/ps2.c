@@ -180,9 +180,6 @@ uint64_t keyboard_handler(registers_t *regs) {
                 }
             }
         }
-
-
-
     }
 
     outb(0x20, 0x20); // EOI

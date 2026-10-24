@@ -755,20 +755,20 @@ void ahci_init(void) {
                 
                 uint32_t sectors = 0;
                 char model[64];
-    if (ahci_identify(i, &sectors, model) == 0) {
-        strcpy(disk->label, model);
-        disk->total_sectors = sectors;
-    } else {
-        strcpy(disk->label, "SATA Drive");
-        disk->total_sectors = 0;
-    }
+                if (ahci_identify(i, &sectors, model) == 0) {
+                    strcpy(disk->label, model);
+                    disk->total_sectors = sectors;
+                } else {
+                    strcpy(disk->label, "SATA Drive");
+                    disk->total_sectors = 0;
+                }
 
-    disk->read_sector = ahci_disk_read_sector;
-    disk->write_sector = ahci_disk_write_sector;
-    disk->read_sectors = ahci_disk_read_sectors;
-    disk->write_sectors = ahci_disk_write_sectors;
-    disk->sync = ahci_disk_sync;
-    disk->driver_data = drv;
+                disk->read_sector = ahci_disk_read_sector;
+                disk->write_sector = ahci_disk_write_sector;
+                disk->read_sectors = ahci_disk_read_sectors;
+                disk->write_sectors = ahci_disk_write_sectors;
+                disk->sync = ahci_disk_sync;
+                disk->driver_data = drv;
                 disk->partition_lba_offset = 0;
                 disk->parent = NULL;
                 disk->is_partition = false;

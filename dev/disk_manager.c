@@ -6,6 +6,8 @@
 #include "slab.h"
 #include "io.h"
 #include "ahci.h"
+#include "usbkb.h"
+#include "usbms.h"
 #include "vfs.h"
 #include "fat32.h"
 #include "ext4fs.h"
@@ -511,10 +513,10 @@ static void parse_mbr_partitions(Disk *disk) {
         if (size == 0) continue;
         if (start >= disk->total_sectors) continue; // Invalid start
         
-        bool fat32 = false;
-        if (type == PART_TYPE_FAT32 || type == PART_TYPE_FAT32_LBA) {
-            fat32 = disk_probe_fat32(disk, start);
-        }
+        bool is_esp  = (type == 0xEF);
+        bool is_ext4 = disk_probe_ext4(disk, start);
+        bool fat32   = !is_ext4 && (is_esp || disk_probe_fat32(disk, start));
+        disk_register_partition(disk, start, size, fat32, is_esp, part_num);
 
         disk_register_partition(disk, partitions[i].lba_start,
                                 partitions[i].sector_count, fat32, false, part_num);
@@ -573,6 +575,7 @@ static void try_add_ata_drive(uint16_t port, bool slave, const char *name) {
     }
 }
 
+
 // === Init & Scan ===
 
 void disk_manager_init(void) {
@@ -590,7 +593,10 @@ void disk_manager_init(void) {
 void disk_manager_scan(void) {
     serial_write("[DISK] Initializing AHCI (SATA DMA)...\n");
     ahci_init();
-    
+    serial_write("[DISK] Initializing xHCI USB Mass Storage (SCSI DMA)\n");
+    // NULL OR boot device. I'll note that the device will set itself up, so nothing needs doing here?
+    usbms_init();
+
     if (ahci_get_port_count() == 0) {
         serial_write("[DISK] No AHCI ports found, falling back to legacy IDE...\n");
         try_add_ata_drive(ATA_PRIMARY_IO, false, "IDE Primary Master");
@@ -816,6 +822,7 @@ int disk_rescan(Disk *disk) {
     if (buffer) {
         if (disk->read_sector(disk, 1, buffer) == 0) {
             GPT_Header *hdr = (GPT_Header*)buffer;
+            serial_write("[DISK] Checking signature\n");
             if (hdr->signature == 0x5452415020494645ULL) {
                 serial_write("[DISK] GPT detected on /dev/");
                 serial_write(disk->devname);
@@ -824,6 +831,10 @@ int disk_rescan(Disk *disk) {
                 parse_gpt_partitions(disk);
                 return 0;
             }
+
+            serial_write("[DISK] /dev/");
+            serial_write(disk->devname);
+            serial_write(" is not a valid GPT disk\n");
         } else {
             serial_write("[DISK] GPT probe read failed on /dev/");
             serial_write(disk->devname);
