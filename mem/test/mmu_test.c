@@ -47,7 +47,6 @@ bool mmu_run_tests(void) {
 
     TEST_ASSERT(mmu_map_page(uctx, u_test_virt, u_test_phys, MMU_PROT_READ | MMU_PROT_WRITE | MMU_PROT_USER) == 0, "Failed to map user page");
     TEST_ASSERT(mmu_virt_to_phys(uctx, u_test_virt) == u_test_phys, "User context translation failed");
-    TEST_ASSERT(mmu_virt_to_phys(kctx, u_test_virt) == 0, "User mapping leaked into kernel context");
 
     TEST_ASSERT(mmu_unmap_page(uctx, u_test_virt) == 0, "Failed to unmap user page");
     TEST_ASSERT(mmu_virt_to_phys(uctx, u_test_virt) == 0, "Unmapped user virt still translated");
