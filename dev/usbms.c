@@ -55,7 +55,7 @@
 
 #define LOW_12 0xFFF
 
-inline void *zkpalloc(void) {
+static inline void *zkpalloc(void) {
     page_t *page = pmm_alloc_page(PMM_ZONE_DMA32);
 
     if (!page) {

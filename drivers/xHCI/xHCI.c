@@ -319,7 +319,7 @@ void xHCI_wrap_trb(xHCI_PCI_t *this, xHCI_TRB_t *ring_base, uint64_t *enqueue, u
     cycle = !cycle;
 }
 
-inline void *zkpalloc(void) {
+static inline void *zkpalloc(void) {
     page_t *page = pmm_alloc_page(PMM_ZONE_DMA32); // Intel xHCI controllers are fine with > 4GB physical ram, but AMD controllers aren't so friendly. (Supposedly)
     
     if (!page) {

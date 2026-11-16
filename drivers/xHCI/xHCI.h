@@ -392,11 +392,11 @@ bool xHCI_poll_evring(xHCI_PCI_t *this);
 void xHCI_pump_boot_ctrlr(void);
 void xHCI_pump_device(xHCI_PCI_t *ref);
 
-inline uint8_t get_port_speed(uint32_t portsc) {
+static inline uint8_t get_port_speed(uint32_t portsc) {
     return (portsc >> XHCI_PORTSC_SPEED_SHIFT) & XHCI_PORTSC_SPEED_MASK;
 }
 
-inline void xHCI_reset_controller(xHCI_PCI_t *this) {
+static inline void xHCI_reset_controller(xHCI_PCI_t *this) {
     if (this->op_regs->usb_cmd & XHCI_CMD_RUN_STOP) {
         this->op_regs->usb_cmd &= ~XHCI_CMD_RUN_STOP;
         
